@@ -1,2 +1,2 @@
-# flow-forge
-Declarative workflow framework
+# saga-forge
+Declarative saga framework for managin multi aggregate (DDD) transactions
