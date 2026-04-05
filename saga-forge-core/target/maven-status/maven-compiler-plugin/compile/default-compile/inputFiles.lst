@@ -1,0 +1,15 @@
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/Command.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/DomainEvent.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/EndSaga.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/Saga.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/SagaCompensation.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/SagaId.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/SagaStep.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/annotation/StartSaga.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/scanner/AnnotationScanner.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/scanner/ReflectiveAnnotationScanner.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/scanner/SagaValidationResult.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventDispatcher.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaInstance.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaStatus.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/StorageProvider.java

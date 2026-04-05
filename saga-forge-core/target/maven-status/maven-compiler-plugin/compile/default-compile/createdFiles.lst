@@ -1,0 +1,16 @@
+io/github/gkosharovdev/sagaforge/core/annotation/EndSaga.class
+io/github/gkosharovdev/sagaforge/core/spi/EventDispatcher.class
+io/github/gkosharovdev/sagaforge/core/scanner/SagaValidationResult.class
+io/github/gkosharovdev/sagaforge/core/spi/StorageProvider.class
+io/github/gkosharovdev/sagaforge/core/scanner/ReflectiveAnnotationScanner.class
+io/github/gkosharovdev/sagaforge/core/annotation/SagaId.class
+.gitkeep
+io/github/gkosharovdev/sagaforge/core/annotation/StartSaga.class
+io/github/gkosharovdev/sagaforge/core/annotation/Saga.class
+io/github/gkosharovdev/sagaforge/core/annotation/Command.class
+io/github/gkosharovdev/sagaforge/core/annotation/DomainEvent.class
+io/github/gkosharovdev/sagaforge/core/spi/SagaInstance.class
+io/github/gkosharovdev/sagaforge/core/scanner/AnnotationScanner.class
+io/github/gkosharovdev/sagaforge/core/annotation/SagaStep.class
+io/github/gkosharovdev/sagaforge/core/annotation/SagaCompensation.class
+io/github/gkosharovdev/sagaforge/core/spi/SagaStatus.class

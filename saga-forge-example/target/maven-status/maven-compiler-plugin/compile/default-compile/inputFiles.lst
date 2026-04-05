@@ -1,0 +1,7 @@
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSaga.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/commands/ProcessPaymentCommand.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/commands/RequestDeliveryCommand.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/commands/ReserveStockCommand.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/events/OrderCompletedEvent.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/events/OrderCreatedEvent.java
+/Users/georgi.kosharov/IdeaProjects/saga-forge/saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/events/PaymentProcessedEvent.java

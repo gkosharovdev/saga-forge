@@ -1,0 +1,7 @@
+io/github/gkosharovdev/sagaforge/example/commands/ReserveStockCommand.class
+io/github/gkosharovdev/sagaforge/example/events/PaymentProcessedEvent.class
+io/github/gkosharovdev/sagaforge/example/OrderProcessingSaga.class
+io/github/gkosharovdev/sagaforge/example/commands/ProcessPaymentCommand.class
+io/github/gkosharovdev/sagaforge/example/events/OrderCreatedEvent.class
+io/github/gkosharovdev/sagaforge/example/commands/RequestDeliveryCommand.class
+io/github/gkosharovdev/sagaforge/example/events/OrderCompletedEvent.class

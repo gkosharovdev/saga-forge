@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScannerPropertyTest
+-------------------------------------------------------------------------------
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.063 s -- in io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScannerPropertyTest
