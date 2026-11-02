@@ -7,3 +7,6 @@ feature.json
 
 # Per-machine extension config overrides.
 extensions/*/local-config.yml
+# Python bytecode from extension scripts.
+__pycache__/
+*.pyc
