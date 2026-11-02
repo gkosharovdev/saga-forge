@@ -268,6 +268,7 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R4 | 3.5, 3.6, 3.7 | `@StartSaga`/`@EndSaga` methods must also have `@SagaStep` |
 | R5 | 4.4, 4.5, 4.6 | `@SagaStep` methods: exactly one param, param type annotated with `@DomainEvent` |
 | R6 | 5.4, 5.5 | `@SagaCompensation.forStep` references existing `@SagaStep` method |
+| R7 | — (feature spec `specs/001-core-lifecycle-context` FR-008) | At most one field whose declared type is `SagaContext` (optional; recognized by declared type only, no marker annotation) |
 
 ```java
 package io.github.gkosharovdev.sagaforge.core.scanner;
@@ -285,6 +286,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
 
         validateClassLevel(sagaClass, errors);
         validateSagaIdField(sagaClass, errors);
+        validateSagaContextField(sagaClass, errors);
         Map<String, Method> stepMethods = validateSagaSteps(sagaClass, errors);
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
@@ -492,6 +494,8 @@ The `SagaInstance` record (defined in the SPI section above) is the persistence 
 
 **Validates: Requirements 1.3, 2.3, 3.3, 3.4, 3.5, 3.6, 4.4, 5.4, 5.5**
 
+This property still holds for saga classes declaring zero or one `SagaContext`-typed field: the `SagaContext` field is optional (see Property 9), so a class satisfying all of the rules above with zero or one such field is valid.
+
 ### Property 7: Non-concrete saga classes are rejected
 
 *For any* class annotated with `@Saga` that is an interface or an abstract class, the `AnnotationScanner` shall report a validation error. `validate()` must return `isValid() == false` with an error message indicating the class must be concrete.
@@ -503,6 +507,12 @@ The `SagaInstance` record (defined in the SPI section above) is the persistence 
 *For any* `SagaValidationResult` instance, the `errors` list shall be unmodifiable. Attempting to mutate the list (add, remove, clear) shall throw `UnsupportedOperationException`. This holds regardless of the input list passed to the constructor.
 
 **Validates: Requirements 1.3, 2.3 (general correctness — validation results must be trustworthy and immutable)**
+
+### Property 9: SagaContext field cardinality enforcement
+
+*For any* `@Saga`-annotated class, the `AnnotationScanner` shall report a validation error if and only if the class declares more than one field whose declared type is `io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext`. The field is recognized by its declared type only (no marker annotation), and it is optional: zero or one such field is valid. Equivalently: for any saga class with two or more `SagaContext`-typed fields, `validate()` must return a result where `isValid()` is `false` and `errors` contains a message about the `SagaContext` field count; for any saga class with zero or one such field, this rule produces no errors.
+
+**Validates: Feature spec `specs/001-core-lifecycle-context` FR-008 (no corresponding requirement in this spec's `requirements.md`)**
 
 ## Error Handling
 
@@ -518,6 +528,7 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Missing @SagaId | Zero `@SagaId` fields | `"@Saga class {className} must declare exactly one @SagaId field, found 0"` |
 | Multiple @SagaId | >1 `@SagaId` fields | `"@Saga class {className} must declare exactly one @SagaId field, found {count}"` |
 | Wrong @SagaId type | `@SagaId` field not `String` | `"@SagaId field {fieldName} in {className} must be of type String"` |
+| Multiple SagaContext | >1 fields of declared type `SagaContext` | `"@Saga class {className} must declare at most one SagaContext field, found {count}"` |
 | Missing @StartSaga | Zero `@StartSaga` methods | `"@Saga class {className} must declare exactly one @StartSaga method, found 0"` |
 | Multiple @StartSaga | >1 `@StartSaga` methods | `"@Saga class {className} must declare exactly one @StartSaga method, found {count}"` |
 | Missing @EndSaga | Zero `@EndSaga` methods | `"@Saga class {className} must declare at least one @EndSaga method, found 0"` |

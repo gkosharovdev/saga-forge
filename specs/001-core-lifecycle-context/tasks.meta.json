@@ -1,0 +1,430 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "T001 Create the new main package `saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/`": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907522
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391917585
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391982785
+      }
+    ],
+    "T002 [P] [US1] Create `SagaStateTypeMismatchException` in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907587
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391989943
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793392671405
+      }
+    ],
+    "T003 [P] [US1] Create `NonStructuredStateValueException` in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907617
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793392678336
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793392732743
+      }
+    ],
+    "T004 [US1] Create the `SagaContext` interface in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907643
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793392738727
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793609369665
+      }
+    ],
+    "T005 [US1] Extend `ReflectiveAnnotationScanner` in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907669
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793609476483
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793611876639
+      }
+    ],
+    "T006 [P] [US1] Add scanner test fixture `SagaWithContextFieldSaga` (valid: exactly one": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907694
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793611881388
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615282564
+      }
+    ],
+    "T007 [P] [US1] Add scanner test fixture `MultipleSagaContextFieldSaga` (invalid: two `SagaContext`-typed": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907716
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615286141
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615379231
+      }
+    ],
+    "T008 [US1] Extend": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907759
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615382705
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615742045
+      }
+    ],
+    "T009 [US1] Close the Constitution Principle III gate flagged in plan.md: update": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907784
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615743247
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615810485
+      }
+    ],
+    "T010 [P] [US1] Create the `InMemorySagaContext` test double in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907808
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615815143
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615900273
+      }
+    ],
+    "T011 [US1] Write": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907840
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793615903679
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793616627537
+      }
+    ],
+    "T012 [US1] Extend `SagaContextTest.java` with spec acceptance scenarios 5–7: `updateStateAttribute`": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907872
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793616632344
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793616720774
+      }
+    ],
+    "T013 [P] [US1] Write": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907897
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793617663867
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793628590096
+      }
+    ],
+    "T014 [P] [US2] Create `DuplicateSagaInstanceException` in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907918
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793628595447
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793628969866
+      }
+    ],
+    "T015 [P] [US2] Create `InvalidSagaTransitionException` in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907962
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793628980758
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793629058455
+      }
+    ],
+    "T016 [US2] Create the `SagaLifecycle` interface in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391907986
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793629073835
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630052368
+      }
+    ],
+    "T017 [P] [US2] Create the `InMemorySagaLifecycle` test double in": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908011
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630056404
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630132657
+      }
+    ],
+    "T018 [US2] Write": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908039
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630136036
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630210877
+      }
+    ],
+    "T019 [US2] Extend `SagaLifecycleTest.java` with acceptance scenario 4 and the duplicate-start edge": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908060
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630214699
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630297978
+      }
+    ],
+    "T020 [US3] Correct `AGENTS.md`: in the \"Current Status\" section, move `SagaLifecycle`/`SagaContext` out": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908083
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630312408
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630363704
+      }
+    ],
+    "T021 [P] [US3] Correct `docs/architecture.md`:": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908105
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630377844
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630441627
+      }
+    ],
+    "T022 [US3] Final verification pass (SC-003): search `AGENTS.md`, `docs/architecture.md`, and": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908128
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630445275
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630507206
+      }
+    ],
+    "T023 [P] Run the full `saga-forge-core` test suite (`mvn -pl saga-forge-core test`) and confirm every": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908155
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630511367
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630556328
+      }
+    ],
+    "T024 Walk `quickstart.md` Scenario A and Scenario B against the final shipped `SagaContext`/": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908203
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630563891
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630668858
+      }
+    ],
+    "T025 [P] Diff `saga-forge-core/pom.xml` against its pre-feature state and confirm zero dependencies were": [
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793391908226
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793630677941
+      },
+      {
+        "executionId": "dba7cc6a-8b64-4606-82f0-8f7c8cf0bee4",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793631030319
+      }
+    ]
+  }
+}
