@@ -64,8 +64,10 @@
 - `.kiro/specs/saga-forge-framework/` and `.kiro/specs/saga-context-lifecycle/` are the pre-Speckit historical
   baseline documenting what's already implemented (see "Repo Reality Check" above). They are not being
   migrated or regenerated into the `specs/NNN-*` convention — leave them as-is as accurate historical record.
-- `.specify/memory/constitution.md` is still the unfilled template; run `/speckit-constitution` before relying
-  on it for governing principles.
+- `.specify/memory/constitution.md` is ratified (v1.0.0) and defines governing principles I–V (Zero-Dependency
+  Core, Annotation-Driven Declarative Style, Formal Spec Conformance, Explicit Narrow Scope, Documentation
+  Hierarchy as Source of Truth). Plans and tasks cite them as "Constitution Principle N"; amend it via
+  `/speckit-constitution`.
 
 ## Known Gaps to Respect When Extending
 - See `docs/architecture.md#feature-gaps` for the full backlog: queryable process-level state (highest

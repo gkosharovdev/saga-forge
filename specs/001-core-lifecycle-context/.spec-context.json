@@ -466,10 +466,6 @@
   ],
   "concerns": [
     {
-      "note": ".specify/memory/constitution.md is still the unfilled template, so the Constitution Principle I/III references in plan.md and tasks.md are not backed by a ratified constitution",
-      "step": "implement"
-    },
-    {
       "note": "The @EndSaga pre-condition on SagaLifecycle.complete is unenforceable by the contract itself (no current-step on SagaInstance); a future engine must enforce it",
       "step": "implement"
     }
