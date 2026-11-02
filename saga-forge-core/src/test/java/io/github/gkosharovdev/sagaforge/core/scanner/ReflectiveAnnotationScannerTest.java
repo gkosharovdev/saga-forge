@@ -12,12 +12,14 @@ import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.CompensationForNon
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.CompensationInvalidForStepSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.EndSagaWithoutStepSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.InterfaceSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleSagaContextFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleSagaIdSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleStartSagaSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoEndSagaSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoSagaIdSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoStartSagaSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NonStringSagaIdSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.SagaWithContextFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StartSagaWithoutStepSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithMultipleParamsSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNoParamSaga;
@@ -107,6 +109,39 @@ class ReflectiveAnnotationScannerTest {
             assertThat(result.isValid()).isFalse();
             assertThat(result.errors()).anyMatch(e ->
                     e.equals("@SagaId field sagaId in NonStringSagaIdSaga must be of type String"));
+        }
+    }
+
+    @Nested
+    @DisplayName("SagaContext field cardinality")
+    class SagaContextFieldTests {
+
+        @Test
+        @DisplayName("exactly one SagaContext field passes validation")
+        void singleSagaContextField() {
+            SagaValidationResult result = scanner.validate(SagaWithContextFieldSaga.class);
+
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.errors()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("multiple SagaContext fields produces error")
+        void multipleSagaContextFields() {
+            SagaValidationResult result = scanner.validate(MultipleSagaContextFieldSaga.class);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.errors()).containsExactly(
+                    "@Saga class MultipleSagaContextFieldSaga must declare at most one SagaContext field, found 2");
+        }
+
+        @Test
+        @DisplayName("zero SagaContext fields passes validation (field is optional)")
+        void zeroSagaContextFields() {
+            SagaValidationResult result = scanner.validate(ValidSaga.class);
+
+            assertThat(result.isValid()).isTrue();
+            assertThat(result.errors()).isEmpty();
         }
     }
 

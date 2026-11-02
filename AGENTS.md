@@ -12,8 +12,13 @@
 
 ## Current Status
 - Implemented and tested: annotation model, `AnnotationScanner`/`ReflectiveAnnotationScanner`,
-  `SagaValidationResult`, `SagaContext`/`SagaLifecycle`, SPI contracts (`StorageProvider`, `EventDispatcher`) —
-  all in `saga-forge-core`.
+  `SagaValidationResult`, SPI contracts (`StorageProvider`, `EventDispatcher`) — all in `saga-forge-core`.
+- Contracts only (`core.lifecycle`): `SagaContext` (named, type-safe per-instance business state via
+  `getState`/`putState`/`updateStateAttribute`; null values rejected) and `SagaLifecycle`
+  (`start`/`advance`/`complete`), plus `SagaStateTypeMismatchException`, `NonStructuredStateValueException`,
+  `DuplicateSagaInstanceException`, `InvalidSagaTransitionException`. Tested via test-only doubles
+  (`InMemorySagaContext`/`InMemorySagaLifecycle`); no production implementation ships — same posture as
+  `StorageProvider`/`EventDispatcher`.
 - Not implemented: the saga engine runtime, any `StorageProvider`/`EventDispatcher` implementation, and Spring
   Boot autoconfiguration. The `saga-forge-storage-*`, `saga-forge-transport-*`, and
   `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
@@ -22,7 +27,7 @@
 
 ## Module Map
 - `saga-forge-core` — annotations (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`,
-  `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`), scanner, `SagaContext`/`SagaLifecycle`, SPI.
+  `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`), scanner, `SagaContext`/`SagaLifecycle` contracts, SPI.
   Zero dependencies.
 - `saga-forge-spring-boot-starter` — target: autoconfiguration that detects an available datastore and
   transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
@@ -36,6 +41,8 @@
 
 ## Saga Model (Project-Specific)
 - Sagas are class-based and annotation-driven: `@Saga` on the class, `@SagaId` on exactly one `String` field.
+- Optional business state: at most one `SagaContext`-typed field (recognized by type, no annotation) —
+  enforced by the scanner (Property 9 in `.kiro/specs/saga-forge-framework/design.md`).
 - Steps are event handlers: `@SagaStep(associationProperty = "...")` on a method taking exactly one
   `@DomainEvent`-annotated parameter, returning a `@Command`-annotated type (or `void` for terminal steps).
 - Lifecycle boundaries: `@StartSaga` and `@EndSaga` must co-occur with `@SagaStep` on the same method.
@@ -57,8 +64,10 @@
 - `.kiro/specs/saga-forge-framework/` and `.kiro/specs/saga-context-lifecycle/` are the pre-Speckit historical
   baseline documenting what's already implemented (see "Repo Reality Check" above). They are not being
   migrated or regenerated into the `specs/NNN-*` convention — leave them as-is as accurate historical record.
-- `.specify/memory/constitution.md` is still the unfilled template; run `/speckit-constitution` before relying
-  on it for governing principles.
+- `.specify/memory/constitution.md` is ratified (v1.0.0) and defines governing principles I–V (Zero-Dependency
+  Core, Annotation-Driven Declarative Style, Formal Spec Conformance, Explicit Narrow Scope, Documentation
+  Hierarchy as Source of Truth). Plans and tasks cite them as "Constitution Principle N"; amend it via
+  `/speckit-constitution`.
 
 ## Known Gaps to Respect When Extending
 - See `docs/architecture.md#feature-gaps` for the full backlog: queryable process-level state (highest
@@ -68,8 +77,10 @@
   `.kiro/specs/saga-forge-framework/` first — retry attributes must be framework-owned, not aliased into a
   third-party retry annotation.
 - No compensation-vs-intervention-required outcome categorization exists in code yet.
-- `SagaContext` tracks step *history* (what happened), not arbitrary associated business state a later step
-  can query — see "Queryable process-level state" in `docs/architecture.md#feature-gaps`.
+- `SagaContext` exposes named business-state read/write (`getState`/`putState`/`updateStateAttribute`), but
+  no engine populates a saga's `SagaContext` field or round-trips that state through a concrete
+  `StorageProvider` across dispatches — see "Queryable process-level state" in
+  `docs/architecture.md#feature-gaps`.
 - jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
 
 ## Agent Working Rules For This Repo

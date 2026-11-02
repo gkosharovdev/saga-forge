@@ -1,2 +1,13 @@
+# Maven build output (compiled classes, test reports, jars)
+target/
+
+# jqwik test database
+.jqwik-database
+
+# IDE files
 /.idea/
+*.iml
+.vscode/
+.DS_Store
+
 .claude/settings.local.json

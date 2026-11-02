@@ -14,6 +14,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
+import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 
 /**
  * Reflection-based implementation of {@link AnnotationScanner} that validates
@@ -23,6 +24,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
  * <ul>
  *   <li>{@code validateClassLevel} — R1: @Saga present, class is concrete</li>
  *   <li>{@code validateSagaIdField} — R2: exactly one @SagaId field of type String</li>
+ *   <li>{@code validateSagaContextField} — at most one field of type {@code SagaContext} (optional)</li>
  *   <li>{@code validateLifecycle} — R3: @StartSaga/@EndSaga cardinality and co-occurrence (task 4.3)</li>
  *   <li>{@code validateSagaSteps} — R5: @SagaStep parameter rules (task 4.3)</li>
  *   <li>{@code validateCompensation} — R6: @SagaCompensation.forStep validity (task 4.4)</li>
@@ -40,6 +42,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
 
         validateClassLevel(sagaClass, errors);
         validateSagaIdField(sagaClass, errors);
+        validateSagaContextField(sagaClass, errors);
         Map<String, Method> stepMethods = validateSagaSteps(sagaClass, errors);
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
@@ -80,6 +83,26 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 errors.add("@SagaId field " + sagaIdField.getName()
                         + " in " + sagaClass.getSimpleName() + " must be of type String");
             }
+        }
+    }
+
+    /**
+     * At most one field of type {@link SagaContext}. The field is optional (zero is valid) and is
+     * recognized by its declared type only, with no marker annotation.
+     */
+    private void validateSagaContextField(Class<?> sagaClass, List<String> errors) {
+        Field[] declaredFields = sagaClass.getDeclaredFields();
+        List<Field> sagaContextFields = new ArrayList<>();
+
+        for (Field field : declaredFields) {
+            if (field.getType().equals(SagaContext.class)) {
+                sagaContextFields.add(field);
+            }
+        }
+
+        if (sagaContextFields.size() > 1) {
+            errors.add("@Saga class " + sagaClass.getSimpleName()
+                    + " must declare at most one SagaContext field, found " + sagaContextFields.size());
         }
     }
 

@@ -83,7 +83,8 @@ library instead of re-plumbing it per service.
 ## Status
 
 This is an early-stage framework. The annotation model, SPI contracts, and module layout exist and
-are tested (`saga-forge-core`); the runtime engine, storage providers, transports, and
+are tested (`saga-forge-core`). The `SagaContext`/`SagaLifecycle` interfaces are contracts only,
+tested via test doubles, with no implementation. The runtime engine, storage providers, transports, and
 autoconfiguration are not implemented yet. This iteration is documentation-only — see
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
@@ -94,7 +95,7 @@ historical planning artifacts, superseded by the docs above where they conflict.
 
 | Module | Role | Depends on |
 |---|---|---|
-| `saga-forge-core` | Annotations, SPI (`StorageProvider`, `EventDispatcher`), `SagaContext`/`SagaLifecycle`, scanner | nothing |
+| `saga-forge-core` | Annotations, SPI (`StorageProvider`, `EventDispatcher`), `SagaContext`/`SagaLifecycle` contracts (no implementation), scanner | nothing |
 | `saga-forge-spring-boot-starter` | Autoconfiguration: detects datastore + transport, wires the engine | `saga-forge-core` |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` implementations | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | `EventDispatcher` over Spring `ApplicationEventPublisher` | `saga-forge-core` |

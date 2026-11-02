@@ -10,7 +10,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 |---|---|
 | Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`) | Implemented, tested |
 | `AnnotationScanner` / `ReflectiveAnnotationScanner` / `SagaValidationResult` | Implemented, tested |
-| `SagaContext` / `SagaLifecycle` | Implemented, tested |
+| `SagaContext` / `SagaLifecycle` | Contracts defined and tested via test doubles; no implementation |
 | SPI (`StorageProvider`, `EventDispatcher`) | Defined, no implementations |
 | Saga engine runtime | Not implemented |
 | Storage providers (Postgres, MySQL, MongoDB) | Not implemented |
@@ -20,7 +20,8 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 ## Module responsibilities
 
 - **`saga-forge-core`** — owns the annotation model, the scanner that validates and reflects over `@Saga`
-  classes, `SagaContext`/`SagaLifecycle`, and the SPI contracts. Zero runtime dependencies, including no
+  classes, the `SagaContext`/`SagaLifecycle` contracts (interfaces only, no implementation), and the SPI
+  contracts. Zero runtime dependencies, including no
   Spring dependency. This is deliberate: the annotation model and validation rules must be usable from a
   future non-Spring runtime without forcing a Spring dependency on every consumer.
 - **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring. Detects, via
@@ -60,8 +61,9 @@ support running two storage providers or two transports simultaneously.
 
 Steps are triggered by domain events — delivered either as Spring application events or Kafka records. At the
 transport level this is choreography: each handler reacts to an event without a central dispatcher deciding
-what happens next. But every `@Saga` instance keeps durable, single-process state (via `SagaContext` and the
-`StorageProvider`), so at any point you can ask "where is this saga, and what has it already done" without
+what happens next. But every `@Saga` instance is designed to keep durable, single-process state (named
+business state via the `SagaContext` contract, persisted through a `StorageProvider` — neither of which has a
+runtime implementation yet), so at any point you can ask "where is this saga, and what has it already done" without
 replaying every event it ever reacted to. That queryable, durable process state is what makes this
 orchestration rather than pure choreography — it is layered on top of an event-driven delivery mechanism, not
 a replacement for one.
@@ -84,7 +86,7 @@ saga's ability to resume or retry correctly.
 
 The following are requirements a production-grade saga runtime must satisfy, derived from real multi-step,
 multi-aggregate orchestration use cases (see [use-cases.md](use-cases.md)). None of them are implemented in
-`saga-forge-core` today. They are listed here as the backlog for the engine/starter work, each phrased as a
+`saga-forge-core` today (queryable process-level state has its contract defined, but no runtime behind it). They are listed here as the backlog for the engine/starter work, each phrased as a
 capability the framework must provide — not as an implementation prescription.
 
 ### Queryable process-level state (highest priority)
@@ -94,24 +96,38 @@ step to read a value that an *earlier* step in the same saga instance computed o
 was manually threaded forward through a chain of growing event types — which does not scale past a handful of
 steps and forces every event type to carry the full upstream state it never otherwise needs.
 
-The framework must provide a **general, queryable process-state store per saga instance**, distinct from
-`SagaContext`'s existing history records (`HandledEventRecord`/`EmittedCommandRecord`/`CompletedStepRecord`,
-which record *what happened*, not arbitrary business values). Concretely:
+The framework must provide a **general, queryable process-state store per saga instance**. The contract
+half of this is now **defined** in `saga-forge-core`; the runtime and persistence half is **still open**.
 
-- A step must be able to associate a named value with the current saga instance (e.g.
-  `SagaLifecycle.putAssociatedState("apartment", apartment)`), and a *later* step — reflectively invoked in a
-  separate dispatch, possibly on a different thread or a different instance entirely if the transport is
-  Kafka — must be able to read it back by name and type (`SagaLifecycle.getAssociatedState("apartment",
-  Apartment.class)`).
-- Because steps in different dispatches cannot share Java object identity or a live `ThreadLocal`, associated
-  state must round-trip through the `StorageProvider`, not just survive within one invocation. This means
-  `StorageProvider` needs a way to persist arbitrary business objects per saga instance, not only the
-  annotation-scanner-known record types — most likely a serialized blob column per storage backend, with a
-  decision needed on which serialization format `saga-forge-core` can depend on (or stay serialization-agnostic
-  and delegate the choice to each `StorageProvider` implementation).
+What is defined (contract only, in `core.lifecycle`):
+
+- A `@Saga` class may declare at most one `SagaContext`-typed field (recognized by type, no annotation;
+  enforced by the scanner). Through it, a step associates a named value with the current saga instance
+  (`context.putState("apartment", apartment)`), and a later step reads it back by name and type
+  (`context.getState("apartment", Apartment.class)`). Individual fields of a structured value can be
+  updated in place with `context.updateStateAttribute(name, field, value)`.
+- Reads are type-safe: a stored value not assignable to the requested type raises
+  `SagaStateTypeMismatchException`, and a field update against a scalar value raises
+  `NonStructuredStateValueException`. Null values are rejected on write, so an empty `Optional` from
+  `getState` always means "never written".
+- The representation is settled: named values map 1:1 onto entries of the existing
+  `SagaInstance.state` `Map<String, Object>`, with a structured value stored as a nested
+  `Map<String, Object>`. No new persisted shape or serialization format is introduced in
+  `saga-forge-core`; each `StorageProvider` persists that map however suits its backend.
+- These contracts are exercised only through test-only doubles; no production `SagaContext` or
+  `SagaLifecycle` implementation ships.
+
+What remains to be built (the runtime/persistence half):
+
+- No engine exists to populate a saga's `SagaContext` field before a step runs, or to fold what the step
+  wrote back into `SagaInstance.state` afterward.
+- Because steps in different dispatches — possibly on a different thread, or a different process entirely
+  if the transport is Kafka — cannot share Java object identity or a live `ThreadLocal`, this state must
+  round-trip through a concrete `StorageProvider` between dispatches. No `StorageProvider` implementation
+  exists yet, so cross-dispatch persistence of `SagaContext` state is unbuilt.
 - This is also the mechanism that should back the "process state available to downstream policies" principle
   already stated in the "Why orchestration on an event-driven substrate" section above — a `@ReadModel`-backed
-  policy reading saga state should be reading through this same associated-state store, not a parallel
+  policy reading saga state should be reading through this same `SagaContext`-backed state, not a parallel
   mechanism.
 
 ### Idempotent step execution

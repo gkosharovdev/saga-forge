@@ -1,0 +1,541 @@
+{
+  "workflow": "companion",
+  "specName": "Saga Lifecycle and Context Abstractions",
+  "branch": "001-core-lifecycle-context",
+  "currentStep": "implement",
+  "status": "completed",
+  "history": [
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-10-30T20:25:32.353Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T001",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-10-30T20:26:08.000Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T002",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-10-30T20:27:01.728Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-10-30T20:27:01.762Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T003",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-10-30T20:38:33.245Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T004",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-10-30T20:40:09.361Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T005",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T09:30:54.177Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T006",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T09:59:22.329Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T007",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:28:49.876Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T008",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:34:45.966Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T009",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:36:32.061Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T010",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:38:03.869Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T011",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:50:09.921Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T012",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T10:51:47.558Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T013",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T11:09:03.631Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T014",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:10:32.641Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T015",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:16:57.148Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T016",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:19:34.515Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T017",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:35:03.034Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T018",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:36:30.807Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T019",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:37:56.570Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T020",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:39:08.469Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T021",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:40:18.189Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T022",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:41:31.912Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T023",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:42:25.150Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T024",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:44:03.288Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T025",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-02T14:44:54.526Z"
+    }
+  ],
+  "currentTask": null,
+  "task_summaries": {
+    "T001": {
+      "status": "DONE",
+      "did": "Created core lifecycle main package (package-info.java Javadoc) and empty test lifecycle/ + lifecycle/fixtures/ dirs; pom.xml untouched",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/package-info.java",
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/",
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/fixtures/"
+      ]
+    },
+    "T002": {
+      "status": "DONE",
+      "did": "Added unchecked SagaStateTypeMismatchException carrying stateName/expectedType/actualType with precise message (FR-003)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaStateTypeMismatchException.java"
+      ]
+    },
+    "T003": {
+      "status": "DONE",
+      "did": "Created unchecked NonStructuredStateValueException (stateName, fieldName, actualType) for FR-002c",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/NonStructuredStateValueException.java"
+      ]
+    },
+    "T004": {
+      "status": "DONE",
+      "did": "Created SagaContext interface (getState/putState/updateStateAttribute) with contract Javadoc, @throws for type-mismatch/non-structured/IAE, and FR-010 scoping invariant",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaContext.java"
+      ]
+    },
+    "T005": {
+      "status": "DONE",
+      "did": "Added validateSagaContextField (at most one SagaContext-typed field, zero valid) to ReflectiveAnnotationScanner and wired into validate()",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/scanner/ReflectiveAnnotationScanner.java"
+      ]
+    },
+    "T006": {
+      "status": "DONE",
+      "did": "Added valid scanner fixture SagaWithContextFieldSaga (ValidSaga shape + one undecorated SagaContext field); test-compile passes",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/scanner/fixtures/SagaWithContextFieldSaga.java"
+      ]
+    },
+    "T007": {
+      "status": "DONE",
+      "did": "Added invalid scanner fixture MultipleSagaContextFieldSaga (two SagaContext fields, otherwise valid)",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/scanner/fixtures/MultipleSagaContextFieldSaga.java"
+      ]
+    },
+    "T008": {
+      "status": "DONE",
+      "did": "Added SagaContextFieldTests nested class to ReflectiveAnnotationScannerTest: one field valid, two fields rejected with exact sole error, zero fields (ValidSaga) valid; 67/67 tests pass",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/scanner/ReflectiveAnnotationScannerTest.java"
+      ]
+    },
+    "T009": {
+      "status": "DONE",
+      "did": "Added Property 9 (SagaContext at-most-one cardinality), R7 rule row, validate() sketch call, error-table row, and Property 6 zero/one SagaContext confirmation to saga-forge-framework design.md",
+      "files": [
+        ".kiro/specs/saga-forge-framework/design.md"
+      ]
+    },
+    "T010": {
+      "status": "DONE",
+      "did": "Added test-only InMemorySagaContext (instance-scoped Map, nested-Map structured values, shallow copy of Map on putState, IAE on null/blank args and null values)",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/fixtures/InMemorySagaContext.java"
+      ]
+    },
+    "T011": {
+      "status": "DONE",
+      "did": "Added SagaContextTest covering US1 scenarios 1-3 (round trip, absent->Optional.empty, type mismatch with stateName/expected/actual) plus getState/putState null/blank arg validation; 21 tests, suite 88/88 green",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaContextTest.java"
+      ]
+    },
+    "T012": {
+      "status": "DONE",
+      "did": "Added FieldLevelUpdate nested tests (scenarios 5-7, FR-002a/b/c, SC-005, defensive copy) and updateStateAttribute argument validation to SagaContextTest",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaContextTest.java"
+      ]
+    },
+    "T013": {
+      "status": "DONE",
+      "did": "Added jqwik SagaContextPropertyTest: instance isolation (scenario 4, FR-010) and field-update preservation (SC-005) properties, 100 tries each; core suite 108/108 green",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaContextPropertyTest.java"
+      ]
+    },
+    "T014": {
+      "status": "DONE",
+      "did": "Created unchecked DuplicateSagaInstanceException carrying sagaType, associationProperty, associationValue with accessors (FR-006)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/DuplicateSagaInstanceException.java"
+      ]
+    },
+    "T015": {
+      "status": "DONE",
+      "did": "Created unchecked InvalidSagaTransitionException with notFound/terminal factories, sagaId/operation/Optional currentStatus accessors and isNotFound (FR-006)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/InvalidSagaTransitionException.java"
+      ]
+    },
+    "T016": {
+      "status": "DONE",
+      "did": "Added SagaLifecycle interface (start/advance/complete) with contract Javadoc; upgraded SagaLifecycle refs to {@link} in SagaContext, exceptions, package-info",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaLifecycle.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaContext.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/DuplicateSagaInstanceException.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/InvalidSagaTransitionException.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/package-info.java"
+      ]
+    },
+    "T017": {
+      "status": "DONE",
+      "did": "Added InMemorySagaLifecycle test double enforcing SagaLifecycle pre-conditions and CREATED->RUNNING->COMPLETED (plus CREATED->COMPLETED) transitions with injectable Clock",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/fixtures/InMemorySagaLifecycle.java"
+      ]
+    },
+    "T018": {
+      "status": "DONE",
+      "did": "Added SagaLifecycleTest covering US2 scenarios 1-3 (start CREATED, advance to RUNNING with clock-driven lastModifiedAt, complete from RUNNING and single-step CREATED) via InMemorySagaLifecycle + test-local MutableClock; 114 tests pass",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaLifecycleTest.java"
+      ]
+    },
+    "T019": {
+      "status": "DONE",
+      "did": "Added SagaLifecycleTest nested suites for terminal-instance (scenario 4), unknown sagaId, duplicate start (CREATED/RUNNING + non-throwing boundaries) and null-argument rejection",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaLifecycleTest.java"
+      ]
+    },
+    "T020": {
+      "status": "DONE",
+      "did": "Corrected AGENTS.md Current Status, Known Gaps, Module Map and Saga Model to reflect SagaContext/SagaLifecycle as tested contracts with no production implementation",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
+    "T021": {
+      "status": "DONE",
+      "did": "Corrected docs/architecture.md: SagaContext/SagaLifecycle status to contract-only, rewrote Queryable process-level state gap around getState/putState/updateStateAttribute with runtime/persistence half still open, removed nonexistent history-record references",
+      "files": [
+        "docs/architecture.md"
+      ]
+    },
+    "T022": {
+      "status": "DONE",
+      "did": "SC-003 verification: README Status sentence and Modules row now state SagaContext/SagaLifecycle are contracts only (test doubles, no implementation); AGENTS.md and architecture.md verified accurate, no edits",
+      "files": [
+        "README.md"
+      ]
+    },
+    "T023": {
+      "status": "DONE",
+      "did": "Ran full suites: saga-forge-core 128 tests pass (0 F/E/S), saga-forge-example -am 1 test passes; BUILD SUCCESS, no fixes needed",
+      "files": [
+        "none"
+      ]
+    },
+    "T024": {
+      "status": "DONE",
+      "did": "Walked quickstart Scenarios A/B against shipped lifecycle types; fixed @DomainEvent/@Command placement, return types, imports, null-rejection, @EndSaga caller responsibility, exception factories/accessors",
+      "files": [
+        "specs/001-core-lifecycle-context/quickstart.md"
+      ]
+    },
+    "T025": {
+      "status": "DONE",
+      "did": "Verified saga-forge-core/pom.xml and root pom.xml unchanged vs HEAD (staged+unstaged); zero dependencies added",
+      "files": [
+        "none"
+      ]
+    }
+  },
+  "decisions": [
+    {
+      "decision": "SagaContext rejects null values (IllegalArgumentException); Optional.empty() means never written",
+      "why": "Optional cannot carry null; keeps FR-004 unambiguous without adding API surface",
+      "rejected": "hasState(name) method; treating stored null as absent"
+    },
+    {
+      "decision": "InMemorySagaContext defensively copies Map values on putState",
+      "why": "caller mutations after putState must not leak into stored state, matching a storage round-trip",
+      "rejected": "storing the caller reference as-is"
+    },
+    {
+      "decision": "InvalidSagaTransitionException exposes notFound and terminal static factories",
+      "why": "two distinct rejection causes with consistent messages, no public constructor sprawl",
+      "rejected": "free-form message constructor"
+    },
+    {
+      "decision": "Terminal statuses are COMPLETED and FAILED",
+      "why": "advance/complete on either must be rejected per FR-006",
+      "rejected": "treating only COMPLETED as terminal"
+    },
+    {
+      "decision": "The @EndSaga pre-check before complete is the responsibility of the caller (engine), not SagaLifecycle",
+      "why": "SagaInstance has no current-step field, so the contract cannot know which step is executing",
+      "rejected": "adding a current-step field to the SPI SagaInstance in this feature"
+    }
+  ],
+  "verified": [
+    {
+      "what": "saga-forge-core test suite",
+      "command": "mvn -B -pl saga-forge-core test",
+      "source": "derived",
+      "exitCode": 0,
+      "durationSeconds": 2.3,
+      "result": "[INFO] Total time:  1.308 s · [INFO] Finished at: 2026-11-02T15:42:15+01:00 · [INFO] ------------------------------------------------------------------------"
+    },
+    {
+      "what": "quickstart.md Scenario A and B walked against shipped SagaContext/SagaLifecycle sources (read-through, not compiled)",
+      "command": "manual walk of quickstart.md vs saga-forge-core/src/main/java/.../core/lifecycle",
+      "result": "signatures and semantics match; snippets not compiled"
+    },
+    {
+      "what": "SC-003 docs grep: AGENTS.md and docs/architecture.md no longer claim SagaLifecycle/SagaContext are implemented by an engine",
+      "command": "grep pass over AGENTS.md and docs/architecture.md",
+      "result": "pass"
+    },
+    {
+      "what": "T025 zero-dependency check (Constitution Principle I)",
+      "command": "git diff HEAD / git diff --cached -- saga-forge-core/pom.xml pom.xml; git log -1",
+      "result": "both POMs unchanged since initial commit 6730cf9; core keeps only its pre-existing test-scope deps (junit-jupiter, jqwik, assertj-core)"
+    },
+    {
+      "what": "core+example reactor tests",
+      "command": "mvn -B -pl saga-forge-example -am test",
+      "source": "derived",
+      "exitCode": 0,
+      "durationSeconds": 2.9,
+      "result": "[INFO] Total time:  1.658 s · [INFO] Finished at: 2026-11-02T15:49:56+01:00 · [INFO] ------------------------------------------------------------------------"
+    }
+  ],
+  "concerns": [
+    {
+      "note": "The @EndSaga pre-condition on SagaLifecycle.complete is unenforceable by the contract itself (no current-step on SagaInstance); a future engine must enforce it",
+      "step": "implement"
+    }
+  ],
+  "coverage": {
+    "FR-001": {
+      "tests": [
+        "SagaContextTest"
+      ]
+    },
+    "FR-002": {
+      "tests": [
+        "SagaContextTest",
+        "SagaContextPropertyTest"
+      ]
+    },
+    "FR-002a": {
+      "tests": [
+        "SagaContextTest",
+        "SagaContextPropertyTest"
+      ]
+    },
+    "FR-002b": {
+      "tests": [
+        "SagaContextTest"
+      ]
+    },
+    "FR-002c": {
+      "tests": [
+        "SagaContextTest"
+      ]
+    },
+    "FR-003": {
+      "tests": [
+        "SagaContextTest",
+        "SagaContextPropertyTest"
+      ]
+    },
+    "FR-004": {
+      "tests": [
+        "SagaContextTest",
+        "SagaContextPropertyTest"
+      ]
+    },
+    "FR-005": {
+      "tests": [
+        "SagaLifecycleTest"
+      ]
+    },
+    "FR-006": {
+      "tests": [
+        "SagaLifecycleTest"
+      ]
+    },
+    "FR-008": {
+      "tests": [
+        "ReflectiveAnnotationScannerTest$SagaContextFieldTests"
+      ]
+    },
+    "FR-010": {
+      "tests": [
+        "SagaContextPropertyTest",
+        "SagaLifecycleTest"
+      ]
+    }
+  },
+  "step_summaries": {
+    "implement": {
+      "summary": "SagaContext and SagaLifecycle contracts plus lifecycle exceptions in saga-forge-core, scanner SagaContext-field cardinality rule, in-memory test doubles, and corrected AGENTS.md/architecture.md; no dependencies added"
+    }
+  },
+  "last_action": "all 25 tasks done, 128/128 core tests pass"
+}
