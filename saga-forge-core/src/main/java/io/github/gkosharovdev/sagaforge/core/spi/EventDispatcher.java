@@ -13,9 +13,22 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <p>This locality decoupling mirrors how {@link StorageProvider} decouples persistence
  * from the storage backend. Concrete transport implementations
- * ({@code saga-forge-transport-inmemory}, {@code saga-forge-transport-kafka},
- * {@code saga-forge-transport-rabbitmq}) are separate modules that depend only on
- * {@code saga-forge-core} and the respective transport client library.</p>
+ * ({@code saga-forge-transport-inmemory}, {@code saga-forge-transport-kafka}) are separate
+ * modules that depend only on {@code saga-forge-core} and the respective transport client
+ * library.</p>
+ *
+ * <h3>Relationship to the saga-scoped unit of work</h3>
+ * <p>This SPI is also the after-commit delivery path for domain events recorded inside a
+ * saga-scoped unit of work. An event recorded with
+ * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} or published
+ * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher} that does not match
+ * a step of the saga instance owning the unit of work is buffered and handed to
+ * {@link #dispatch(Object)} only after that unit of work commits; the buffer is discarded on
+ * rollback. An event raised outside any unit of work is dispatched immediately. Matching events
+ * are delivered in-process within the same unit of work and never reach this SPI.</p>
+ *
+ * <p>Implementations therefore never observe an event whose unit of work rolled back, and need
+ * no transactional coordination of their own.</p>
  *
  * <h3>Implementor concerns</h3>
  * <ul>

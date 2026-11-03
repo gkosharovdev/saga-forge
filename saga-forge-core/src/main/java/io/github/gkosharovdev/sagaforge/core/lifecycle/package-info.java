@@ -5,9 +5,12 @@
  * instance through its lifecycle:
  *
  * <ul>
- *   <li>{@link SagaLifecycle} — process orchestration: start, advance, and complete a saga instance.
+ *   <li>{@link SagaLifecycle} — process orchestration: start a saga instance, record completed steps,
+ *       and advance, complete, or fail it.
  *   <li>{@link SagaContext} — step execution: read and write named, queryable process-level state
- *       scoped to a single saga instance.
+ *       scoped to a single saga instance. The values are persisted as a separate
+ *       {@code SagaContextRecord} through the {@code spi} package's {@code SagaContextStore}, not in
+ *       {@code SagaInstance.state}, and survive the rollback of a saga-scoped unit of work.
  * </ul>
  *
  * <p>Only contracts (interfaces and their supporting exception types) live here. No production

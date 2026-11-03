@@ -7,7 +7,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marker annotation for command classes emitted by saga steps.
+ * Marker annotation for command classes. A command is dispatched through
+ * {@code CommandGateway} to the single {@code @CommandHandler} for its type;
+ * saga steps do not return commands.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

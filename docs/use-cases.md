@@ -6,8 +6,11 @@ including the failure, retry, and compensation scenarios that motivated several 
 
 ## 1. Happy path: `OrderProcessingSaga`
 
-The simplest possible shape — three steps, one compensation — living in `saga-forge-example` as a continuously
-compiled reference:
+The simplest shape: three steps, one compensation, living in `saga-forge-example` as a continuously compiled
+reference. Every step is triggered by a Domain Event and returns `void`. A step dispatches Commands through the
+`CommandGateway` field; a `@CommandHandler` on an Aggregate or a service handles each Command and records the
+next Domain Event with `DomainEvents.record`. The `SagaContext` and `CommandGateway` fields are recognized by
+type and populated by the engine.
 
 ```java
 @Saga
@@ -16,36 +19,86 @@ public class OrderProcessingSaga {
     @SagaId
     private String sagaId;
 
+    private SagaContext context;
+
+    private CommandGateway commandGateway;
+
     @StartSaga
     @SagaStep(associationProperty = "orderId")
-    public ProcessPaymentCommand handleOrderCreated(OrderCreatedEvent event) {
-        return new ProcessPaymentCommand(event.orderId());
+    public void handleOrderCreated(OrderCreatedEvent event) {
+        context.putState("orderAmount", event.amount());
+        commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
     }
 
     @SagaStep(associationProperty = "orderId")
-    public ReserveStockCommand processPayment(PaymentProcessedEvent event) {
-        return new ReserveStockCommand(event.orderId());
+    public void processPayment(PaymentProcessedEvent event) {
+        BigDecimal orderAmount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        if (orderAmount.compareTo(event.amount()) != 0) {
+            throw new IllegalStateException("Payment does not match order amount"); // rolls back the payment too
+        }
+        context.putState("paymentId", event.paymentId());
+        commandGateway.send(new ReserveStockCommand(event.orderId()));
     }
 
     @EndSaga
     @SagaStep(associationProperty = "orderId")
     public void completeOrder(OrderCompletedEvent event) {
-        // terminal step — saga completes
+        // Outcome step: nothing left to dispatch.
     }
 
     @SagaCompensation(forStep = "processPayment")
     public void compensatePayment() {
-        // undo the payment side effect if a later step fails
+        // Mapping only; when and how compensation runs is a separate spec.
     }
 }
 ```
 
-Use this as the baseline for understanding the annotation contract before reading the richer examples below.
+The two Command Handlers, abbreviated. `PaymentService` is a service-hosted handler; `Order` is an
+`@Aggregate` with an instance-method handler, loaded and saved by the client's own `OrderRepository`:
 
-## 2. `CreateBookingSaga` — claim, then pay
+```java
+public class PaymentService {
+    @CommandHandler
+    public void handle(ProcessPaymentCommand command) {
+        String paymentId = UUID.randomUUID().toString(); // a real service would charge the customer here
+        DomainEvents.record(new PaymentProcessedEvent(paymentId, command.orderId(), command.amount()));
+    }
+}
 
-A booking needs availability claimed on an Inventory aggregate before payment is attempted, matching the
-README's canonical example:
+@Aggregate
+public class Order {
+    @AggregateIdentifier
+    private final String orderId;
+    private Status status = Status.CREATED;
+
+    @CommandHandler
+    public void handle(ReserveStockCommand command) { // ReserveStockCommand carries @AggregateIdentifier orderId
+        if (status != Status.CREATED) {
+            throw new IllegalStateException("Order " + orderId + " is already " + status);
+        }
+        status = Status.COMPLETED;
+        DomainEvents.record(new OrderCompletedEvent(orderId));
+    }
+}
+
+public class OrderRepository {
+    @AggregateLoader
+    public Order load(String orderId) { ... }  // null -> AggregateNotFoundException, unit of work fails
+
+    @AggregateSaver
+    public void save(Order order) { ... }
+}
+```
+
+Every Domain Event in this chain triggers a Step of the same saga instance, so the whole chain runs in one
+saga-scoped unit of work that commits when the `@EndSaga` step `completeOrder` completes: the payment and the
+order change commit together or not at all. A failure anywhere rolls the unit of work back and the saga ends
+`FAILED`; values already written to `SagaContext` stay readable.
+
+## 2. `CreateBookingSaga`: claim, pay, then one of two outcomes
+
+A booking claims availability on an `Inventory` Aggregate, initiates payment, then waits for the payment
+provider's callback. It mirrors the reference saga in `saga-forge-core`'s test fixtures and the README:
 
 ```java
 @Saga
@@ -54,39 +107,104 @@ public class CreateBookingSaga {
     @SagaId
     private String sagaId;
 
+    private SagaContext context;
+
+    private CommandGateway commandGateway;
+
     @StartSaga
     @SagaStep(associationProperty = "bookingId")
-    public ClaimAvailabilityCommand onBookingRequested(BookingRequestedEvent event) {
-        return new ClaimAvailabilityCommand(event.bookingId(), event.dates());
+    public void onBookingRequested(BookingRequestedEvent event) {
+        context.putState("inventoryId", event.inventoryId());
+        context.putState("amount", event.amount());
+        commandGateway.send(new ClaimAvailability(
+                event.inventoryId(), event.bookingId(), event.checkIn(), event.checkOut()));
     }
 
     @SagaStep(associationProperty = "bookingId")
-    public InitiatePaymentCommand onAvailabilityClaimed(AvailabilityClaimedEvent event) {
-        return new InitiatePaymentCommand(event.bookingId());
+    public void onAvailabilityClaimed(AvailabilityClaimedEvent event) {
+        context.putState("claimId", event.claimId());
+        long amount = context.getState("amount", Long.class).orElseThrow();
+        commandGateway.send(new InitiatePayment(event.bookingId(), amount));
     }
 
-    @EndSaga
+    // No step reacts to PaymentInitiatedEvent: wait point, the first unit of work commits.
+
     @SagaStep(associationProperty = "bookingId")
-    public void onPaymentInitiated(PaymentInitiatedEvent event) {
-        // terminal step — saga completes
+    public void onPaymentConfirmed(PaymentConfirmedEvent event) {
+        context.putState("paymentId", event.paymentId());
+        String claimId = context.getState("claimId", String.class).orElseThrow();
+        commandGateway.send(new ConfirmBooking(event.bookingId(), claimId, event.paymentId()));
     }
 
-    @SagaCompensation(forStep = "onAvailabilityClaimed")
-    public ReleaseAvailabilityCommand compensateAvailability(AvailabilityClaimedEvent event) {
-        return new ReleaseAvailabilityCommand(event.bookingId());
+    @EndSaga // outcome "confirmed"
+    @SagaStep(associationProperty = "bookingId")
+    public void onBookingConfirmed(BookingConfirmedEvent event) {
+        // Outcome step: nothing left to dispatch.
+    }
+
+    @EndSaga // outcome "declined"
+    @SagaStep(associationProperty = "bookingId")
+    public void onPaymentDeclined(PaymentDeclinedEvent event) {
+        String inventoryId = context.getState("inventoryId", String.class).orElseThrow();
+        String claimId = context.getState("claimId", String.class).orElseThrow();
+        commandGateway.send(new ReleaseAvailability(inventoryId, event.bookingId(), claimId));
     }
 }
 ```
 
-Two production lessons this example carries, even though neither is enforced by `saga-forge-core` yet (see
-architecture.md's "Idempotency and retry" gap):
+Handlers: `Inventory` handles `ClaimAvailability` and `ReleaseAvailability` with instance methods, loaded and
+saved through `InventoryRepository`'s `@AggregateLoader`/`@AggregateSaver`; `PaymentService` handles
+`InitiatePayment`; `Booking` is created by its `@CommandHandler` constructor taking `ConfirmBooking`. One
+excerpt:
 
-- If `AvailabilityClaimedEvent` is delivered twice (at-least-once transport), `onAvailabilityClaimed` must not
-  re-issue `InitiatePaymentCommand` a second time. This requires a uniqueness check on `(sagaId, stepName)`
-  at the storage layer before the step runs — not yet modeled by `@SagaStep`.
-- If payment initiation fails with a transient error (timeout calling the payment gateway), the step should
-  retry with backoff; if it fails with a domain rejection (card declined), it should not retry — it should
-  compensate the availability claim instead. `@SagaStep` has no attributes to distinguish these yet.
+```java
+@Aggregate
+public class Inventory {
+    @AggregateIdentifier
+    private final String inventoryId;
+    private final Map<String, Claim> claims = new LinkedHashMap<>();
+
+    @CommandHandler
+    public void handle(ClaimAvailability command) { // ClaimAvailability carries @AggregateIdentifier inventoryId
+        String claimId = claimIdFor(command.bookingId());
+        if (claims.containsKey(claimId)) {
+            throw new IllegalStateException("Booking " + command.bookingId() + " already holds claim " + claimId);
+        }
+        claims.put(claimId, new Claim(claimId, command.bookingId(), command.checkIn(), command.checkOut()));
+        DomainEvents.record(new AvailabilityClaimedEvent(inventoryId, command.bookingId(), claimId));
+    }
+}
+```
+
+The saga runs in two saga-scoped units of work:
+
+- **First unit of work**: `BookingRequestedEvent` (published by application code through the event publisher)
+  runs `onBookingRequested` and, in-process, `onAvailabilityClaimed`. `PaymentInitiatedEvent` triggers no Step,
+  so the chain stops at a wait point: the claim and the payment commit, and the saga is persisted `RUNNING`.
+- **Second unit of work**: the provider's callback arrives through the transport (possibly in another
+  application instance), is correlated by `bookingId`, and runs from the persisted saga state. On
+  `PaymentConfirmedEvent` it runs `onPaymentConfirmed` then `onBookingConfirmed`; on `PaymentDeclinedEvent` it
+  runs `onPaymentDeclined`, which releases the claim. Either way the saga is `COMPLETED` with the reached
+  `@EndSaga` step as its outcome, and the other path's Steps stay not run.
+
+If the second unit of work fails (for example the `Booking` constructor throws), it is rolled back in full,
+the first unit of work's claim and payment stay committed, and the saga ends `FAILED` with the failing Step and
+cause recorded. `SagaContext` (`inventoryId`, `amount`, `claimId`, `paymentId`) is stored separately from the
+unit of work and stays readable. Undoing the first unit of work's effects is compensation, defined in a
+separate spec. There, the availability compensation targets `onBookingRequested`, the Step whose
+`ClaimAvailability` Command caused the effect; an earlier draft of this document wrongly mapped it to
+`onAvailabilityClaimed`.
+
+Production lessons this example carries, none of which `saga-forge-core` enforces yet (see architecture.md's
+feature gaps):
+
+- **Idempotency is still a gap.** If `AvailabilityClaimedEvent` is delivered twice (at-least-once transport),
+  `onAvailabilityClaimed` must not dispatch `InitiatePayment` a second time. That needs a uniqueness check on
+  `(sagaId, stepName)` at the storage layer before the Step runs, which is not modeled yet.
+- **Retry is still a gap.** A transient failure (a timeout calling the payment gateway) should be retried with
+  backoff. Today any rollback ends the saga `FAILED`; a Step retry design will revisit this.
+- **Domain rejection leads to compensation.** A domain rejection (card declined) should not be retried; it
+  should compensate the availability claim. That behavior is defined in a separate compensation spec.
 
 ## 3. Deferred booking — five related processes, one shared policy family
 
@@ -98,27 +216,27 @@ and distinct association properties.
 
 ### Process A — Create deferred booking request
 
-| Step | Triggered by | Emits | On transient failure | On domain failure |
+| Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Validate and record request | `DeferredBookingRequestedEvent` | `RecordBookingRequestCommand` | Retry with backoff | Fail terminally — no compensation needed, nothing committed yet |
 | Notify owner | `BookingRequestRecordedEvent` | `NotifyOwnerCommand` | Retry with backoff | Requires intervention — booking exists but owner was never notified |
 
 ### Process B — Owner accepts
 
-| Step | Triggered by | Emits | On transient failure | On domain failure |
+| Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Record acceptance | `OwnerAcceptedEvent` | `ConfirmBookingCommand` | Retry with backoff | Requires intervention |
 | Trigger payment initiation | `BookingConfirmedEvent` | `InitiateDeferredPaymentCommand` | Retry with backoff | Compensate: `CancelBookingConfirmationCommand` |
 
 ### Process C — Owner declines
 
-| Step | Triggered by | Emits | On transient failure | On domain failure |
+| Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Record decline and release hold | `OwnerDeclinedEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Requires intervention — hold may be stuck |
 
 ### Process D — Initiate deferred payment
 
-| Step | Triggered by | Emits | On transient failure | On domain failure |
+| Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Attempt payment | `DeferredPaymentDueEvent` | `ChargePaymentCommand`, idempotency keyed on a stable payment attempt identity | Retry with backoff, same payment attempt identity — never a new charge attempt | Compensate: `CancelBookingConfirmationCommand` (from Process B) |
 
@@ -129,7 +247,7 @@ expression, not just relying on the saga/step name pair.
 
 ### Process E — Expire deferred booking
 
-| Step | Triggered by | Emits | On transient failure | On domain failure |
+| Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Detect expiry | Scheduled work claim reaching its deadline | `ExpireBookingCommand` | Retry with backoff | Requires intervention |
 | Release hold | `BookingExpiredEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Requires intervention |
@@ -147,7 +265,7 @@ not the scheduler.
   own distinct start and end.
 - **Compensation targets a specific prior step, not "the saga."** `@SagaCompensation(forStep = "...")` always
   names the step whose effect needs undoing — e.g. Process D's compensation undoes Process B's confirmation,
-  even though they're different `@Saga` classes. Cross-process compensation like this must emit a command
+  even though they're different `@Saga` classes. Cross-process compensation like this must dispatch a command
   aimed at the other process's aggregate; it cannot reach into the other saga instance directly.
 - **Every domain failure resolves to compensate-or-intervene, never silent retry-forever.** This is the
   failure categorization from architecture.md's "Failure categorization" section, applied consistently across

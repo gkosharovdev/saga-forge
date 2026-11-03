@@ -11,6 +11,9 @@ import java.lang.annotation.Target;
  * names the field on the incoming {@code @DomainEvent} class used to correlate
  * the event to the correct saga instance. The method must accept exactly one
  * parameter whose type is annotated with {@code @DomainEvent}.
+ *
+ * <p>A step returns {@code void}. It never returns a command; instead it
+ * dispatches any {@code @Command} it issues through {@code CommandGateway}.</p>
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)

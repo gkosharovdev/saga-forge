@@ -1,0 +1,698 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "T001 Create the new main packages `saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/command/`": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393065
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721403131
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721499071
+      }
+    ],
+    "T002 [P] Create the annotations `CommandHandler` (`@Target({METHOD, CONSTRUCTOR})`), `Aggregate` (TYPE),": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393104
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721509332
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721659050
+      }
+    ],
+    "T003 Add the required attribute `Class<?> aggregate()` to": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393129
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721659240
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721827685
+      }
+    ],
+    "T004 Migrate every existing core test `@DomainEvent` to the new attribute: add a fixture aggregate": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393223
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721660493
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721828741
+      }
+    ],
+    "T005 Keep the example module compiling: add a placeholder `@Aggregate` class": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393257
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721661316
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721829935
+      }
+    ],
+    "T006 [P] Create `CommandGateway` (`void send(Object command)`, Javadoc per contracts/command-gateway.md),": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393486
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721837571
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722017319
+      }
+    ],
+    "T007 [P] Create the recording facade and its binding SPI per contracts/event-publisher.md:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393518
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721838548
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722018434
+      }
+    ],
+    "T008 [P] Create the records and enum `StepStatus`, `StepRecord`, `AggregateReference`, and `SagaFailure` per": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393543
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721839778
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722019689
+      }
+    ],
+    "T009 Add the `steps`, `outcome`, and `failure` components to": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393569
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722030377
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722187321
+      }
+    ],
+    "T010 Apply contracts/saga-lifecycle.md to": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393622
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722189625
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724424029
+      }
+    ],
+    "T011 [P] Create `SagaContextRecord` and `SagaContextStore` per contracts/saga-context-store.md in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393663
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721840999
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722021244
+      }
+    ],
+    "T012 [P] Create `AggregateResolver` and `HandlerInstanceProvider` per data-model.md (host-implemented, never": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393695
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721841748
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722022142
+      }
+    ],
+    "T013 Create `saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/scanner/ValidationReport.java`": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393729
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722031162
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722188431
+      }
+    ],
+    "T014 [P] [US1] Add invalid saga fixtures `StepReturningValueSaga`, `DuplicateEventTypeSaga`,": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393762
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722190824
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724424825
+      }
+    ],
+    "T015 [P] [US1] Add the in-process reference model in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393806
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722191987
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724425958
+      }
+    ],
+    "T016 [P] [US1] Write": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393854
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725080387
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725487606
+      }
+    ],
+    "T017 [P] [US1] Write the jqwik property test": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393887
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725081617
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725487624
+      }
+    ],
+    "T018 [US1] Create the harness stores in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393928
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722192856
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724427164
+      }
+    ],
+    "T019 [US1] Implement the saga-class rules in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721393977
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793722201333
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724428329
+      }
+    ],
+    "T020 [US1] Implement the unit-of-work engine in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394017
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793724437729
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725080303
+      }
+    ],
+    "T021 [P] [US2] Add fixtures in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394063
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725082790
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725488683
+      }
+    ],
+    "T022 [P] [US2] Add the booking model in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394097
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725083920
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725489981
+      }
+    ],
+    "T023 [P] [US2] Write": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394125
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726038196
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726580776
+      }
+    ],
+    "T024 [US2] Implement the handler, identifier, loader, saver, and model rules of contracts/validation.md in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394161
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725491312
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726034255
+      }
+    ],
+    "T025 [US2] Extend": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394208
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725492409
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726035573
+      }
+    ],
+    "T026 [US2] Add `HarnessEventPublisher.java` in": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394289
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793725493631
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726036892
+      }
+    ],
+    "T027 [P] [US3] Add": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394329
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726039113
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726211695
+      }
+    ],
+    "T028 [P] [US3] Write": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394362
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726583085
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726911374
+      }
+    ],
+    "T029 [P] [US3] Write the jqwik property test": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394410
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726584128
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726911415
+      }
+    ],
+    "T030 [US3] Extend": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394462
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726212888
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726581840
+      }
+    ],
+    "T031 [US4] Rewrite the example module:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394510
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726594938
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726912534
+      }
+    ],
+    "T032 [P] [US4] Rewrite the pitch paragraph and the `CreateBookingSaga` example in `README.md` to the new model:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394567
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726916577
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727157965
+      }
+    ],
+    "T033 [P] [US4] Rewrite examples 1 and 2 in `docs/use-cases.md` to the new model, and rename the \"Emits\" column": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394614
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726917813
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727158984
+      }
+    ],
+    "T034 [P] [US4] Update `docs/architecture.md`:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394685
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726918884
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727159962
+      }
+    ],
+    "T035 [P] [US4] Update `AGENTS.md`:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394727
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726920260
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727160916
+      }
+    ],
+    "T036 [P] [US4] Update Scenario A and Scenario B in `specs/001-core-lifecycle-context/quickstart.md` to the new": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394775
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726921154
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727161833
+      }
+    ],
+    "T037 [P] [US4] In `.kiro/specs/saga-forge-framework/requirements.md`, mark Requirement 8.4, Requirement 11, and": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394823
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726595114
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726914116
+      }
+    ],
+    "T038 [US4] Close the Constitution Principle III gate in `.kiro/specs/saga-forge-framework/design.md`:": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394864
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726596348
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793726914975
+      }
+    ],
+    "T039 [P] [US4] Amend `.specify/memory/constitution.md` to 1.0.1 (PATCH): replace the stale Technical Constraints": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394911
+      },
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793727173597
+      }
+    ],
+    "T040 [P] Update the Javadoc of": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721394950
+      }
+    ],
+    "T041 Run `mvn -B test` at the root and confirm every existing and new test passes with zero regressions.": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721395003
+      }
+    ],
+    "T042 Run the SC-005 search (quickstart scenario 11) over `README.md`, `docs/`, `specs/`, `AGENTS.md`, and the": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721395064
+      }
+    ],
+    "T043 [P] Diff `saga-forge-core/pom.xml`, `saga-forge-example/pom.xml`, and the root `pom.xml` against their": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721395116
+      }
+    ],
+    "T044 Walk `specs/002-transactional-step-sequence/quickstart.md` scenarios 1 to 15 against the delivered code": [
+      {
+        "executionId": "059a7970-210d-4850-877e-8c53866bbe96",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1793721395160
+      }
+    ]
+  }
+}

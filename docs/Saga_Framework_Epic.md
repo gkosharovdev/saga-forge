@@ -1,5 +1,9 @@
 # Epic: Saga Framework
 
+> **Superseded historical artifact.** Pre-`saga-forge` planning material from an earlier naming scheme; not
+> current design. See `README.md`, `docs/architecture.md`, `docs/use-cases.md`, and `specs/` (Constitution
+> Principle V).
+
 ## Epic Description
 Implement a comprehensive Saga framework library for managing long-running business processes and distributed transactions. The framework will provide event-driven orchestration capabilities with built-in compensation and error handling.
 

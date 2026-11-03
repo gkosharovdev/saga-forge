@@ -1,5 +1,9 @@
 # User Stories for Saga Framework Implementation
 
+> **Superseded historical artifact.** Pre-`saga-forge` planning material from an earlier naming scheme; not
+> current design. See `README.md`, `docs/architecture.md`, `docs/use-cases.md`, and `specs/` (Constitution
+> Principle V).
+
 ## COURA-001: As a developer, I want to define sagas using annotations so that I can create long-running business processes declaratively
 
 **Story Points:** 8  
