@@ -26,11 +26,14 @@ import java.util.Optional;
  * different instances writing under the same {@code name} never observe each other's values.</p>
  *
  * <h3>Representation</h3>
- * <p>Named values (and the individual fields of structured values) map 1:1 onto entries of the
- * existing {@code SagaInstance.state} map, so they can be persisted and reconstructed by any
- * {@code StorageProvider} without a new persisted shape (FR-009). A {@code SagaContext} does not call
- * {@code StorageProvider} itself; the engine folds the accumulated state back into the
- * {@code SagaInstance} before saving it.</p>
+ * <p>Named values (structured values as nested {@code Map<String, Object>}) are persisted as their own
+ * {@code SagaContextRecord}, through the {@code SagaContextStore} SPI, referencing the saga instance by
+ * its saga id. They are <em>not</em> stored in {@code SagaInstance.state}, which keeps only the saga
+ * class's own serialized fields (feature 002 FR-024, superseding feature 001's mapping onto
+ * {@code SagaInstance.state}). Context values are managed independently of the saga-scoped unit of
+ * work: values written by a step stay queryable by later steps whether that step's unit of work
+ * committed or rolled back. A {@code SagaContext} does not call {@code SagaContextStore} itself; the
+ * engine persists the values. The value semantics described here are unchanged.</p>
  *
  * <h3>Null-safety contracts</h3>
  * <ul>

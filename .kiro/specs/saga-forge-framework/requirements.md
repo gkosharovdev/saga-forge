@@ -1,8 +1,10 @@
 # Requirements Document
 
+> **Note:** Items marked **[Superseded by specs/002-transactional-step-sequence: ...]** (or "Partly superseded") are kept unchanged as historical record. For those items, `specs/002-transactional-step-sequence/spec.md` is authoritative.
+
 ## Introduction
 
-Saga Forge is a declarative Java 24 framework for orchestrating long-running, multi-step business processes (sagas) that span multiple DDD aggregates, inspired by Axon Framework's saga capabilities. It uses domain events and an annotation-driven programming model as first-class building blocks. The core coordination pattern is: a running saga receives a `@DomainEvent`-annotated event, the saga step handler processes it, and the step emits a `@Command`-annotated command to trigger an aggregate state transition. The framework is distributed as a multi-module Maven project colocated in a single git repository, where each module is independently deployable as a separate Maven package. Spring Boot integration is first-class, with storage adapters instantiated as Spring beans via auto-configuration, while modularity remains the primary trait — persistence is provided as separate packages. This specification covers the annotation model definitions (including `@DomainEvent` and `@Command` marker annotations), multi-module project structure, module dependency boundaries, stateful saga instance persistence, pub/sub event delivery, the event-to-command flow pattern, and an example saga demonstrating the programming model. Internal engine implementation, storage provider implementations, and Spring Boot auto-configuration internals are out of scope and will be addressed in separate specifications.
+Saga Forge is a declarative Java 24 framework for orchestrating long-running, multi-step business processes (sagas) that span multiple DDD aggregates, inspired by Axon Framework's saga capabilities. It uses domain events and an annotation-driven programming model as first-class building blocks. The core coordination pattern is: a running saga receives a `@DomainEvent`-annotated event, the saga step handler processes it, and the step emits a `@Command`-annotated command to trigger an aggregate state transition. **[Superseded by specs/002-transactional-step-sequence: steps return void and dispatch commands through the CommandGateway (FR-006, FR-007)]** The framework is distributed as a multi-module Maven project colocated in a single git repository, where each module is independently deployable as a separate Maven package. Spring Boot integration is first-class, with storage adapters instantiated as Spring beans via auto-configuration, while modularity remains the primary trait — persistence is provided as separate packages. This specification covers the annotation model definitions (including `@DomainEvent` and `@Command` marker annotations), multi-module project structure, module dependency boundaries, stateful saga instance persistence, pub/sub event delivery, the event-to-command flow pattern, and an example saga demonstrating the programming model. Internal engine implementation, storage provider implementations, and Spring Boot auto-configuration internals are out of scope and will be addressed in separate specifications.
 
 ## Glossary
 
@@ -13,7 +15,7 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 - **Association_Property**: A correlation key declared on `@SagaStep(associationProperty = "...")` that links incoming domain events to the correct Saga_Instance.
 - **Compensation_Handler**: A method annotated with `@SagaCompensation(forStep = "...")` that reverses the effect of a specific Saga_Step when failure occurs.
 - **Domain_Event**: An immutable object representing something that happened in the domain, marked with the `@DomainEvent` annotation, consumed by Saga_Steps to advance a Saga_Instance.
-- **Command**: An object representing an intent to trigger an aggregate state transition, marked with the `@Command` annotation, emitted by Saga_Steps after processing a Domain_Event.
+- **Command**: An object representing an intent to trigger an aggregate state transition, marked with the `@Command` annotation, emitted by Saga_Steps after processing a Domain_Event. **[Superseded by specs/002-transactional-step-sequence: commands are dispatched by steps through the CommandGateway to a @CommandHandler, not emitted as return values (FR-006, FR-007)]**
 - **Annotation_Scanner**: The component within the Saga_Engine that discovers classes annotated with `@Saga` and introspects their annotated methods.
 - **Storage_Provider**: A pluggable persistence adapter responsible for durably saving and loading Saga_Instance state on every state transition. (Implementation is out of scope for this spec.)
 - **Spring_Boot_Starter**: The auto-configuration module that integrates Saga Forge into Spring Boot applications, instantiating Storage_Provider adapters as Spring beans. (Implementation is out of scope for this spec.)
@@ -107,7 +109,7 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 
 1. THE `@DomainEvent` annotation SHALL have `@Target(ElementType.TYPE)` and `@Retention(RetentionPolicy.RUNTIME)`.
 2. THE `@DomainEvent` annotation SHALL be applicable only to class-level declarations.
-3. THE `@DomainEvent` annotation SHALL serve as a marker annotation with no attributes.
+3. THE `@DomainEvent` annotation SHALL serve as a marker annotation with no attributes. **[Superseded by specs/002-transactional-step-sequence: @DomainEvent declares a required aggregate attribute (FR-008, FR-014)]**
 4. WHEN a class is annotated with `@DomainEvent`, THE Annotation_Scanner SHALL recognize the class as a valid domain event type for Saga_Step method parameters.
 
 ### Requirement 8: Command Marker Annotation
@@ -119,7 +121,7 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 1. THE `@Command` annotation SHALL have `@Target(ElementType.TYPE)` and `@Retention(RetentionPolicy.RUNTIME)`.
 2. THE `@Command` annotation SHALL be applicable only to class-level declarations.
 3. THE `@Command` annotation SHALL serve as a marker annotation with no attributes.
-4. WHEN a Saga_Step method emits an object, THE object SHALL be an instance of a class annotated with `@Command`.
+4. WHEN a Saga_Step method emits an object, THE object SHALL be an instance of a class annotated with `@Command`. **[Superseded by specs/002-transactional-step-sequence: steps return void and dispatch commands through the CommandGateway (FR-006)]**
 
 ### Requirement 9: Stateful Saga Instance Persistence
 
@@ -146,7 +148,7 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 6. THE Event_Dispatcher SPI SHALL be transport-agnostic, supporting both local (in-process) and distributed (cross-instance via message broker) event delivery through pluggable Event_Transport implementations.
 7. THE Event_Dispatcher contract SHALL decouple event publication from Saga_Instance location, so that the publisher is unaware of whether the target Saga_Instance is co-located or remote.
 
-### Requirement 11: Event-to-Command Flow Pattern
+### Requirement 11: Event-to-Command Flow Pattern **[Superseded by specs/002-transactional-step-sequence (entire requirement, all acceptance criteria): steps return void and dispatch commands through the CommandGateway (FR-006, FR-007)]**
 
 **User Story:** As a developer, I want the framework to enforce an event-to-command coordination pattern, so that sagas receive domain events, process them in step handlers, and emit commands that trigger aggregate state transitions.
 
@@ -159,7 +161,7 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 
 ### Requirement 12: Example Saga Demonstrating the Annotation Model
 
-**User Story:** As a developer evaluating Saga Forge, I want to see a complete example saga class using all annotations including `@DomainEvent` and `@Command`, so that I understand the intended programming model and the event-to-command flow pattern.
+**User Story:** As a developer evaluating Saga Forge, I want to see a complete example saga class using all annotations including `@DomainEvent` and `@Command`, so that I understand the intended programming model and the event-to-command flow pattern. **[Partly superseded by specs/002-transactional-step-sequence: the example shows steps dispatching commands through the CommandGateway, not an emit-on-return flow (FR-006, US4)]**
 
 #### Acceptance Criteria
 
@@ -170,5 +172,5 @@ Saga Forge is a declarative Java 24 framework for orchestrating long-running, mu
 5. THE `OrderProcessingSaga` SHALL contain a method annotated with both `@EndSaga` and `@SagaStep(associationProperty = "orderId")`.
 6. THE `OrderProcessingSaga` SHALL contain at least one `@SagaCompensation` method with a `forStep` attribute referencing an existing Saga_Step method name.
 7. THE example event classes (`OrderCreatedEvent`, `PaymentProcessedEvent`, `OrderCompletedEvent`) SHALL each be annotated with `@DomainEvent`.
-8. THE example SHALL demonstrate at least one Saga_Step method emitting a `@Command`-annotated command object (e.g., `ProcessPaymentCommand`).
+8. THE example SHALL demonstrate at least one Saga_Step method emitting a `@Command`-annotated command object (e.g., `ProcessPaymentCommand`). **[Superseded by specs/002-transactional-step-sequence: the example's steps return void and dispatch commands through the CommandGateway to a @CommandHandler (FR-006, US4)]**
 9. THE `OrderProcessingSaga` example SHALL compile and pass annotation validation by the Annotation_Scanner.

@@ -1,10 +1,20 @@
 <!--
 Sync Impact Report
-Version change: (none) → 1.0.0
-Modified principles: N/A (initial adoption)
-Added sections: Core Principles (I-V), Technical Constraints, Development Workflow, Governance
+Version change: 1.0.0 → 1.0.1 (PATCH — clarification only; no principle semantics changed)
+Modified principles:
+  - II. Annotation-Driven, Declarative Style — annotation list extended with the annotations introduced by
+    specs/002-transactional-step-sequence (`@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`,
+    `@AggregateLoader`, `@AggregateSaver`); principle wording unchanged.
+Modified sections:
+  - Technical Constraints — replaced the stale "`SagaContext` tracks step history" line with its current
+    meaning: named business state held in a separate `SagaContextRecord` (keyed by sagaId, stored via
+    `SagaContextStore`) that survives unit-of-work rollback and is queryable by later steps.
+Added sections: none
 Removed sections: none
+Templates requiring updates: none (.specify/templates/* reference principles by number only)
 Follow-up TODOs: none
+Previous report (1.0.0): initial adoption — Core Principles (I-V), Technical Constraints, Development
+Workflow, Governance.
 -->
 
 # Saga Forge Constitution
@@ -23,7 +33,8 @@ core-level coupling to one stack defeats that goal and blocks future integration
 
 ### II. Annotation-Driven, Declarative Style
 Sagas are modeled declaratively via annotations (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`,
-`@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`), not imperative
+`@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`, `@Aggregate`,
+`@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`), not imperative
 orchestration code. New capabilities (retry, idempotency, failure classification, etc.) MUST be
 expressed as framework-owned annotation attributes or SPI extension points, not as aliases into
 third-party annotations (e.g. a third-party retry annotation) and not as hand-rolled orchestration glue
@@ -68,9 +79,13 @@ explicit precedence order, contributors and agents will act on stale information
   classpath rather than requiring users to hand-assemble a `SagaEngineConfig`.
 - `@SagaStep` currently has no retry/backoff attributes. Any such addition MUST update
   `.kiro/specs/saga-forge-framework/` first and MUST be framework-owned (Principle II).
-- `SagaContext` tracks step history, not arbitrary associated business state; expanding it into a
-  general queryable process-state store is tracked as a feature gap, not an incidental change — see
-  `docs/architecture.md#feature-gaps`.
+- `SagaContext` holds named, type-safe business state for one saga instance. Its values live in a
+  separate `SagaContextRecord` keyed by sagaId and stored via `SagaContextStore` (not in
+  `SagaInstance.state`, which holds only the saga class's own fields), so they survive a unit-of-work
+  rollback and are queryable by later steps of the same instance. Step history is tracked by the
+  framework on `SagaInstance` (`StepRecord`), not by `SagaContext`. Expanding this into a general
+  queryable process-level state store across instances remains a feature gap, not an incidental
+  change — see `docs/architecture.md#feature-gaps`.
 
 ## Development Workflow
 
@@ -98,4 +113,4 @@ All Speckit-driven work (`/speckit-plan`, `/speckit-implement`) MUST verify comp
 Principles above before merge. Complexity that violates Principle I or IV must be explicitly justified
 in the relevant `spec.md`/`plan.md` or rejected.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11
+**Version**: 1.0.1 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-03

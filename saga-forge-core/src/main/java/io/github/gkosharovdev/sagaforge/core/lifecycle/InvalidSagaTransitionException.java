@@ -9,7 +9,9 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
  * Thrown when a lifecycle transition is requested for a saga instance that cannot accept it: either no
  * instance exists for the addressed saga id, or the instance is already in a terminal status.
  *
- * <p>Raised by {@link SagaLifecycle#advance(String)} and {@link SagaLifecycle#complete(String)} so that an invalid
+ * <p>Raised by {@link SagaLifecycle#recordStepCompleted(String, String, java.util.List)},
+ * {@link SagaLifecycle#advance(String)}, {@link SagaLifecycle#complete(String, String)} and
+ * {@link SagaLifecycle#fail(String, io.github.gkosharovdev.sagaforge.core.spi.SagaFailure)} so that an invalid
  * transition is reported as a clear, distinguishable error rather than silently succeeding or corrupting
  * the recorded status (FR-006). Instances are created through one of two factories, keeping the two
  * failure modes distinguishable to callers:

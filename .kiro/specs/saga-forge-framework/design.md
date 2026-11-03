@@ -4,11 +4,11 @@
 
 This design covers the foundational layer of Saga Forge: the annotation definitions, multi-module Maven project structure, module dependency boundaries, core interfaces/contracts, and an example saga demonstrating the programming model.
 
-The framework follows an annotation-driven, declarative approach inspired by Axon Framework's saga model. Developers declare sagas as plain Java classes annotated with `@Saga`, define lifecycle boundaries with `@StartSaga`/`@EndSaga`, correlate events to saga instances via `@SagaStep(associationProperty = "...")`, and wire compensation logic with `@SagaCompensation(forStep = "...")`. Domain events and commands are marked with `@DomainEvent` and `@Command` marker annotations respectively, establishing the event-to-command flow pattern.
+The framework follows an annotation-driven, declarative approach inspired by Axon Framework's saga model. Developers declare sagas as plain Java classes annotated with `@Saga`, define lifecycle boundaries with `@StartSaga`/`@EndSaga`, correlate events to saga instances via `@SagaStep(associationProperty = "...")`, and wire compensation logic with `@SagaCompensation(forStep = "...")`. Domain events and commands are marked with `@DomainEvent` and `@Command` annotations respectively. A step reacts to one domain event and returns `void`; it dispatches zero or more commands through a `CommandGateway` field, and each command is routed to the single `@CommandHandler` for its type (an `@Aggregate` method or constructor, or a service method). Steps do not emit or return commands (updated by `specs/002-transactional-step-sequence`, which supersedes the earlier "step returns a command" flow).
 
 **What is in scope:**
-- All 8 annotation definitions (`@Saga`, `@SagaId`, `@StartSaga`, `@EndSaga`, `@SagaStep`, `@SagaCompensation`, `@DomainEvent`, `@Command`)
-- `AnnotationScanner` interface and a reflection-based validation implementation
+- All 8 original annotation definitions (`@Saga`, `@SagaId`, `@StartSaga`, `@EndSaga`, `@SagaStep`, `@SagaCompensation`, `@DomainEvent`, `@Command`), plus the five added by `specs/002-transactional-step-sequence` (`@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`, `@AggregateLoader`, `@AggregateSaver`)
+- `AnnotationScanner` interface and a reflection-based validation implementation, covering a single saga class (`validate`) and a whole model of sagas, handlers, loaders, savers, aggregates, events, and commands (`validateAll`, returning `ValidationReport`)
 - Multi-module Maven project structure with parent POM and 5 child modules
 - `StorageProvider` and `EventDispatcher` SPI interfaces (contracts only)
 - `OrderProcessingSaga` example with domain events and commands
@@ -25,6 +25,7 @@ The framework follows an annotation-driven, declarative approach inspired by Axo
 - All annotations live in `saga-forge-core` with zero external dependencies
 - SPI interfaces use Java's `ServiceLoader` pattern for pluggability
 - Annotation validation is separated from runtime execution — the `AnnotationScanner` validates at startup, the engine (future spec) executes at runtime
+- Steps are `void` event handlers; commands are dispatched through the transport-agnostic `CommandGateway` contract (`io.github.gkosharovdev.sagaforge.core.command`), never returned from a step (`specs/002-transactional-step-sequence` FR-006, FR-007)
 
 ## Architecture
 
@@ -59,7 +60,7 @@ saga-forge/
 │   ├── pom.xml                          (zero external deps)
 │   └── src/main/java/io/github/gkosharovdev/sagaforge/
 │       ├── core/
-│       │   ├── annotation/              (all 8 annotations)
+│       │   ├── annotation/              (all 13 annotations)
 │       │   │   ├── Saga.java
 │       │   │   ├── SagaId.java
 │       │   │   ├── StartSaga.java
@@ -67,10 +68,17 @@ saga-forge/
 │       │   │   ├── SagaStep.java
 │       │   │   ├── SagaCompensation.java
 │       │   │   ├── DomainEvent.java
-│       │   │   └── Command.java
+│       │   │   ├── Command.java
+│       │   │   ├── CommandHandler.java       (spec 002)
+│       │   │   ├── Aggregate.java            (spec 002)
+│       │   │   ├── AggregateIdentifier.java  (spec 002)
+│       │   │   ├── AggregateLoader.java      (spec 002)
+│       │   │   └── AggregateSaver.java       (spec 002)
+│       │   ├── command/                 (CommandGateway contract, spec 002)
 │       │   ├── scanner/                 (annotation validation)
 │       │   │   ├── AnnotationScanner.java        (interface)
-│       │   │   ├── SagaValidationResult.java     (validation result)
+│       │   │   ├── SagaValidationResult.java     (per-class validation result)
+│       │   │   ├── ValidationReport.java         (whole-model result, spec 002)
 │       │   │   └── ReflectiveAnnotationScanner.java (implementation)
 │       │   └── spi/                     (contracts for future modules)
 │       │       ├── StorageProvider.java
@@ -92,7 +100,7 @@ saga-forge/
 └── saga-forge-example/
     ├── pom.xml                          (depends: core)
     └── src/main/java/io/github/gkosharovdev/sagaforge/example/
-        ├── OrderProcessingSaga.java
+        ├── OrderProcessingSaga.java     (void steps + CommandGateway field, per spec 002)
         ├── events/
         │   ├── OrderCreatedEvent.java
         │   ├── PaymentProcessedEvent.java
@@ -102,6 +110,8 @@ saga-forge/
             ├── ReserveStockCommand.java
             └── RequestDeliveryCommand.java
 ```
+
+The example layout above predates `specs/002-transactional-step-sequence`; that feature adds the example's `@CommandHandler`, `@Aggregate`, `@AggregateLoader`, and `@AggregateSaver` types. The module source is the current file list.
 
 ### Design Rationale
 
@@ -172,7 +182,7 @@ public @interface SagaStep {
     String associationProperty();
 }
 ```
-Marks an event-handling method. The `associationProperty` names the field on the incoming `@DomainEvent` class used to correlate the event to the correct saga instance. The method must accept exactly one parameter whose type is annotated with `@DomainEvent`.
+Marks an event-handling method. The `associationProperty` names the field on the incoming `@DomainEvent` class used to correlate the event to the correct saga instance. The method must accept exactly one parameter whose type is annotated with `@DomainEvent`, must return `void` (commands are dispatched through the saga's `CommandGateway` field), and no two `@SagaStep` methods of one saga may react to the same event type (`specs/002-transactional-step-sequence` FR-001, FR-006).
 
 #### @SagaCompensation
 ```java
@@ -191,9 +201,10 @@ Marks a compensation handler. The `forStep` attribute references the method name
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface DomainEvent {
+    Class<?> aggregate();
 }
 ```
-Marker annotation for domain event classes. The scanner validates that `@SagaStep` method parameters are annotated with this.
+Marks a domain event class. The required `aggregate` attribute names the event's aggregate type, which must be annotated with `@Aggregate`, and the event type must declare exactly one `@AggregateIdentifier` field (`specs/002-transactional-step-sequence` FR-008, FR-014; this supersedes the earlier attribute-less marker). The scanner validates that `@SagaStep` method parameters are annotated with this.
 
 #### @Command
 ```java
@@ -203,7 +214,57 @@ Marker annotation for domain event classes. The scanner validates that `@SagaSte
 public @interface Command {
 }
 ```
-Marker annotation for command classes emitted by saga steps.
+Marker annotation for command classes. A step dispatches a command through the `CommandGateway` (`void send(Object command)`), which routes it to the single `@CommandHandler` for its type; steps do not return commands. A command type declares at most one `@AggregateIdentifier` field, and exactly one when it is handled by an `@Aggregate` instance method (`specs/002-transactional-step-sequence` FR-006, FR-007, FR-011, FR-014).
+
+#### @CommandHandler
+```java
+@Target({ElementType.METHOD, ElementType.CONSTRUCTOR})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface CommandHandler {
+}
+```
+Marks the handler of one command type (`specs/002-transactional-step-sequence` FR-009 to FR-011). It may sit on an `@Aggregate` instance method (the target aggregate is loaded first), an `@Aggregate` constructor or static factory method (a creation handler), or a method of a non-aggregate service class, but never on a `@Saga` class. A handler declares exactly one `@Command`-typed parameter (other parameters are permitted), and each command type has at most one handler across the validated model.
+
+#### @Aggregate
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface Aggregate {
+}
+```
+Marks an aggregate type. It must declare exactly one `@AggregateIdentifier` field (FR-014).
+
+#### @AggregateIdentifier
+```java
+@Target(ElementType.FIELD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface AggregateIdentifier {
+}
+```
+Marks the identity field of an `@Aggregate`, `@DomainEvent`, or `@Command` type: exactly one on aggregates and events, at most one on commands (FR-014). Record components annotated with it count through their backing field.
+
+#### @AggregateLoader
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface AggregateLoader {
+}
+```
+Marks a client-owned method that loads an aggregate by its identifier: exactly one parameter, returning an `@Aggregate` type; at most one loader per aggregate type (FR-013, FR-014). No Saga Forge type has to be implemented or extended.
+
+#### @AggregateSaver
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface AggregateSaver {
+}
+```
+Marks a client-owned method that saves an aggregate: exactly one `@Aggregate`-typed parameter; at most one saver per aggregate type (FR-013, FR-014).
 
 ### AnnotationScanner Interface
 
@@ -224,6 +285,47 @@ public interface AnnotationScanner {
      * @throws IllegalArgumentException if sagaClass is null
      */
     SagaValidationResult validate(Class<?> sagaClass);
+
+    /**
+     * Validates a whole model (sagas, handler/loader/saver hosts, aggregates, events, commands)
+     * in one pass, reporting all errors rather than stopping at the first (spec 002 FR-026).
+     *
+     * @throws IllegalArgumentException if classes is null or contains a null element
+     */
+    ValidationReport validateAll(Collection<Class<?>> classes);
+}
+```
+
+`validateAll` validates the passed-in classes followed by the `@Aggregate`, `@DomainEvent`, and `@Command` types reached from their signatures (`@SagaStep` parameters, `@CommandHandler` `@Command` parameters, `@AggregateLoader` return types, `@AggregateSaver` parameters). Each class is validated once:
+
+- each passed-in `@Saga` class gets every `validate(Class<?>)` rule;
+- each passed-in non-saga class declaring a `@CommandHandler`, `@AggregateLoader`, or `@AggregateSaver` (a host) gets the handler, loader, and saver rules;
+- every `@Aggregate`, `@DomainEvent`, and `@Command` type, passed in or reached, gets the identifier rules. Reached types get only these rules, their own signatures are not followed, and `@DomainEvent.aggregate()` is checked but not followed;
+- cross-class rules (one handler per command, one loader and one saver per aggregate, identifier on commands of aggregate instance handlers) are evaluated over the passed-in hosts and reported as model errors.
+
+Every passed-in saga and host gets a `SagaValidationResult`, even when valid; other aggregate, event, or command types get one only when they have errors. Classes no rule applies to are ignored.
+
+### ValidationReport
+
+```java
+package io.github.gkosharovdev.sagaforge.core.scanner;
+
+/**
+ * Immutable result of validateAll: one result per validated class plus cross-class errors.
+ */
+public record ValidationReport(
+    List<SagaValidationResult> classResults,
+    List<String> modelErrors
+) {
+    // Rejects null lists and null elements (IllegalArgumentException); copies both lists.
+
+    public boolean isValid() {  // every class result valid and modelErrors empty
+        ...
+    }
+
+    public List<String> allErrors() {  // class errors in result order, then model errors
+        ...
+    }
 }
 ```
 
@@ -269,6 +371,19 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R5 | 4.4, 4.5, 4.6 | `@SagaStep` methods: exactly one param, param type annotated with `@DomainEvent` |
 | R6 | 5.4, 5.5 | `@SagaCompensation.forStep` references existing `@SagaStep` method |
 | R7 | — (feature spec `specs/001-core-lifecycle-context` FR-008) | At most one field whose declared type is `SagaContext` (optional; recognized by declared type only, no marker annotation) |
+| R8 | — (`specs/002-transactional-step-sequence` FR-006) | Every `@SagaStep` method returns `void` |
+| R9 | — (spec 002 FR-001) | No two `@SagaStep` methods of one saga react to the same event type (only single-parameter steps are compared) |
+| R10 | — (spec 002 FR-010) | A `@Saga` class declares no `@CommandHandler` method |
+| R11 | — (spec 002 FR-007, research §1) | At most one field whose declared type is `CommandGateway` on a `@Saga` class (optional; recognized by declared type only) |
+| R12 | — (spec 002 FR-009) | Each `@CommandHandler` method or constructor declares exactly one `@Command`-typed parameter (host rule, `validateAll` only) |
+| R13 | — (spec 002 FR-011) | No `@Command` type is handled by more than one `@CommandHandler` across the model (model rule, `validateAll` only) |
+| R14 | — (spec 002 FR-014) | Exactly one `@AggregateIdentifier` field on each `@Aggregate` and `@DomainEvent` type; at most one on each `@Command` type (`validateAll` only) |
+| R15 | — (spec 002 FR-014) | A command handled by a non-static `@Aggregate` method declares an `@AggregateIdentifier` field (model rule, `validateAll` only) |
+| R16 | — (spec 002 FR-014) | `@DomainEvent(aggregate = X.class)` names a class annotated `@Aggregate` (`validateAll` only) |
+| R17 | — (spec 002 FR-013) | `@AggregateLoader`: exactly one parameter, returns an `@Aggregate` type; `@AggregateSaver`: exactly one `@Aggregate`-typed parameter (host rule, `validateAll` only) |
+| R18 | — (spec 002 FR-014) | At most one well-formed `@AggregateLoader` and one well-formed `@AggregateSaver` per aggregate type (model rule, `validateAll` only) |
+
+R1 to R11 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 run only in `validateAll`.
 
 ```java
 package io.github.gkosharovdev.sagaforge.core.scanner;
@@ -287,11 +402,27 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateClassLevel(sagaClass, errors);
         validateSagaIdField(sagaClass, errors);
         validateSagaContextField(sagaClass, errors);
+        validateCommandGatewayField(sagaClass, errors);                    // R11
         Map<String, Method> stepMethods = validateSagaSteps(sagaClass, errors);
+        validateStepReturnTypes(sagaClass, stepMethods, errors);           // R8
+        validateUniqueStepEventTypes(sagaClass, stepMethods, errors);      // R9
+        validateNoCommandHandlers(sagaClass, errors);                      // R10
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
 
         return new SagaValidationResult(sagaClass, errors);
+    }
+
+    @Override
+    public ValidationReport validateAll(Collection<Class<?>> classes) {
+        // Passed-in classes, then @Aggregate/@DomainEvent/@Command types reached from signatures.
+        // Per class: @Saga -> validate(type); host -> validateCommandHandlerParameters (R12),
+        //   validateLoaders / validateSavers (R17); every model type -> validateIdentifierFields (R14),
+        //   validateEventAggregate (R16).
+        // Model errors over the passed-in hosts:
+        //   validateUniqueCommandHandlers (R13), validateUniqueAggregateMembers for loaders and savers (R18),
+        //   validateInstanceHandlerCommandIdentifiers (R15).
+        return new ValidationReport(classResults, modelErrors);
     }
 
     // Each private method validates one rule group.
@@ -496,6 +627,8 @@ The `SagaInstance` record (defined in the SPI section above) is the persistence 
 
 This property still holds for saga classes declaring zero or one `SagaContext`-typed field: the `SagaContext` field is optional (see Property 9), so a class satisfying all of the rules above with zero or one such field is valid.
 
+This property still holds under the rules added by `specs/002-transactional-step-sequence` (Properties 10 to 13), with "structurally valid" extended accordingly: a saga class that also has only `void` `@SagaStep` methods, no two `@SagaStep` methods reacting to the same event type, no `@CommandHandler` method, and zero or one `CommandGateway`-typed field passes `validate()` with no errors, and `validateAll` reports no errors for it either, provided the event types its steps reach also satisfy Properties 16 and 17.
+
 ### Property 7: Non-concrete saga classes are rejected
 
 *For any* class annotated with `@Saga` that is an interface or an abstract class, the `AnnotationScanner` shall report a validation error. `validate()` must return `isValid() == false` with an error message indicating the class must be concrete.
@@ -514,11 +647,79 @@ This property still holds for saga classes declaring zero or one `SagaContext`-t
 
 **Validates: Feature spec `specs/001-core-lifecycle-context` FR-008 (no corresponding requirement in this spec's `requirements.md`)**
 
+Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequence` (rules R8 to R18). Properties 10 to 13 are saga-class rules checked by both `validate()` and `validateAll()`; Properties 14 to 20 are checked only by `validateAll()`, either per class or as model errors in `ValidationReport.modelErrors()`. Every one of them is reported in the same single pass as all other rules (spec 002 FR-026).
+
+### Property 10: SagaStep methods return void
+
+*For any* `@Saga`-annotated class, the `AnnotationScanner` shall report a validation error for each `@SagaStep`-annotated method whose return type is not `void`, and no error from this rule if every `@SagaStep` method returns `void`. Equivalently: for any saga class with a `@SagaStep` method returning a value, `validate()` must return a result where `isValid()` is `false` and `errors` contains a message naming that method and directing the developer to dispatch commands through the `CommandGateway`.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-006 (supersedes this spec's Requirement 8.4 and Requirement 11)**
+
+### Property 11: Event type uniqueness per saga
+
+*For any* `@Saga`-annotated class, the `AnnotationScanner` shall report exactly one validation error per event type that is the single parameter type of two or more `@SagaStep`-annotated methods, and no error from this rule if every such parameter type is distinct. The error names the event type and lists the offending method names in ascending lexicographic order; steps that do not have exactly one parameter are not compared (they are reported by Property 4).
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-001**
+
+### Property 12: No command handlers on a saga
+
+*For any* `@Saga`-annotated class, the `AnnotationScanner` shall report a validation error for each declared method annotated with `@CommandHandler`, and no error from this rule if the class declares no such method.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-010**
+
+### Property 13: CommandGateway field cardinality enforcement
+
+*For any* `@Saga`-annotated class, the `AnnotationScanner` shall report a validation error if and only if the class declares more than one field whose declared type is `io.github.gkosharovdev.sagaforge.core.command.CommandGateway`. The field is recognized by its declared type only (no marker annotation), and it is optional: zero or one such field is valid, and for two or more `errors` contains a message with the field count.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-007 and research §1**
+
+### Property 14: Exactly one command parameter per handler
+
+*For any* class passed to `validateAll()` that is not a `@Saga` class, the `AnnotationScanner` shall report a validation error in that class's result for each `@CommandHandler`-annotated method or constructor that does not declare exactly one parameter whose type is annotated with `@Command`, and no error from this rule if every handler declares exactly one. Parameters of other types are permitted and not counted.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-009**
+
+### Property 15: One handler per command type
+
+*For any* set of classes passed to `validateAll()`, the `AnnotationScanner` shall report exactly one model error per `@Command` type handled by two or more `@CommandHandler` methods or constructors across the passed-in non-saga classes, and no error from this rule if every command type has at most one handler. Only handlers with exactly one `@Command` parameter take part (others are reported by Property 14). The error lists the handlers as `{class}.{member}` in ascending lexicographic order.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-011**
+
+### Property 16: AggregateIdentifier cardinality enforcement
+
+*For any* `@Aggregate` or `@DomainEvent` type validated by `validateAll()` (passed in or reached from a step, handler, loader, or saver signature), the `AnnotationScanner` shall report a validation error if and only if the type does not declare exactly one `@AggregateIdentifier` field; *for any* `@Command` type so validated, it shall report a validation error if and only if the type declares more than one. Only declared fields count; record components count through their backing field.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-014**
+
+### Property 17: DomainEvent names an aggregate
+
+*For any* `@DomainEvent` type validated by `validateAll()`, the `AnnotationScanner` shall report a validation error if and only if the class named by `@DomainEvent.aggregate()` is not annotated with `@Aggregate`.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-014**
+
+### Property 18: Commands of aggregate instance handlers declare an identifier
+
+*For any* passed-in `@Aggregate` class with a non-static `@CommandHandler` method declaring exactly one `@Command` parameter, the `AnnotationScanner` shall report a model error if and only if that command type declares no `@AggregateIdentifier` field. Constructors and static factory methods (creation handlers) and service-class handlers are not subject to this rule; a command with several identifiers is reported by Property 16 instead.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-014 (and FR-013: the identifier is how the target aggregate is loaded)**
+
+### Property 19: AggregateLoader and AggregateSaver shape
+
+*For any* class passed to `validateAll()` that is not a `@Saga` class, the `AnnotationScanner` shall report a validation error for each `@AggregateLoader` method that does not take exactly one parameter or does not return an `@Aggregate`-annotated type, and for each `@AggregateSaver` method that does not take exactly one parameter whose type is annotated with `@Aggregate`. Well-formed loaders and savers produce no error from this rule.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-013**
+
+### Property 20: One loader and one saver per aggregate type
+
+*For any* set of classes passed to `validateAll()`, the `AnnotationScanner` shall report exactly one model error per aggregate type returned by two or more well-formed `@AggregateLoader` methods, and exactly one per aggregate type taken by two or more well-formed `@AggregateSaver` methods, across the passed-in non-saga classes; no error from this rule if each aggregate type has at most one of each. Malformed members do not take part (they are reported by Property 19). The error lists the members as `{class}.{method}` in ascending lexicographic order.
+
+**Validates: Feature spec `specs/002-transactional-step-sequence` FR-014**
+
 ## Error Handling
 
 ### Scanner Validation Errors
 
-The `ReflectiveAnnotationScanner` collects all validation errors for a saga class in a single pass rather than failing on the first error. This gives developers a complete picture of what needs fixing.
+The `ReflectiveAnnotationScanner` collects all validation errors for a saga class in a single pass rather than failing on the first error. This gives developers a complete picture of what needs fixing. `validateAll` extends the same single pass to a whole model: per-class errors go into each class's `SagaValidationResult`, and cross-class errors (marked "model error" below) go into `ValidationReport.modelErrors()`.
 
 **Error categories and messages:**
 
@@ -537,10 +738,28 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Non-@DomainEvent param | Param type missing `@DomainEvent` | `"@SagaStep method {methodName} parameter type {paramType} must be annotated with @DomainEvent"` |
 | Invalid forStep reference | `forStep` references non-existent method | `"@SagaCompensation on {methodName}: forStep '{forStep}' does not reference an existing method in {className}"` |
 | forStep not a @SagaStep | `forStep` references non-`@SagaStep` method | `"@SagaCompensation on {methodName}: forStep '{forStep}' must reference a @SagaStep method"` |
+| Step returns a value (R8) | `@SagaStep` method with non-`void` return type | `"@SagaStep method {methodName} in {className} must return void; dispatch commands through the CommandGateway instead"` |
+| Duplicate step event type (R9) | Two or more single-parameter `@SagaStep` methods on one event type | `"@Saga class {className} has more than one @SagaStep reacting to {eventType}: {methodName}, {methodName}"` |
+| Handler on a saga (R10) | `@CommandHandler` method declared on a `@Saga` class | `"@Saga class {className} must not declare @CommandHandler method {methodName}"` |
+| Multiple CommandGateway (R11) | >1 fields of declared type `CommandGateway` | `"@Saga class {className} must declare at most one CommandGateway field, found {count}"` |
+| Handler command parameter count (R12) | `@CommandHandler` with !=1 `@Command`-typed params | `"@CommandHandler method {methodName} in {className} must declare exactly one @Command parameter, found {count}"` |
+| Duplicate handler (R13, model error) | >1 `@CommandHandler` for one `@Command` type | `"Command {commandType} has more than one @CommandHandler: {className}.{methodName}, {className}.{methodName}"` |
+| Aggregate or event identifier count (R14) | `@Aggregate`/`@DomainEvent` type without exactly one `@AggregateIdentifier` field | `"{className} must declare exactly one @AggregateIdentifier field, found {count}"` |
+| Command identifier count (R14) | `@Command` type with >1 `@AggregateIdentifier` fields | `"@Command type {className} must declare at most one @AggregateIdentifier field, found {count}"` |
+| Instance-handler command without identifier (R15, model error) | Command of a non-static `@Aggregate` handler method has no `@AggregateIdentifier` | `"@Command type {commandType} is handled by @Aggregate instance method {className}.{methodName} and must declare an @AggregateIdentifier field"` |
+| Event aggregate not an aggregate (R16) | `@DomainEvent.aggregate()` names a non-`@Aggregate` class | `"@DomainEvent type {className} names aggregate {aggregateType}, which is not annotated @Aggregate"` |
+| Loader shape (R17) | `@AggregateLoader` with !=1 params or non-`@Aggregate` return type | `"@AggregateLoader method {methodName} in {className} must take exactly one parameter and return an @Aggregate type"` |
+| Saver shape (R17) | `@AggregateSaver` without exactly one `@Aggregate`-typed param | `"@AggregateSaver method {methodName} in {className} must take exactly one @Aggregate-typed parameter"` |
+| Duplicate loader (R18, model error) | >1 well-formed `@AggregateLoader` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateLoader: {className}.{methodName}, {className}.{methodName}"` |
+| Duplicate saver (R18, model error) | >1 well-formed `@AggregateSaver` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateSaver: {className}.{methodName}, {className}.{methodName}"` |
+
+All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, and R18 messages are sorted in ascending lexicographic order (method names for R9, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.
 
 ### Null Safety
 
 - `AnnotationScanner.validate(null)` throws `IllegalArgumentException` immediately
+- `AnnotationScanner.validateAll(null)`, or a collection containing a `null` element, throws `IllegalArgumentException` immediately
+- `ValidationReport` rejects `null` lists and `null` elements with `IllegalArgumentException` and copies both lists
 - `SagaValidationResult` constructor uses `List.copyOf()` to reject null elements and ensure immutability
 
 ### SPI Error Contracts (for future implementors)
@@ -600,6 +819,8 @@ Alternative simpler approach: maintain a set of pre-built test fixture classes (
 | `validSagaClassesPassValidation` | Property 6 | For any structurally valid saga class, validation passes |
 | `nonConcreteSagaClassesRejected` | Property 7 | For any interface/abstract @Saga class, validation fails |
 | `validationResultImmutability` | Property 8 | For any SagaValidationResult, errors list is unmodifiable |
+
+Properties 9 to 20 are covered by fixture-based tests with exact error messages: Properties 9 to 13 in `ReflectiveAnnotationScannerTest` (Properties 10 to 13 in its nested `TransactionalStepSequenceRuleTests`), and Properties 14 to 20 in `ValidateAllTest`.
 
 ### Test Location
 

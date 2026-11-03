@@ -1,5 +1,9 @@
 # Technical Tasks for Saga Framework Implementation
 
+> **Superseded historical artifact.** Pre-`saga-forge` planning material from an earlier naming scheme; not
+> current design. See `README.md`, `docs/architecture.md`, `docs/use-cases.md`, and `specs/` (Constitution
+> Principle V).
+
 ## Sprint 1 Tasks (2 weeks)
 
 ### COURA-101: Create Saga Core Annotations Package

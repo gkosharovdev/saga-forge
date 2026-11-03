@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.AbstractSagaClass;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.CompensationForNonStepMethodSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.CompensationInvalidForStepSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.DuplicateEventTypeSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.EndSagaWithoutStepSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.InterfaceSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleCommandGatewayFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleSagaContextFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleSagaIdSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.MultipleStartSagaSaga;
@@ -19,8 +21,10 @@ import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoEndSagaSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoSagaIdSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NoStartSagaSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.NonStringSagaIdSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.SagaWithCommandHandler;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.SagaWithContextFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StartSagaWithoutStepSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepReturningValueSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithMultipleParamsSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNoParamSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNonDomainEventParamSaga;
@@ -262,6 +266,65 @@ class ReflectiveAnnotationScannerTest {
             assertThat(result.isValid()).isFalse();
             assertThat(result.errors()).anyMatch(e ->
                     e.equals("@SagaCompensation on compensate: forStep 'regularMethod' must reference a @SagaStep method"));
+        }
+    }
+
+    /**
+     * Saga-class rules from feature 002 (contracts/validation.md, research §7). Each invalid fixture is
+     * otherwise identical to {@link ValidSaga}, so it yields exactly one error.
+     */
+    @Nested
+    @DisplayName("Transactional step-sequence saga-class rules (002)")
+    class TransactionalStepSequenceRuleTests {
+
+        @Test
+        @DisplayName("step returning a value produces error")
+        void stepReturningValue() {
+            SagaValidationResult result = scanner.validate(StepReturningValueSaga.class);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.errors()).containsExactly(
+                    "@SagaStep method handleStart in StepReturningValueSaga must return void; "
+                            + "dispatch commands through the CommandGateway instead");
+        }
+
+        @Test
+        @DisplayName("two steps reacting to the same event type produce one error listing both methods, sorted by name")
+        void duplicateEventType() {
+            SagaValidationResult result = scanner.validate(DuplicateEventTypeSaga.class);
+
+            assertThat(result.isValid()).isFalse();
+            // Method names are listed in ascending lexicographic order for a deterministic message.
+            assertThat(result.errors()).containsExactly(
+                    "@Saga class DuplicateEventTypeSaga has more than one @SagaStep reacting to TestEvent: "
+                            + "handleAgain, handleStart");
+        }
+
+        @Test
+        @DisplayName("@CommandHandler method on a saga produces error")
+        void commandHandlerOnSaga() {
+            SagaValidationResult result = scanner.validate(SagaWithCommandHandler.class);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.errors()).containsExactly(
+                    "@Saga class SagaWithCommandHandler must not declare @CommandHandler method handle");
+        }
+
+        @Test
+        @DisplayName("multiple CommandGateway fields produce error")
+        void multipleCommandGatewayFields() {
+            SagaValidationResult result = scanner.validate(MultipleCommandGatewayFieldSaga.class);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.errors()).containsExactly(
+                    "@Saga class MultipleCommandGatewayFieldSaga must declare at most one CommandGateway field, found 2");
+        }
+
+        @Test
+        @DisplayName("ValidSaga and SagaWithContextFieldSaga remain valid")
+        void existingValidSagasRemainValid() {
+            assertThat(scanner.validate(ValidSaga.class).errors()).isEmpty();
+            assertThat(scanner.validate(SagaWithContextFieldSaga.class).errors()).isEmpty();
         }
     }
 
