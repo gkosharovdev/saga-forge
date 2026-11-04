@@ -134,6 +134,15 @@ library instead of re-plumbing it per service.
    annotations, plain Spring beans for dependencies you inject into a saga (repositories, read
    models) via regular DI.
 
+## Design Inspiration
+
+The saga programming model is inspired by [AxonIQ's Axon Framework](https://axoniq.io/):
+- Event-triggered steps returning void, dispatching commands through a gateway
+- Domain-driven design patterns (aggregates, commands, domain events)
+- Per-instance saga orchestration across aggregate boundaries
+
+Saga Forge is an independent, zero-dependency implementation designed for JDK 21+.
+
 ## Status
 
 This is an early-stage framework. The annotation model, SPI contracts, and module layout exist and
