@@ -5,11 +5,11 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <p>This interface is <strong>transport-agnostic</strong>. It makes no assumptions about
  * whether the event publisher and the target saga instance reside in the same JVM process.
- * Implementations may deliver events in-process (e.g., direct method invocation for
- * single-instance deployments) or across instances via a message broker (e.g., Kafka,
- * RabbitMQ for distributed deployments). The publisher is completely decoupled from the
- * saga instance location — it is unaware of whether the target saga is co-located or
- * remote.</p>
+ * Implementations may deliver events in-process (e.g., over Spring's
+ * {@code ApplicationEventPublisher} for single-instance deployments) or across instances via
+ * a message broker (e.g., Kafka for distributed deployments). The publisher is completely
+ * decoupled from the saga instance location — it is unaware of whether the target saga is
+ * co-located or remote.</p>
  *
  * <p>This locality decoupling mirrors how {@link StorageProvider} decouples persistence
  * from the storage backend. Concrete transport implementations
@@ -20,15 +20,18 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * <h3>Relationship to the saga-scoped unit of work</h3>
  * <p>This SPI is also the after-commit delivery path for domain events recorded inside a
  * saga-scoped unit of work. An event recorded with
- * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} or published
- * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher} that does not match
- * a step of the saga instance owning the unit of work is buffered and handed to
- * {@link #dispatch(Object)} only after that unit of work commits; the buffer is discarded on
- * rollback. An event raised outside any unit of work is dispatched immediately. Matching events
- * are delivered in-process within the same unit of work and never reach this SPI.</p>
+ * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} (or published
+ * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher}, which inside a unit
+ * of work is equivalent) that does not trigger a step of the saga instance owning the unit of work
+ * is buffered and handed to {@link #dispatch(Object)} only after that unit of work commits; the
+ * buffer is discarded on rollback. The same applies to events recorded in the non-saga unit of
+ * work that {@code CommandGateway.send} opens when called outside any unit of work. Events that
+ * do trigger a step of the owning instance (same event type, same {@code associationProperty}
+ * value) are delivered in-process within the same unit of work and never reach this SPI. Only an
+ * event published through {@code EventPublisher} outside any unit of work is handed to
+ * {@link #dispatch(Object)} immediately.</p>
  *
- * <p>Implementations therefore never observe an event whose unit of work rolled back, and need
- * no transactional coordination of their own.</p>
+ * <p>Implementations therefore never observe an event whose unit of work rolled back.</p>
  *
  * <h3>Implementor concerns</h3>
  * <ul>

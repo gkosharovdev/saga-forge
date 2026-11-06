@@ -18,7 +18,7 @@
   (`start`/`advance`/`complete`), plus `SagaStateTypeMismatchException`, `NonStructuredStateValueException`,
   `DuplicateSagaInstanceException`, `InvalidSagaTransitionException`. Tested via test-only doubles
   (`InMemorySagaContext`/`InMemorySagaLifecycle`); no production implementation ships — same posture as
-  `StorageProvider`/`EventDispatcher`.
+  `EventDispatcher`.
 - Contracts only, added by `specs/002-transactional-step-sequence`: `core.command` (`CommandGateway`,
   `NoCommandHandlerException`, `AggregateNotFoundException`), `core.event` (`DomainEvents.record`/`capture`,
   `EventPublisher`), SPI `AggregateResolver`/`AggregateReference`, `HandlerInstanceProvider`,
@@ -26,9 +26,16 @@
   `SagaFailure`; `SagaLifecycle` gains `recordStepCompleted`, `complete(sagaId, outcomeStep)` and `fail`. The
   scanner (implemented) gains `validateAll` → `ValidationReport`. Execution semantics are proven only by the
   test-only `SagaTestHarness` in `saga-forge-core/src/test/.../core/execution/harness/` — it is not an engine.
-- Not implemented: the saga engine runtime, any `StorageProvider`/`EventDispatcher` implementation, and Spring
-  Boot autoconfiguration. The `saga-forge-storage-*`, `saga-forge-transport-*`, and
-  `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
+- Implemented and tested against Postgres via Testcontainers (the concurrency suites not yet run, G-003-23), added
+  by `specs/003-postgres-saga-persistence`: `saga-forge-storage-postgres` implements
+  `StorageProvider` (`PostgresStorageProvider`) and `SagaContextStore` (`PostgresSagaContextStore`) over a
+  caller-supplied `DataSource`, with the DDL shipped as the classpath resource `schema.sql`; failures surface as
+  `ConcurrentSagaUpdateException` (concurrent diverging save) or `UncheckedSqlException`. `saga-forge-core` gains
+  the storage-agnostic, write-only lifecycle-history vocabulary `core.spi.SagaLifecycleEntry` /
+  `SagaLifecycleEventKind` (no SPI method takes or returns it).
+- Not implemented: the saga engine runtime, MySQL and MongoDB storage, both transports (no `EventDispatcher`
+  implementation), and Spring Boot autoconfiguration. The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb`,
+  `saga-forge-transport-*`, and `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
   actual `.java` source before relying on it.
 
@@ -39,8 +46,11 @@
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
 - `saga-forge-spring-boot-starter` — target: autoconfiguration that detects an available datastore and
   transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
-- `saga-forge-storage-postgres` / `-mysql` / `-mongodb` — target: `StorageProvider` implementations, one per
-  backend.
+- `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
+  (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
+  (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core.
+- `saga-forge-storage-mysql` / `-mongodb` — target: `StorageProvider` + `SagaContextStore` implementations, one
+  per backend.
 - `saga-forge-transport-inmemory` — target: `EventDispatcher` over Spring `ApplicationEventPublisher`.
 - `saga-forge-transport-kafka` — target: `EventDispatcher` over Kafka. These two transports are the only ones
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
@@ -69,6 +79,11 @@
 - Saga-scoped unit of work: commits at the first `@EndSaga` step or at a wait point (no queued event left for
   the instance); any failure rolls the whole unit of work back and the saga is `FAILED`.
   `SagaContext` values live in a separate `SagaContextRecord` and survive the rollback.
+- Write order (decided, `specs/003-postgres-saga-persistence/research.md` §8): a `SagaContextRecord` is saved
+  only after its `SagaInstance` row exists. The engine's unit of work persists the instance with
+  `StorageProvider.save` before the first `SagaContextStore.save` for that `sagaId`; a context save for an
+  unknown `sagaId` fails with `UncheckedSqlException` (FK violation). 002's harness does not follow this yet
+  (G-ENG-01).
 - Validate a whole model with `AnnotationScanner.validateAll(...)` → `ValidationReport` (cross-class rules,
   Properties 14–20); `validate(...)` covers single-saga rules only.
 - Compensation is step-targeted: `@SagaCompensation(forStep = "...")`, where `forStep` must name an existing
@@ -98,6 +113,8 @@
   `/speckit-constitution`.
 
 ## Known Gaps to Respect When Extending
+- `.specify/memory/memory.md` is the register of known gaps, deferred decisions and limitations (IDs such as
+  `G-003-01`); check it before extending a feature.
 - See `docs/architecture.md#feature-gaps` for the full backlog: queryable process-level state (highest
   priority), idempotent step execution, per-step retry with failure classification, transaction boundary
   relative to the triggering dispatch, and failure categorization with compensation dispatch.
@@ -122,6 +139,11 @@
 - No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled
   process.
 - jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
+- Postgres storage (003), see memory.md for detail: concurrency is a row lock plus a forward-transition check,
+  with no version field (G-003-02, -03, -13, -19 to -22; G-003-01/-02 explicitly deferred); steps completed in one
+  `save()` are ordered by a step-name tiebreak (G-003-04, -16); no lifecycle-history query API, FR-012
+  (G-003-24); the host applies `schema.sql`, no migration tool (G-003-25); `DataSource`/pool wiring belongs to
+  the starter (G-003-26).
 
 ## Agent Working Rules For This Repo
 - Prefer edits that preserve the annotation-driven declarative style over imperative orchestration code.
@@ -137,6 +159,8 @@
   changing annotation semantics.
 - Follow the DDD vocabulary consistently: Command, Domain Event, Aggregate, Policy, Projection/Read Model,
   Saga, Step, Compensation — see `docs/architecture.md#vocabulary` for definitions.
+- Whenever you notice a gap, limitation or deferred decision, record it in `.specify/memory/memory.md` with an
+  ID; don't silently fix or ignore it.
 
 ## Fast Discovery Checklist
 - Read `README.md` for the pitch and the canonical example.

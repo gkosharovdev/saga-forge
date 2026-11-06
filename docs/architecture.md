@@ -8,16 +8,17 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 
 | Layer | State |
 |---|---|
-| Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
+| Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
 | `AnnotationScanner` / `ReflectiveAnnotationScanner` / `SagaValidationResult` / `validateAll` → `ValidationReport` | Implemented, tested |
 | `DomainEvents.record` / `DomainEventScope` (thread-bound event recording) | Implemented, tested |
 | `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined and tested via test doubles; no implementation |
 | `CommandGateway`, `EventPublisher` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
 | SPI `AggregateResolver`, `HandlerInstanceProvider`, `SagaContextStore` / `SagaContextRecord` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
 | `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
-| SPI (`StorageProvider`, `EventDispatcher`) | Defined, no implementations |
+| SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)); no `EventDispatcher` implementation |
+| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; derived and persisted by Postgres storage on `save()`; no query API |
 | Saga engine runtime | Not implemented |
-| Storage providers (Postgres, MySQL, MongoDB) | Not implemented |
+| Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Transports (in-memory, Kafka) | Not implemented |
 | Spring Boot autoconfiguration | Not implemented |
 
@@ -34,7 +35,9 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   resolve an unambiguous choice (e.g. two storage providers on the classpath), it should fail fast with a
   clear error rather than guess.
 - **`saga-forge-storage-{postgres,mysql,mongodb}`** — each implements `StorageProvider` and
-  `SagaContextStore` for one backend.
+  `SagaContextStore` for one backend, and records each instance's lifecycle history
+  (`SagaLifecycleEntry`: creation, step completions, terminal outcome) by diffing snapshots inside `save()`,
+  for direct data-store inspection only. Only Postgres exists so far.
   Exactly one should be on the classpath per application. These are the only three storage backends in
   scope; adding a fourth is a scope decision, not an implementation detail.
 - **`saga-forge-transport-{inmemory,kafka}`** — each implements `EventDispatcher`. In-memory wraps Spring's
@@ -143,7 +146,8 @@ What is defined (contract only, in `core.lifecycle`):
   saved no later than the end of the step that made them, and a `SagaContextStore.save` never joins the saga
   transaction. Values therefore survive a rollback, and a record may exist for a `FAILED` instance.
 - These contracts are exercised only through test-only doubles and the test-only harness; no production
-  `SagaContext`, `SagaLifecycle` or `SagaContextStore` implementation ships.
+  `SagaContext` or `SagaLifecycle` implementation ships. `saga-forge-storage-postgres` ships the first
+  production `SagaContextStore` (and `StorageProvider`).
 
 What remains to be built (the runtime/persistence half):
 
@@ -151,8 +155,9 @@ What remains to be built (the runtime/persistence half):
   work begins, or to save what a step wrote.
 - Because different units of work — possibly on a different thread, or a different process entirely if the
   transport is Kafka — cannot share Java object identity or a live `ThreadLocal`, this state must round-trip
-  through a concrete `SagaContextStore` between units of work. No `SagaContextStore` or `StorageProvider`
-  implementation exists yet, so cross-unit-of-work persistence of `SagaContext` state is unbuilt.
+  through a concrete `SagaContextStore` between units of work. The Postgres `SagaContextStore` and
+  `StorageProvider` can hold that state, but no engine round-trips it yet, so cross-unit-of-work persistence
+  of `SagaContext` state is still unbuilt.
 - This is also the mechanism that should back the "process state available to downstream policies" principle
   already stated in the "Why orchestration on an event-driven substrate" section above — a `@ReadModel`-backed
   policy reading saga state should be reading through this same `SagaContext`-backed state, not a parallel

@@ -149,8 +149,8 @@ This is an early-stage framework. The annotation model, SPI contracts, and modul
 are tested (`saga-forge-core`). The `SagaContext`/`SagaLifecycle` interfaces are contracts only,
 tested via test doubles, with no implementation. The step, command-handler, and unit-of-work contracts
 (`CommandGateway`, `DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined and proven by a test-only
-harness (feature 002). The runtime engine, storage providers, transports, and autoconfiguration are not
-implemented yet. See
+harness (feature 002). Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003).
+The runtime engine, MySQL and MongoDB storage, transports, and autoconfiguration are not implemented yet. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as
@@ -160,9 +160,9 @@ historical planning artifacts, superseded by the docs above where they conflict.
 
 | Module | Role | Depends on |
 |---|---|---|
-| `saga-forge-core` | Annotations, SPI (`StorageProvider`, `EventDispatcher`), `SagaContext`/`SagaLifecycle` contracts (no implementation), scanner | nothing |
+| `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
 | `saga-forge-spring-boot-starter` | Autoconfiguration: detects datastore + transport, wires the engine | `saga-forge-core` |
-| `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` implementations | `saga-forge-core` |
+| `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | `EventDispatcher` over Spring `ApplicationEventPublisher` | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
 | `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core` |
