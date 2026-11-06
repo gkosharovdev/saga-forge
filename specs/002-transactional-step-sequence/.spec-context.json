@@ -364,6 +364,46 @@
       "kind": "complete",
       "by": "ai",
       "at": "2026-11-03T17:31:16.431Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T040",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T20:54:17.201Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T041",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:05:50.105Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T042",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:05:50.240Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T043",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:05:50.366Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T044",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:05:50.491Z"
     }
   ],
   "decisions": [
@@ -383,7 +423,7 @@
       "rejected": "Separate @TargetAggregateIdentifier; inferring the aggregate type"
     }
   ],
-  "currentTask": "T033",
+  "currentTask": "T044",
   "task_summaries": {
     "T001": {
       "status": "DONE",
@@ -738,6 +778,29 @@
       "files": [
         "docs/use-cases.md"
       ]
+    },
+    "T040": {
+      "status": "DONE",
+      "did": "EventDispatcher Javadoc: RabbitMQ dropped (in-memory/Kafka only); after-commit delivery of recorded events, discarded on rollback, per research §5 and contracts",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventDispatcher.java"
+      ]
+    },
+    "T041": {
+      "status": "DONE",
+      "did": "Marked complete by user decision without execution; 002 verification deferred (memory.md G-002-03)"
+    },
+    "T042": {
+      "status": "DONE",
+      "did": "Marked complete by user decision without execution; 002 verification deferred (memory.md G-002-03)"
+    },
+    "T043": {
+      "status": "DONE",
+      "did": "Marked complete by user decision without execution; 002 verification deferred (memory.md G-002-03)"
+    },
+    "T044": {
+      "status": "DONE",
+      "did": "Marked complete by user decision without execution; 002 verification deferred (memory.md G-002-03)"
     }
   }
 }
