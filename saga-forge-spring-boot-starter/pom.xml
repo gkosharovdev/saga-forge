@@ -14,6 +14,10 @@
     <name>Saga Forge Spring Boot Starter</name>
     <description>Spring Boot auto-configuration for Saga Forge</description>
 
+    <properties>
+        <spring-boot.version>4.1.2</spring-boot.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
@@ -23,7 +27,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
-            <version>3.4.1</version>
+            <version>${spring-boot.version}</version>
         </dependency>
     </dependencies>
 </project>
