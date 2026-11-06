@@ -1,0 +1,624 @@
+{
+  "workflow": "companion",
+  "specName": "PostgreSQL Saga Persistence",
+  "branch": "master",
+  "currentStep": "implement",
+  "status": "completed",
+  "history": [
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-04T19:29:11.000Z"
+    },
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-04T19:40:58.270Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-05T09:22:03.371Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-05T10:03:58.117Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-05T20:38:11.528Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-05T20:47:16.920Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-05T21:09:56.751Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T001",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:11:05.870Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T002",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:11:21.052Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T003",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:11:39.053Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T004",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:11:52.372Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T005",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:16:28.544Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T007",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:16:30.140Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T006",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:17:38.331Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T008",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:19:39.009Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T009",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:25:06.433Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T010",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:25:06.571Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T011",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:25:06.714Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T012",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:27:07.626Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T013",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:28:06.835Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T014",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:31:40.169Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T015",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:31:40.360Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T016",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:31:40.529Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T017",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:32:25.017Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T018",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:32:59.889Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T019",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:34:27.111Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T021",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:38:50.857Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T022",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:38:57.379Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T023",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:39:06.649Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T024",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:39:27.331Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T020",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:46:40.879Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T025",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:46:41.019Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T026",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:50:03.055Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T027",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:50:40.411Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T028",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:51:02.208Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T029",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:51:49.175Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T030",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:52:05.933Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T031",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T21:52:18.736Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T032",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T22:50:21.734Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T033",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T22:52:15.289Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-05T22:52:15.326Z"
+    }
+  ],
+  "workingBranch": "003-postgres-saga-persistence",
+  "currentTask": null,
+  "task_summaries": {
+    "T001": {
+      "status": "DONE",
+      "did": "Added jackson-databind 3.1.7 (compile), bumped postgresql to 42.7.14, added JUnit/jqwik/AssertJ and Testcontainers 2.0.5 test deps; test-compile BUILD SUCCESS",
+      "files": [
+        "saga-forge-storage-postgres/pom.xml"
+      ]
+    },
+    "T002": {
+      "status": "DONE",
+      "did": "Created package-info.java (Postgres StorageProvider/SagaContextStore, host applies schema.sql, caller supplies DataSource and pooling) and the resources/test package directories",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/package-info.java"
+      ]
+    },
+    "T003": {
+      "status": "DONE",
+      "did": "Created schema.sql with the four tables, CHECK constraints, cascades and idx_saga_association_lookup exactly as contracts/postgres-schema.md (values left unquoted; verified by SchemaTest in T008)",
+      "files": [
+        "saga-forge-storage-postgres/src/main/resources/io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql"
+      ]
+    },
+    "T004": {
+      "status": "DONE",
+      "did": "Created public UncheckedSqlException extends RuntimeException with (String, SQLException) constructor and Javadoc on driver-failure propagation",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/UncheckedSqlException.java"
+      ]
+    },
+    "T005": {
+      "status": "DONE",
+      "did": "Wrote JsonCodecTest (20 tests: value-set round-trips, Long-to-Integer narrowing, escaping, deep unmodifiability, deterministic key order, encode rejections with field/path and type, malformed decode); confirmed it fails to compile before JsonCodec exists",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/JsonCodecTest.java"
+      ]
+    },
+    "T007": {
+      "status": "DONE",
+      "did": "Created PostgresTestSupport: static postgres:16-alpine container started in a static initializer, schema.sql applied once, newDataSource (PGSimpleDataSource), reset (drop fault triggers + TRUNCATE CASCADE), failOn trigger-based fault injection, queryRows",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresTestSupport.java"
+      ]
+    },
+    "T006": {
+      "status": "DONE",
+      "did": "Implemented package-private JsonCodec over one static JsonMapper (ORDER_MAP_ENTRIES_BY_KEYS, no default typing): encode/encodeObject validate the value set with path-naming IAE, decode/decodeObject return deep unmodifiable copies, JacksonException wrapped; JsonCodecTest 20/20 green",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/JsonCodec.java"
+      ]
+    },
+    "T008": {
+      "status": "DONE",
+      "did": "Wrote SchemaTest (5 tests: schema applies with 4 tables + lookup index, valid rows accepted, both CHECK constraints reject with SQLState 23514, DELETE cascades to association/context/history); green against postgres:16-alpine, unquoted values column accepted",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/SchemaTest.java"
+      ]
+    },
+    "T009": {
+      "status": "DONE",
+      "did": "PostgresStorageProviderTest.RoundTrip: 8 tests (scenarios 1-3, 13, re-save replace, findByAssociation, delete, null rules); confirmed it failed to compile before T011",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderTest.java"
+      ]
+    },
+    "T010": {
+      "status": "DONE",
+      "did": "SagaInstanceRows: bind/fromRow, state and steps JSON via JsonCodec, reusable touchedAggregates mapping, flattened failure, UTC timestamptz",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/SagaInstanceRows.java"
+      ]
+    },
+    "T011": {
+      "status": "DONE",
+      "did": "PostgresStorageProvider: transactional upsert + association replace, single-statement findById/findByAssociation, cascading delete; T009 passes",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T012": {
+      "status": "DONE",
+      "did": "PostgresSagaContextStoreTest: scenarios 4, 5, 6, 14 (context), 15, structured round-trip, delete, null rejection; fails to compile before T013",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresSagaContextStoreTest.java"
+      ]
+    },
+    "T013": {
+      "status": "DONE",
+      "did": "PostgresSagaContextStore: own Connection + explicit commit per call, ON CONFLICT upsert with unquoted values, JsonCodec values, write-order rule in Javadoc; T012 8/8 green, G-003-08 closed",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresSagaContextStore.java",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T014": {
+      "status": "DONE",
+      "did": "SagaLifecycleEntryTest: valid entry per kind, null/negative rejection, present-iff per kind, defensive unmodifiable copy (fails to compile before T017)",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEntryTest.java"
+      ]
+    },
+    "T015": {
+      "status": "DONE",
+      "did": "LifecycleHistoryDerivationTest (plain JUnit): CREATED/terminal first save, step diffs, alphabetical tiebreak, status transitions, idempotent re-save, consecutive sequence numbers",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryDerivationTest.java"
+      ]
+    },
+    "T016": {
+      "status": "DONE",
+      "did": "LifecycleHistoryTest (Testcontainers, SQL only): scenarios 7, 8, 9, unchanged re-save, G-003-04 tiebreak, scenario 14 history cascade",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryTest.java"
+      ]
+    },
+    "T017": {
+      "status": "DONE",
+      "did": "Added core.spi SagaLifecycleEventKind enum and SagaLifecycleEntry record with present-iff validation, defensive copy, and Javadoc for the same-save tiebreak and first-save limitations; JDK + core types only, no interface changes; SagaLifecycleEntryTest 13/13",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEventKind.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEntry.java"
+      ]
+    },
+    "T018": {
+      "status": "DONE",
+      "did": "Package-private LifecycleHistoryDerivation.derive(previousOrNull, incoming, next): CREATED on first save, name-sorted STEP_COMPLETED diffs, terminal COMPLETED/FAILED on status change; LifecycleHistoryDerivationTest 11/11",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryDerivation.java"
+      ]
+    },
+    "T019": {
+      "status": "DONE",
+      "did": "PostgresStorageProvider.save now locks+reads previous (FOR UPDATE OF i, with associations), COALESCE(MAX+1,0) sequence, derives entries, upserts instance, replaces associations, batch-inserts history in one transaction; previous kept at the T025 hook; null-field checks hoisted before SQL; core 363, postgres 58 green",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java",
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/SagaInstanceRows.java"
+      ]
+    },
+    "T021": {
+      "status": "DONE",
+      "did": "ConcurrencyControlTest written",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/ConcurrencyControlTest.java"
+      ]
+    },
+    "T022": {
+      "status": "DONE",
+      "did": "Pure jqwik ForwardTransitionPropertyTest: forward-transition oracle property and idempotent re-save property",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/ForwardTransitionPropertyTest.java"
+      ]
+    },
+    "T023": {
+      "status": "DONE",
+      "did": "Public unchecked ConcurrentSagaUpdateException with sagaId() and a message naming the violated rule",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/ConcurrentSagaUpdateException.java"
+      ]
+    },
+    "T024": {
+      "status": "DONE",
+      "did": "LifecycleHistoryDerivation.requireForwardTransition per the contract; a previously completed step missing from incoming is a violation (G-003-15 decision)",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryDerivation.java"
+      ]
+    },
+    "T020": {
+      "status": "DONE",
+      "did": "Reviewed nested Atomicity class against T020: step-completing save under history-insert fault keeps pre-call snapshot and adds no history; failed first save leaves no instance/association/history row; no change needed (not run, container suite deferred to T032)",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderTest.java"
+      ]
+    },
+    "T025": {
+      "status": "DONE",
+      "did": "save: requireForwardTransition after the FOR UPDATE read and before any write; inTransaction rolls back and rethrows RuntimeExceptions unwrapped; first-save race via RETURNING (xmax = 0) AS inserted throws ConcurrentSagaUpdateException; G-003-17 closed, G-003-19..23 recorded",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T026": {
+      "status": "DONE",
+      "did": "AGENTS.md: 003 Current Status bullet, Not implemented narrowed, Postgres Module Map line, write-order rule (research §8) in Saga Model, Known Gaps pointer to memory.md IDs; memory.md G-003-24..26 added",
+      "files": [
+        "AGENTS.md",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T027": {
+      "status": "DONE",
+      "did": "architecture.md: SPI row, Storage providers row, new SagaLifecycleEntry row, lifecycle history in storage module paragraph, two stale 'no SagaContextStore/StorageProvider implementation' sentences in Feature gaps; @ReadModel removed from annotation row (G-002-01 closed, G-002-04 opened)",
+      "files": [
+        "docs/architecture.md",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T028": {
+      "status": "DONE",
+      "did": "README.md: storage row (Postgres ships StorageProvider+SagaContextStore, MySQL/MongoDB placeholders), core row lists 002/003 contracts (G-002-02 closed), stale Status sentence updated; Getting started untouched",
+      "files": [
+        "README.md",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T029": {
+      "status": "DONE",
+      "did": "Principle III gate closed: no correctness property or Error Handling row in either .kiro design.md changes; outcome line added under III in plan.md Post-Phase 1 Re-Check; pre-003 design drift recorded as G-002-05",
+      "files": [
+        "specs/003-postgres-saga-persistence/plan.md",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T030": {
+      "status": "DONE",
+      "did": "spec.md Assumptions optimistic-check bullet marked superseded by research.md §3; quickstart.md scenario 10 refs now US4-1, FR-008, FR-013",
+      "files": [
+        "specs/003-postgres-saga-persistence/spec.md",
+        "specs/003-postgres-saga-persistence/quickstart.md"
+      ]
+    },
+    "T031": {
+      "status": "DONE",
+      "did": "Principles I/IV static check passed: root+core pom diff vs master empty; no java.sql/javax.sql/org.postgresql/org.testcontainers/tools.jackson/com.fasterxml in core main; storage-postgres pom adds only jackson-databind 3.1.7 (non-test), driver 42.7.4->42.7.14, 6 test-scope deps + version properties. Out-of-scope known: 002 T040 EventDispatcher Javadoc, starter Spring Boot 3.4.1->4.1.2",
+      "files": [
+        "saga-forge-storage-postgres/pom.xml"
+      ]
+    },
+    "T032": {
+      "status": "DONE",
+      "did": "Unit-only run per user decision: clean test-compile and reactor test excluding the 5 container classes, BUILD SUCCESS (core 363, postgres pure 33, example 4), no container started",
+      "files": [
+        "specs/003-postgres-saga-persistence/tasks.md",
+        ".specify/memory/memory.md"
+      ]
+    },
+    "T033": {
+      "status": "DONE",
+      "did": "Mapped quickstart scenarios 1-15 to named tests with evidence levels; synced quickstart, postgres-schema and concurrency-control contracts with the code (xmax first-save race, G-003-15/-19, values unquoted, exception names, not-run note)",
+      "files": [
+        "specs/003-postgres-saga-persistence/quickstart.md",
+        "specs/003-postgres-saga-persistence/contracts/postgres-schema.md",
+        "specs/003-postgres-saga-persistence/contracts/concurrency-control.md"
+      ]
+    }
+  },
+  "decisions": [
+    {
+      "decision": "Instance row saved before the first context save; saga_context FK to saga_instance kept",
+      "why": "Referential integrity and cascade delete",
+      "rejected": "Dropping the FK"
+    },
+    {
+      "decision": "Jackson 3 (tools.jackson 3.1.7) for JSONB, confined to saga-forge-storage-postgres",
+      "why": "Aligned with Spring Boot 4.1.2; core stays zero-dependency",
+      "rejected": "Hand-written codec; Jackson 2; polymorphic default typing"
+    },
+    {
+      "decision": "Concurrency via FOR UPDATE row lock plus forward-transition check, first-save race via RETURNING (xmax = 0)",
+      "why": "No version column needed in the SPI",
+      "rejected": "Optimistic version marker"
+    }
+  ],
+  "verified": [
+    {
+      "what": "Unit-only reactor test run (reported by the spec-task-execution worker, not re-run by the orchestrator)",
+      "command": "/opt/homebrew/bin/mvn -B test -Dsurefire.failIfNoSpecifiedTests=false -Dtest=!SchemaTest,!PostgresStorageProviderTest*,!PostgresSagaContextStoreTest,!LifecycleHistoryTest,!ConcurrencyControlTest",
+      "result": "BUILD SUCCESS: core 363, postgres 33 (JsonCodecTest 20, LifecycleHistoryDerivationTest 11, ForwardTransitionPropertyTest 2), example 4; 0 failures",
+      "warnings": []
+    },
+    {
+      "what": "Full reactor clean test-compile including container test sources",
+      "command": "/opt/homebrew/bin/mvn -B clean test-compile",
+      "result": "BUILD SUCCESS",
+      "warnings": []
+    }
+  ],
+  "concerns": [
+    {
+      "note": "Testcontainers suites (SchemaTest, PostgresStorageProviderTest, PostgresSagaContextStoreTest, LifecycleHistoryTest, ConcurrencyControlTest) compiled but never run after US3, by user decision; all 15 quickstart scenarios lack a run DB test (memory.md G-003-23)",
+      "step": "implement"
+    },
+    {
+      "note": "Plain mvn test still runs the container suites; no tag/profile exclusion yet (G-003-27)",
+      "step": "implement"
+    }
+  ],
+  "step_summaries": {
+    "implement": {
+      "summary": "PostgreSQL StorageProvider and SagaContextStore with lifecycle history and concurrency control; core gains SagaLifecycleEntry/SagaLifecycleEventKind"
+    }
+  },
+  "last_action": "33/33 tasks done; unit tests pass (363 core, 33 postgres, 4 example); container suites unrun by user decision"
+}
