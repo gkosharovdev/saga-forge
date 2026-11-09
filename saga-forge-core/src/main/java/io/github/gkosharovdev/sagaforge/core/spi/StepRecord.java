@@ -17,14 +17,21 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * @param handledCommands   identities of the commands the step sent and whose handling committed with it, in
  *                          dispatch order; an unmodifiable defensive copy, saga-scoped and without duplicates,
  *                          empty unless {@code status == COMPLETED} ({@code specs/005-step-retry} FR-004)
+ * @param completionSequence position of the step in the instance's completion order, counting the first completed
+ *                          step as 1; 0 unless {@code status == COMPLETED}, then at least 1. The engine assigns
+ *                          distinct values within an instance; the compatibility constructors default to 1, so
+ *                          uniqueness is not checked here ({@code specs/006-saga-compensation} FR-005)
+ * @param compensation      the step's compensation state once its instance entered compensation; {@code null}
+ *                          unless {@code status == COMPLETED} ({@code specs/006-saga-compensation} FR-017)
  * @throws IllegalArgumentException if {@code status}, {@code touchedAggregates}, {@code handledCommands} or any of
  *                                  their elements is {@code null}, if aggregates, commands or attempts are given
  *                                  for a step that is not {@link StepStatus#COMPLETED}, if a completed step has
  *                                  fewer than 1 attempt, or if {@code handledCommands} holds an unscoped or
- *                                  duplicate identity
+ *                                  duplicate identity, if {@code completionSequence} breaks its rule, or if a
+ *                                  step that is not completed has a {@code compensation}
  */
 public record StepRecord(StepStatus status, List<AggregateReference> touchedAggregates, int attempts,
-        List<CommandId> handledCommands) {
+        List<CommandId> handledCommands, int completionSequence, StepCompensation compensation) {
 
     private static final StepRecord NOT_RUN = new StepRecord(StepStatus.NOT_RUN, List.of());
 
@@ -55,7 +62,25 @@ public record StepRecord(StepStatus status, List<AggregateReference> touchedAggr
         if (new LinkedHashSet<>(handledCommands).size() != handledCommands.size()) {
             throw new IllegalArgumentException("handledCommands must not contain duplicates: " + handledCommands);
         }
+        if (completed ? completionSequence < 1 : completionSequence != 0) {
+            throw new IllegalArgumentException("completionSequence must be " + (completed ? "at least 1" : "0")
+                    + " when status is " + status + ", but is " + completionSequence);
+        }
+        if (!completed && compensation != null) {
+            throw new IllegalArgumentException(
+                    "compensation must be null unless status is COMPLETED, but status is " + status);
+        }
         touchedAggregates = List.copyOf(new LinkedHashSet<>(touchedAggregates));
+    }
+
+    /**
+     * A record without compensation state: completion sequence 1 if {@code status == COMPLETED}, otherwise 0.
+     *
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public StepRecord(StepStatus status, List<AggregateReference> touchedAggregates, int attempts,
+            List<CommandId> handledCommands) {
+        this(status, touchedAggregates, attempts, handledCommands, status == StepStatus.COMPLETED ? 1 : 0, null);
     }
 
     /**
@@ -95,6 +120,39 @@ public record StepRecord(StepStatus status, List<AggregateReference> touchedAggr
     public static StepRecord completed(List<AggregateReference> touchedAggregates, int attempts,
             List<CommandId> handledCommands) {
         return new StepRecord(StepStatus.COMPLETED, touchedAggregates, attempts, handledCommands);
+    }
+
+    /**
+     * @param touchedAggregates  aggregates touched by the step, in recording order; duplicates are dropped
+     * @param attempts           the attempt in which the step completed; at least 1
+     * @param handledCommands    identities of the commands it sent, in dispatch order
+     * @param completionSequence the step's position in the instance's completion order; at least 1
+     * @return a record for a completed step
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public static StepRecord completed(List<AggregateReference> touchedAggregates, int attempts,
+            List<CommandId> handledCommands, int completionSequence) {
+        return new StepRecord(StepStatus.COMPLETED, touchedAggregates, attempts, handledCommands, completionSequence,
+                null);
+    }
+
+    /**
+     * @param sequence the completion sequence to record
+     * @return this record with {@code completionSequence} replaced
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public StepRecord withCompletionSequence(int sequence) {
+        return new StepRecord(status, touchedAggregates, attempts, handledCommands, sequence, compensation);
+    }
+
+    /**
+     * @param newCompensation the compensation state to record; nullable
+     * @return this record with {@code compensation} replaced
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public StepRecord withCompensation(StepCompensation newCompensation) {
+        return new StepRecord(status, touchedAggregates, attempts, handledCommands, completionSequence,
+                newCompensation);
     }
 
     private static <T> List<T> copyWithoutNulls(List<T> list, String name) {

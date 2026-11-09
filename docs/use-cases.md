@@ -6,8 +6,8 @@ including the failure, retry, and compensation scenarios that motivated several 
 
 ## 1. Happy path: `OrderProcessingSaga`
 
-The simplest shape: three steps, one compensation, living in `saga-forge-example` as a continuously compiled
-reference. Every step is triggered by a Domain Event and returns `void`. A step dispatches Commands through the
+The simplest shape: three steps, one failure outcome and one compensation, living in `saga-forge-example` as a
+continuously compiled reference. Every step is triggered by a Domain Event and returns `void`. A step dispatches Commands through the
 `CommandGateway` field; a `@CommandHandler` on an Aggregate or a service handles each Command and records the
 next Domain Event with `DomainEvents.record`. The `SagaContext` and `CommandGateway` fields are recognized by
 type and populated by the engine.
@@ -47,9 +47,17 @@ public class OrderProcessingSaga {
         // Outcome step: nothing left to dispatch.
     }
 
-    @SagaCompensation(forStep = "processPayment")
-    public void compensatePayment() {
-        // Mapping only; when and how compensation runs is a separate spec.
+    @StartCompensation // failure outcome "rejectOrder": the stock is not there after all
+    @SagaStep(associationProperty = "orderId")
+    public void rejectOrder(StockUnavailableEvent event) {
+        // The trigger records why; the compensation reads what it needs from the SagaContext.
+    }
+
+    @SagaCompensation(forStep = "processPayment") // runs in its own unit of work once the saga compensates
+    public void compensatePayment(CompensationTrigger trigger) {
+        String paymentId = context.getState("paymentId", String.class).orElseThrow();
+        BigDecimal amount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount)); // keyed by its CommandId
     }
 }
 ```
@@ -79,6 +87,11 @@ public class Order {
         if (status != Status.CREATED) {
             throw new IllegalStateException("Order " + orderId + " is already " + status);
         }
+        if (!inStock) {                          // a business failure, recorded rather than thrown
+            status = Status.OUT_OF_STOCK;
+            DomainEvents.record(new StockUnavailableEvent(orderId));
+            return;
+        }
         status = Status.COMPLETED;
         DomainEvents.record(new OrderCompletedEvent(orderId));
     }
@@ -97,6 +110,14 @@ Every Domain Event in this chain triggers a Step of the same saga instance, so t
 saga-scoped unit of work that commits when the `@EndSaga` step `completeOrder` completes: the payment and the
 order change commit together or not at all. A failure anywhere rolls the unit of work back and the saga ends
 `FAILED`; values already written to `SagaContext` stay readable.
+
+If the order turns out to be out of stock, `Order` records `StockUnavailableEvent` instead, and the `@StartCompensation`
+step `rejectOrder` handles it in the same unit of work. That unit of work commits with `processPayment` completed and
+the instance `COMPENSATING` ([006](../specs/006-saga-compensation/spec.md)). The provider's charge happened outside the
+transaction, so it has to be undone: the engine then runs `compensatePayment` in its own unit of work, the refund is
+handled with its own stable `CommandId` as the provider's idempotency key, and the saga ends `COMPENSATED` with
+`rejectOrder` and `StockUnavailableEvent` recorded as its trigger. A repeated `StockUnavailableEvent` is `DUPLICATE`
+and refunds nothing.
 
 ## 2. `CreateBookingSaga`: claim, pay, then one of two outcomes
 
@@ -193,10 +214,30 @@ The saga runs in two saga-scoped units of work:
 If the second unit of work fails (for example the `Booking` constructor throws), it is rolled back in full,
 the first unit of work's claim and payment stay committed, and the saga ends `FAILED` with the failing Step and
 cause recorded. `SagaContext` (`inventoryId`, `amount`, `claimId`, `paymentId`) is stored separately from the
-unit of work and stays readable. Undoing the first unit of work's effects is compensation, defined in a
-separate spec. There, the availability compensation targets `onBookingRequested`, the Step whose
-`ClaimAvailability` Command caused the effect; an earlier draft of this document wrongly mapped it to
-`onAvailabilityClaimed`.
+unit of work and stays readable.
+
+Undoing the first unit of work's effects is compensation ([006](../specs/006-saga-compensation/spec.md)). The
+availability compensation targets `onBookingRequested`, the Step whose `ClaimAvailability` Command caused the effect
+(an earlier draft of this document wrongly mapped it to `onAvailabilityClaimed`). With it, the decline becomes a
+failure outcome instead of an `@EndSaga` step that releases the claim by hand, as in the README:
+
+```java
+    @StartCompensation // failure outcome "declined"
+    @SagaStep(associationProperty = "bookingId")
+    public void onPaymentDeclined(PaymentDeclinedEvent event) {
+        context.putState("declineReason", event.reason());
+    }
+
+    @SagaCompensation(forStep = "onBookingRequested")
+    public void releaseClaim(CompensationTrigger trigger) {
+        commandGateway.send(new ReleaseAvailability(inventoryId(), bookingId(), claimId())); // read from SagaContext
+    }
+```
+
+The decline then ends the saga `COMPENSATED`. A final failure of the second unit of work (the `Booking` constructor
+throwing an exception marked `FinalFailure`) releases the claim the same way, with the failing step and cause as the
+trigger; an unmarked failure still ends `FAILED`. If releasing the claim itself fails, the saga ends
+`REQUIRES_INTERVENTION`, and nothing retries it.
 
 Production lessons this example carries (see architecture.md's feature gaps):
 
@@ -206,9 +247,10 @@ Production lessons this example carries (see architecture.md's feature gaps):
   `CommandId`, and a payment handler that passes it to the gateway as the idempotency key charges once.
 - **Retry** ([005](../specs/005-step-retry/spec.md)). A transient failure (a timeout calling the payment gateway,
   marked `TransientFailure` or listed in the step's `retryOn`) is retried with backoff under the step's
-  `@RetryPolicy`. Running out of attempts ends the saga `FAILED` with classification `EXHAUSTED`.
-- **Domain rejection leads to compensation.** A domain rejection (card declined) should not be retried; it
-  should compensate the availability claim. That behavior is defined in a separate compensation spec.
+  `@RetryPolicy`. Running out of attempts after the claim committed compensates it, with a `RETRIES_EXHAUSTED`
+  trigger carrying the attempt count and last cause.
+- **Domain rejection leads to compensation** ([006](../specs/006-saga-compensation/spec.md)). A domain rejection
+  (card declined) is not retried: it is a `@StartCompensation` step, and the availability claim is compensated.
 
 ## 3. Deferred booking — five related processes, one shared policy family
 

@@ -59,7 +59,7 @@ class OrderProcessingSagaValidationTest {
                 .filter(method -> method.isAnnotationPresent(SagaStep.class))
                 .toList();
 
-        assertThat(steps).hasSize(3).allSatisfy(step -> assertThat(step.getReturnType()).isEqualTo(void.class));
+        assertThat(steps).hasSize(4).allSatisfy(step -> assertThat(step.getReturnType()).isEqualTo(void.class));
     }
 
     @Test

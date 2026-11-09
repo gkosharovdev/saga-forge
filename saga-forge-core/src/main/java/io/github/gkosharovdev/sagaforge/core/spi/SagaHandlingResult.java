@@ -15,10 +15,12 @@ import java.util.List;
  *                        {@code outcome == COMPLETED}
  * @param failure         the failure recorded on the instance; non-null if and only if {@code outcome == FAILED}
  * @param unitOfWorkId    the unit of work that ran; non-null if and only if one ran ({@code WAITING},
- *                        {@code COMPLETED}, {@code FAILED}, or {@code NOT_HANDLED} after a conflict)
- * @param handoffFailures the exceptions thrown by the after-commit handoff of the committed unit of work; non-null,
- *                        no {@code null} element, non-empty only for {@code WAITING} or {@code COMPLETED}; an
- *                        unmodifiable defensive copy
+ *                        {@code COMPLETED}, {@code FAILED}, {@code NOT_HANDLED} after a conflict, and for
+ *                        {@code COMPENSATED} and {@code REQUIRES_INTERVENTION} the last unit of work of the
+ *                        compensation run)
+ * @param handoffFailures the exceptions thrown by the after-commit handoffs of the committed units of work; non-null,
+ *                        no {@code null} element, non-empty only for {@code WAITING}, {@code COMPLETED},
+ *                        {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}; an unmodifiable defensive copy
  * @throws IllegalArgumentException if {@code sagaType}, {@code outcome} or {@code handoffFailures} is {@code null},
  *                                  if {@code handoffFailures} contains {@code null} or is non-empty for another
  *                                  outcome, or if {@code outcomeStep} or {@code failure} is present or absent
@@ -55,10 +57,11 @@ public record SagaHandlingResult(
                 throw new IllegalArgumentException("handoffFailures must not contain null elements");
             }
         }
-        boolean committed = outcome == HandlingOutcome.WAITING || outcome == HandlingOutcome.COMPLETED;
+        boolean committed = outcome == HandlingOutcome.WAITING || outcome == HandlingOutcome.COMPLETED
+            || outcome == HandlingOutcome.COMPENSATED || outcome == HandlingOutcome.REQUIRES_INTERVENTION;
         if (!committed && !handoffFailures.isEmpty()) {
-            throw new IllegalArgumentException(
-                "handoffFailures must be empty unless outcome is WAITING or COMPLETED, but outcome is " + outcome);
+            throw new IllegalArgumentException("handoffFailures must be empty unless outcome is WAITING, COMPLETED, "
+                + "COMPENSATED or REQUIRES_INTERVENTION, but outcome is " + outcome);
         }
         return List.copyOf(handoffFailures);
     }

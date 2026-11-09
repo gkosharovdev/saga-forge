@@ -9,8 +9,9 @@ saga instance, runs the steps triggered within one unit of work together (all of
 do), persists each step's status and the saga's `SagaContext` values, and waits between units of
 work for events from outside. A step can declare a retry policy for transient failures, and every command it
 sends carries a stable identity, so a retried or redelivered step never applies a command's effect twice.
-Compensation is declared per step with `@SagaCompensation`; its semantics are defined in a future spec. You write
-steps; Saga Forge forges the process around them.
+When the process fails after earlier units of work committed, a business failure marked with `@StartCompensation`
+or a final technical failure, Saga Forge undoes those steps with their `@SagaCompensation` methods, most recent
+first, each in its own unit of work. You write steps; Saga Forge forges the process around them.
 
 ```java
 @Saga
@@ -26,6 +27,7 @@ public class CreateBookingSaga {
     @StartSaga
     @SagaStep(associationProperty = "bookingId")
     public void onBookingRequested(BookingRequestedEvent event) {
+        context.putState("bookingId", event.bookingId());
         context.putState("inventoryId", event.inventoryId());
         context.putState("amount", event.amount());
         commandGateway.send(new ClaimAvailability(
@@ -56,13 +58,20 @@ public class CreateBookingSaga {
         // nothing left to dispatch
     }
 
-    // Outcome "declined": release the claimed availability.
-    @EndSaga
+    // Failure outcome "declined": the claim committed in the first unit of work, so it is compensated.
+    @StartCompensation
     @SagaStep(associationProperty = "bookingId")
     public void onPaymentDeclined(PaymentDeclinedEvent event) {
+        context.putState("declineReason", event.reason());
+    }
+
+    // Undoes the claim that onBookingRequested asked for; runs in its own unit of work once the saga compensates.
+    @SagaCompensation(forStep = "onBookingRequested")
+    public void releaseClaim(CompensationTrigger trigger) {
+        String bookingId = context.getState("bookingId", String.class).orElseThrow();
         String inventoryId = context.getState("inventoryId", String.class).orElseThrow();
         String claimId = context.getState("claimId", String.class).orElseThrow();
-        commandGateway.send(new ReleaseAvailability(inventoryId, event.bookingId(), claimId));
+        commandGateway.send(new ReleaseAvailability(inventoryId, bookingId, claimId));
     }
 }
 ```
@@ -106,11 +115,14 @@ public class PaymentService {
 
 The first unit of work runs `onBookingRequested` and `onAvailabilityClaimed`. No step reacts to
 `PaymentInitiatedEvent`, so that unit of work commits there and the saga waits `RUNNING`. The payment
-provider's callback starts the second unit of work, which reaches one of the two `@EndSaga` outcomes. If a
-step or handler fails, its unit of work rolls back. A transient failure (marked `TransientFailure` or listed in
-`retryOn`) is retried under the failing step's policy, re-running the whole unit of work; any other failure, or
-running out of attempts, ends the saga `FAILED` with the failure's classification and attempt count. An event
-for a step that already completed is reported `DUPLICATE` and runs nothing. Loading and saving aggregates
+provider's callback starts the second unit of work. A confirmation reaches the `@EndSaga` outcome; a decline is the
+`@StartCompensation` step, whose commit moves the saga to `COMPENSATING`, after which the engine runs `releaseClaim`
+for the claim that committed earlier and the saga ends `COMPENSATED`. If a step or handler fails, its unit of work
+rolls back. A transient failure (marked `TransientFailure` or listed in `retryOn`) is retried under the failing
+step's policy, re-running the whole unit of work. A final failure (marked `FinalFailure`) or running out of attempts
+compensates the steps that already committed; an unmarked failure ends the saga `FAILED`. A compensation that fails
+is never retried: the saga ends `REQUIRES_INTERVENTION`, and the stored instance shows what was and was not undone.
+An event for a step that already completed is reported `DUPLICATE` and runs nothing. Loading and saving aggregates
 stays in your code, through `@AggregateLoader`/`@AggregateSaver` methods or, once the starter ships, its
 Spring Data adapter (not implemented yet).
 
@@ -175,7 +187,9 @@ a time, an outbox-ready after-commit handoff, and fail-fast startup validation. 
 in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
 `StorageProvider` joins the engine's transaction (feature 004). Step retry with failure classification, stable
 command identities and duplicate-event detection are implemented in the engine and persisted by Postgres (feature
-005). Not implemented yet: the Spring Boot starter, the transports, MySQL and MongoDB storage, and compensation. See
+005). Compensation (feature 006) runs `@SagaCompensation` methods after a `@StartCompensation` business failure or a
+final or exhausted step failure, in reverse completion order, and resumes after a crash. Not implemented yet: the
+Spring Boot starter, the transports, and MySQL and MongoDB storage. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as

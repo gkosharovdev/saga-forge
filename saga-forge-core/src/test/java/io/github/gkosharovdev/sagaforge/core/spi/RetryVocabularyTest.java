@@ -182,12 +182,13 @@ class RetryVocabularyTest {
             assertThatThrownBy(() -> new SagaLifecycleEntry("saga-1", SagaLifecycleEventKind.ATTEMPT_FAILED,
                     null, List.of(), null, transientFailure(1), NOW))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("stepName must be non-null if and only if kind is STEP_COMPLETED or "
-                            + "ATTEMPT_FAILED");
+                    .hasMessageContaining("stepName must be non-null if and only if kind is STEP_COMPLETED, "
+                            + "ATTEMPT_FAILED, STEP_COMPENSATED or COMPENSATION_FAILED");
             assertThatThrownBy(() -> new SagaLifecycleEntry("saga-1", SagaLifecycleEventKind.ATTEMPT_FAILED,
                     "charge", List.of(), null, null, NOW))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("failure must be non-null if and only if kind is FAILED or ATTEMPT_FAILED");
+                    .hasMessageContaining("failure must be non-null if and only if kind is FAILED, ATTEMPT_FAILED or "
+                            + "COMPENSATION_FAILED");
         }
     }
 }

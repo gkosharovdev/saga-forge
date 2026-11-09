@@ -26,7 +26,7 @@
   `SagaFailure`; `SagaLifecycle` gains `recordStepCompleted`, `complete(sagaId, outcomeStep)` and `fail`. The
   scanner (implemented) gains `validateAll` → `ValidationReport`. Execution semantics are proven only by the
   test-only `SagaTestHarness` in `saga-forge-core/src/test/.../core/execution/harness/` — it is not an engine.
-- Implemented and tested against Postgres via Testcontainers (the concurrency suites not yet run, G-003-23), added
+- Implemented and tested against Postgres via Testcontainers (all container suites ran green on 2026-11-09), added
   by `specs/003-postgres-saga-persistence`: `saga-forge-storage-postgres` implements
   `StorageProvider` (`PostgresStorageProvider`) and `SagaContextStore` (`PostgresSagaContextStore`) over a
   caller-supplied `DataSource`, with the DDL shipped as the classpath resource `schema.sql`; failures surface as
@@ -52,8 +52,18 @@
   The engine's `AttemptLoop` re-runs a unit of work after an in-process, bounded wait (`RetryPause`,
   `maxTotalRetryBackoff`, default 30 s). Postgres persists the new fields; existing databases apply
   `schema-upgrade-005.sql`.
-- Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; the 004 container
-  tests have not been run yet (G-003-23).
+- Implemented and tested, added by `specs/006-saga-compensation`: compensation. `@StartCompensation` marks a
+  business-failure step (with `@SagaStep`; scanner rules R20 to R22, Properties 30 to 32); a `@SagaCompensation`
+  method returns `void` and takes no parameter or one `core.compensation.CompensationTrigger`. The engine compensates
+  every other `COMPLETED` step, most recently completed first (`StepRecord.completionSequence`), each in its own unit
+  of work (`CompensationRun`/`CompensationUnitOfWork`), after a `@StartCompensation` step commits or a `FINAL`/
+  `EXHAUSTED` failure once a step committed (`CompensationStartWrite`); an `UNCLASSIFIED` failure, or one with nothing
+  committed, still ends `FAILED`. New terminal statuses `COMPENSATED` and `REQUIRES_INTERVENTION` (a failed
+  compensation, never retried); `SagaInstance.compensationTrigger`, `StepRecord.compensation` (`StepCompensation`),
+  five lifecycle kinds; any event for a `COMPENSATING` instance resumes compensation (checked before the duplicate
+  check). Postgres persists it; existing databases apply `schema-upgrade-006.sql`.
+- Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; they all passed on
+  2026-11-09 (186 tests), closing G-003-23.
 - Not implemented: MySQL and MongoDB storage, both transports (no `EventDispatcher` implementation), and Spring Boot
   autoconfiguration. The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb`,
   `saga-forge-transport-*`, and `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
@@ -103,8 +113,9 @@
   `@AggregateIdentifier` field (Properties 16–17). Handlers record them with static
   `DomainEvents.record(...)` (no base class/interface on aggregates); outside a unit of work, publish via
   `EventPublisher`.
-- Saga-scoped unit of work: commits at the first `@EndSaga` step or at a wait point (no queued event left for
-  the instance); any failure rolls the whole unit of work back and the saga is `FAILED`.
+- Saga-scoped unit of work: commits at the first `@EndSaga` step, at the first `@StartCompensation` step, or at a
+  wait point (no queued event left for the instance); any failure rolls the whole unit of work back, and the saga is
+  `FAILED`, or compensates if the failure is `FINAL`/`EXHAUSTED` and an earlier unit of work committed.
   `SagaContext` values live in a separate `SagaContextRecord` and survive the rollback.
 - Write order (decided, `specs/003-postgres-saga-persistence/research.md` §8): a `SagaContextRecord` is saved
   only after its `SagaInstance` row exists. The engine's unit of work persists the instance with
@@ -114,12 +125,15 @@
 - Validate a whole model with `AnnotationScanner.validateAll(...)` → `ValidationReport` (cross-class rules,
   Properties 14–20); `validate(...)` covers single-saga rules only.
 - Compensation is step-targeted: `@SagaCompensation(forStep = "...")`, where `forStep` must name an existing
-  `@SagaStep` method on the same class.
+  `@SagaStep` method on the same class (not a `@StartCompensation` step), at most one per step. A business failure is
+  a `@StartCompensation` step (with `@SagaStep`, never with `@StartSaga`/`@EndSaga`); its name is the recorded
+  failure outcome.
 - Canonical example: `saga-forge-example`'s `OrderProcessingSaga` (`handleOrderCreated` (`@StartSaga`) →
-  `processPayment` → `completeOrder` (`@EndSaga`), all on `associationProperty = "orderId"`):
+  `processPayment` → `completeOrder` (`@EndSaga`), or `rejectOrder` (`@StartCompensation`, on
+  `StockUnavailableEvent`, which `Order` records when out of stock), all on `associationProperty = "orderId"`):
   `ProcessPaymentCommand` handled by `PaymentService` (service), `ReserveStockCommand` handled by `Order`
-  (aggregate instance method, loaded/saved through `OrderRepository`); `compensatePayment` mapped to
-  `processPayment`.
+  (aggregate instance method, loaded/saved through `OrderRepository`); `compensatePayment(CompensationTrigger)` mapped
+  to `processPayment` sends `RefundPaymentCommand`, handled by `PaymentService` with its `CommandId` as the key.
 - Transport is event-driven (choreography-shaped at delivery); the saga instance keeps durable,
   orchestration-shaped process state per `docs/architecture.md`. Don't conflate the two — the SPI contracts are
   transport-agnostic by design, so don't leak Kafka- or in-memory-specific assumptions into `saga-forge-core`.
@@ -144,7 +158,7 @@
   `G-003-01`); check it before extending a feature.
 - See `docs/architecture.md#feature-gaps` for the full backlog: queryable process-level state (highest
   priority), transaction boundary relative to the triggering dispatch, and failure categorization with
-  compensation dispatch (`specs/006-saga-compensation`, specified, builds on 005's classification).
+  compensation dispatch (implemented by `specs/006-saga-compensation`).
 - Retry attributes live on `@SagaStep(retry = @RetryPolicy(...))`. Change them only together with
   `.kiro/specs/saga-forge-framework/design.md` (R19, Property 29); keep them framework-owned, never an alias of a
   third-party retry annotation. A handler that calls an outside system takes a `CommandId` parameter and passes
@@ -154,7 +168,12 @@
   the identity on (G-005-03); the triggering request is not deduplicated before a saga exists (G-005-04); a crash
   during a fresh event's first attempt is not counted (G-005-05); a retry of a start unit of work does not resume
   after a crash (G-005-06).
-- No compensation-vs-intervention-required outcome categorization exists in code yet.
+- Compensation limitations, see memory.md G-006-02 to G-006-09: no confirmation wait for an undo (G-006-02); no
+  operator path out of `REQUIRES_INTERVENTION` (G-006-03); no "irreversible step" marker (G-006-04); a `COMPENSATING`
+  instance with no further event never resumes (G-006-05); a compensation sees the trigger's event type, not the
+  event (G-006-06); upgraded instances may get a name-ordered `completionSequence` (G-006-07); compensations block the
+  caller and hold the instance (G-006-08); a failed compensation is never retried (G-006-09). A compensation
+  interrupted before its commit runs again on resume, so its commands must be idempotent (pass `CommandId` on).
 - `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the engine leaves
   `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
 - Engine limitations, see memory.md G-ENG-05 to G-ENG-13: a crash between the creation write and the first unit of
@@ -164,8 +183,8 @@
   `FOR NO KEY UPDATE` reasoning is unverified against a database (G-ENG-11); `begin()` suspending vs. rejecting a
   host transaction is boundary-specific (G-ENG-12).
 - Deferred to the Spring starter: a Spring Data repository adapter behind `AggregateResolver`.
-- Compensation semantics (when/how `@SagaCompensation` runs) belong to a separate spec; a `FAILED` saga's
-  committed effects currently stay in place.
+- A `FAILED` saga (an `UNCLASSIFIED` failure) keeps its committed effects in place; only `FINAL`/`EXHAUSTED`
+  failures and `@StartCompensation` steps compensate.
 - A retried attempt sees the `SagaContext` values earlier attempts wrote (they live outside the transaction); steps
   should write them so that writing again is harmless.
 - Deferred: whether a `@StartSaga` step may also be a `@CommandHandler`. Dropped for now: programmatic abort

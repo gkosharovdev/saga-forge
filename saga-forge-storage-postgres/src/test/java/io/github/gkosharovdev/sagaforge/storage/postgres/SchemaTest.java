@@ -190,6 +190,68 @@ class SchemaTest {
         }
     }
 
+    @Test
+    @DisplayName("006: CHECK trigger_iff_compensation requires a trigger exactly while compensating or compensated")
+    void triggerIffCompensation() throws SQLException {
+        insertInstance("s-1", "RUNNING", null, null);
+        execute("UPDATE saga_instance SET status = 'COMPENSATING', compensation_trigger = '{}'::jsonb "
+                + "WHERE saga_id = ?", "s-1");
+
+        assertThatThrownBy(() -> execute("UPDATE saga_instance SET compensation_trigger = NULL WHERE saga_id = ?",
+                "s-1"))
+                .isInstanceOf(SQLException.class)
+                .satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo(CHECK_VIOLATION))
+                .hasMessageContaining("trigger_iff_compensation");
+        insertInstance("s-2", "RUNNING", null, null);
+        assertThatThrownBy(() -> execute("UPDATE saga_instance SET compensation_trigger = '{}'::jsonb "
+                + "WHERE saga_id = ?", "s-2"))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("trigger_iff_compensation");
+    }
+
+    @Test
+    @DisplayName("006: schema-upgrade-006.sql backfills sequences from history, then by name, and is idempotent")
+    void upgradeScript006Applies() throws SQLException {
+        try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("DROP SCHEMA IF EXISTS pre006 CASCADE");
+            statement.execute("CREATE SCHEMA pre006");
+            statement.execute("SET search_path TO pre006");
+            try {
+                for (String sql : PostgresTestSupport.statements("schema-before-006.sql")) {
+                    statement.execute(sql);
+                }
+                statement.execute("INSERT INTO saga_instance (saga_id, saga_type, state, status, created_at,"
+                        + " last_modified_at, steps) VALUES ('old', 'com.example.OrderSaga', '{}'::jsonb, 'RUNNING',"
+                        + " now(), now(), '{\"a\": {\"status\": \"COMPLETED\", \"touchedAggregates\": []},"
+                        + " \"b\": {\"status\": \"COMPLETED\", \"touchedAggregates\": []},"
+                        + " \"c\": {\"status\": \"COMPLETED\", \"touchedAggregates\": []},"
+                        + " \"d\": {\"status\": \"NOT_RUN\", \"touchedAggregates\": []}}'::jsonb)");
+                statement.execute("INSERT INTO saga_lifecycle_history (saga_id, sequence_number, kind, step_name,"
+                        + " occurred_at) VALUES ('old', 1, 'CREATED', NULL, now()),"
+                        + " ('old', 2, 'STEP_COMPLETED', 'b', now()), ('old', 3, 'STEP_COMPLETED', 'a', now())");
+                for (int run = 0; run < 2; run++) {
+                    for (String sql : PostgresTestSupport.statements("schema-upgrade-006.sql")) {
+                        statement.execute(sql);
+                    }
+                    try (ResultSet row = statement.executeQuery("SELECT steps -> 'a' ->> 'sequence',"
+                            + " steps -> 'b' ->> 'sequence', steps -> 'c' ->> 'sequence', steps -> 'd' ->> 'sequence',"
+                            + " compensation_trigger FROM saga_instance")) {
+                        assertThat(row.next()).isTrue();
+                        assertThat(row.getString(1)).as("a, second in history").isEqualTo("2");
+                        assertThat(row.getString(2)).as("b, first in history").isEqualTo("1");
+                        assertThat(row.getString(3)).as("c, no history row").isEqualTo("3");
+                        assertThat(row.getString(4)).as("d, not run").isNull();
+                        assertThat(row.getString(5)).isNull();
+                    }
+                }
+            } finally {
+                statement.execute("SET search_path TO public");
+                statement.execute("DROP SCHEMA pre006 CASCADE");
+            }
+        }
+    }
+
     private static void execute(String sql, Object... params) throws SQLException {
         try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {

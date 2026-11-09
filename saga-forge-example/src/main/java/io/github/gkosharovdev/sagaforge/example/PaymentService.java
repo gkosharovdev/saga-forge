@@ -4,6 +4,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import io.github.gkosharovdev.sagaforge.example.commands.ProcessPaymentCommand;
+import io.github.gkosharovdev.sagaforge.example.commands.RefundPaymentCommand;
 import io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent;
 
 /**
@@ -31,5 +32,14 @@ public class PaymentService {
     public void handle(ProcessPaymentCommand command, CommandId commandId) {
         String paymentId = provider.charge(commandId.value(), command.amount());
         DomainEvents.record(new PaymentProcessedEvent(paymentId, command.orderId(), command.amount()));
+    }
+
+    /**
+     * Refunds a payment; sent by the saga's compensation. The command identity is again the provider's idempotency
+     * key, so a compensation that runs again after a crash refunds once.
+     */
+    @CommandHandler
+    public void handle(RefundPaymentCommand command, CommandId commandId) {
+        provider.refund(commandId.value(), command.paymentId(), command.amount());
     }
 }

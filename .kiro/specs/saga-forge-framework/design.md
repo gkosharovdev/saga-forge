@@ -173,6 +173,16 @@ public @interface EndSaga {
 ```
 Marks a method that terminates a saga instance. Must co-occur with `@SagaStep`. At least one per saga class.
 
+#### @StartCompensation
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface StartCompensation {
+}
+```
+Marks the step that handles a business-failure event (`specs/006-saga-compensation` FR-001). Must co-occur with `@SagaStep` and never with `@StartSaga` or `@EndSaga` (R20). Its method name is the failure outcome recorded in the instance's `CompensationTrigger`, the way an `@EndSaga` step's name is the success outcome. When its unit of work commits, the instance enters `COMPENSATING` and the engine compensates every other completed step, most recently completed first. Zero or more per saga class; R3 still requires at least one `@EndSaga`.
+
 #### @SagaStep
 ```java
 @Target(ElementType.METHOD)
@@ -211,7 +221,7 @@ public @interface SagaCompensation {
     String forStep();
 }
 ```
-Marks a compensation handler. The `forStep` attribute references the method name of the `@SagaStep` to compensate. The scanner validates that the referenced method exists and is annotated with `@SagaStep`.
+Marks a compensation handler. The `forStep` attribute references the method name of the `@SagaStep` to compensate. The scanner validates that the referenced method exists and is annotated with `@SagaStep` (R6). Since `specs/006-saga-compensation` the method returns `void`, declares no parameter or one parameter of type `core.compensation.CompensationTrigger`, and is not itself a `@SagaStep` (R21); at most one compensation targets a step, and none targets a `@StartCompensation` step (R22). The engine runs it, in its own saga-scoped unit of work, when the saga compensates after the targeted step committed (`specs/006-saga-compensation/contracts/compensation-run.md`).
 
 #### @DomainEvent
 ```java
@@ -401,8 +411,11 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R17 | — (spec 002 FR-013) | `@AggregateLoader`: exactly one parameter, returns an `@Aggregate` type; `@AggregateSaver`: exactly one `@Aggregate`-typed parameter (host rule, `validateAll` only) |
 | R18 | — (spec 002 FR-014) | At most one well-formed `@AggregateLoader` and one well-formed `@AggregateSaver` per aggregate type (model rule, `validateAll` only) |
 | R19 | — (`specs/005-step-retry` FR-012) | Every `@SagaStep.retry` policy is valid: `maxAttempts >= 1`; `initialBackoffMillis >= 0`; `multiplier` finite and `>= 1.0`; `maxBackoffMillis` is `0` or `>= initialBackoffMillis`; `retryOn` names no `java.lang.Error` type; with `maxAttempts == 1` every other attribute keeps its default |
+| R20 | — (`specs/006-saga-compensation` FR-001a) | `@StartCompensation` methods also carry `@SagaStep` and carry neither `@StartSaga` nor `@EndSaga` |
+| R21 | — (`specs/006-saga-compensation` FR-009, FR-010) | `@SagaCompensation` methods return `void`, declare no parameter or exactly one parameter of type `CompensationTrigger`, and are not `@SagaStep` methods |
+| R22 | — (`specs/006-saga-compensation` FR-008) | At most one `@SagaCompensation` targets a given step, and none targets a `@StartCompensation` step |
 
-R1 to R11 and R19 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 run only in `validateAll`.
+R1 to R11 and R19 to R22 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 run only in `validateAll`.
 
 ```java
 package io.github.gkosharovdev.sagaforge.core.scanner;
@@ -429,6 +442,9 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
         validateRetryPolicies(sagaClass, stepMethods, errors);             // R19
+        validateStartCompensation(sagaClass, errors);                      // R20
+        validateCompensationShape(sagaClass, errors);                      // R21
+        validateCompensationTargets(sagaClass, stepMethods, errors);       // R22
 
         return new SagaValidationResult(sagaClass, errors);
     }
@@ -550,11 +566,17 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 public enum SagaStatus {
     CREATED,
     RUNNING,
-    COMPENSATING,
+    COMPENSATING,            // compensations running (specs/006-saga-compensation)
     COMPLETED,
-    FAILED
+    FAILED,
+    COMPENSATED,             // terminal: every applicable compensation committed (006)
+    REQUIRES_INTERVENTION    // terminal: a compensation failed; never retried (006)
 }
 ```
+
+`COMPLETED`, `FAILED`, `COMPENSATED` and `REQUIRES_INTERVENTION` are terminal. `SagaInstance.compensationTrigger` is
+non-null if and only if the status is `COMPENSATING`, `COMPENSATED` or `REQUIRES_INTERVENTION`
+(`specs/006-saga-compensation/data-model.md`).
 
 ## Data Models
 
@@ -773,7 +795,7 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 ### Property 27: Lifecycle history order
 
-*For any* engine-driven saga instance, its persisted lifecycle entries shall be `CREATED`, then for each committed unit of work its `STEP_COMPLETED` entries in completion order followed by `COMPLETED` if that unit of work ended the saga, then `FAILED` if the saga failed; no entry of a rolled-back unit of work shall be persisted.
+*For any* engine-driven saga instance, its persisted lifecycle entries shall be `CREATED`, then for each committed unit of work its `STEP_COMPLETED` entries in completion order followed by `COMPLETED` if that unit of work ended the saga, then `FAILED` if the saga failed; no entry of a rolled-back unit of work shall be persisted. Since `specs/006-saga-compensation`, a compensating instance's entries continue with `COMPENSATION_STARTED`, one `STEP_COMPENSATED` per compensation committed in reverse completion order, and finally either `COMPENSATED` or `COMPENSATION_FAILED` followed by `REQUIRES_INTERVENTION`.
 
 **Validates: Feature spec `specs/004-saga-engine` FR-033, SC-010** (test: `LifecycleHistoryPropertyTest`)
 
@@ -789,9 +811,39 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/005-step-retry` FR-011, FR-012** (test: `RetryPolicyValidationTest`, including the property `retryPolicyValidity`)
 
+### Property 30: StartCompensation placement
+
+*For any* `@Saga` class, the `AnnotationScanner` shall report one error for each `@StartCompensation` method that lacks `@SagaStep`, and one for each that also carries `@StartSaga` or `@EndSaga`, and no R20 error otherwise.
+
+**Validates: Feature spec `specs/006-saga-compensation` FR-001, FR-001a** (test: `StartCompensationValidationTest`, including the property `startCompensationPlacement`)
+
+### Property 31: Compensation method shape
+
+*For any* `@SagaCompensation` method of a `@Saga` class, the `AnnotationScanner` shall report one error if it does not return `void`, one if it declares any parameters other than a single `CompensationTrigger`, and one if it is also a `@SagaStep`, and no R21 error otherwise.
+
+**Validates: Feature spec `specs/006-saga-compensation` FR-009, FR-010** (test: `CompensationValidationTest`, including the property `compensationShape`)
+
+### Property 32: One compensation per step
+
+*For any* `@Saga` class, the `AnnotationScanner` shall report one error for each step targeted by more than one `@SagaCompensation`, and one for each `@SagaCompensation` targeting a `@StartCompensation` step.
+
+**Validates: Feature spec `specs/006-saga-compensation` FR-008** (test: `CompensationValidationTest`)
+
+### Property 33: Compensation selection and order
+
+*For any* engine-driven saga instance that enters compensation, the compensations run shall be exactly those declared for its `COMPLETED` steps other than the triggering `@StartCompensation` step, in decreasing order of completion; a step whose unit of work rolled back shall never be compensated, and a completed step without a compensation shall be recorded `NOTHING_TO_COMPENSATE`.
+
+**Validates: Feature spec `specs/006-saga-compensation` FR-005, FR-007, SC-002** (test: `CompensationSelectionPropertyTest`)
+
+### Property 34: Each compensation at most once
+
+*For any* engine-driven saga instance and any point at which the process stops during compensation, handling a later event for the instance shall commit each remaining compensation exactly once and never run an already committed compensation again (a compensation whose own unit of work the stop rolled back runs again, with the same command identities).
+
+**Validates: Feature spec `specs/006-saga-compensation` FR-004, FR-012, SC-003** (tests: `CompensationResumePropertyTest`, `CompensationFaultInjectionTest`)
+
 ### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
 
-None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged.
+None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged. `specs/006-saga-compensation` adds `@StartCompensation`, rules R20 to R22 and Properties 30 to 34, extends Property 27 with the compensation entries, and leaves Properties 1 to 26, 28 and 29 unchanged.
 
 ## Error Handling
 
@@ -831,8 +883,15 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Duplicate loader (R18, model error) | >1 well-formed `@AggregateLoader` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateLoader: {className}.{methodName}, {className}.{methodName}"` |
 | Duplicate saver (R18, model error) | >1 well-formed `@AggregateSaver` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateSaver: {className}.{methodName}, {className}.{methodName}"` |
 | Invalid retry policy (R19) | A `@SagaStep.retry` attribute violates R19 | `"@SagaStep method {methodName} in {className} has an invalid retry policy: {attribute} {reason}"` where `{reason}` is one of `must be at least 1, found {value}`, `must not be negative, found {value}`, `must be a finite number of at least 1.0, found {value}`, `must be 0 or at least initialBackoffMillis {initial}, found {value}`, `must not name Error type {typeName}`, `must keep its default when maxAttempts is 1` |
+| StartCompensation without @SagaStep (R20) | `@StartCompensation` without `@SagaStep` | `"Method {methodName} in {className} is annotated with @StartCompensation but missing @SagaStep"` |
+| StartCompensation with another lifecycle annotation (R20) | `@StartCompensation` with `@StartSaga` or `@EndSaga` | `"@StartCompensation method {methodName} in {className} cannot also be annotated with @{lifecycle}"` |
+| Compensation returns a value (R21) | `@SagaCompensation` method with non-`void` return type | `"@SagaCompensation method {methodName} in {className} must return void"` |
+| Compensation parameters (R21) | Parameters other than none or one `CompensationTrigger` | `"@SagaCompensation method {methodName} in {className} must declare no parameter or one CompensationTrigger parameter"` |
+| Compensation is a step (R21) | `@SagaCompensation` method also `@SagaStep` | `"@SagaCompensation method {methodName} in {className} cannot also be annotated with @SagaStep"` |
+| Duplicate compensation (R22) | >1 `@SagaCompensation` for one step | `"@SagaCompensation methods {methodName}, {methodName} in {className} both compensate step {stepName}"` |
+| Compensation of a trigger step (R22) | `forStep` names a `@StartCompensation` step | `"@SagaCompensation method {methodName} in {className} compensates step {stepName}, which is a @StartCompensation step"` |
 
-All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, and R18 messages are sorted in ascending lexicographic order (method names for R9, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.
+All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, R18 and R22 messages are sorted in ascending lexicographic order (method names for R9 and R22, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.
 
 ### Null Safety
 

@@ -8,7 +8,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 
 | Layer | State |
 |---|---|
-| Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
+| Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@StartCompensation`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
 | `AnnotationScanner` / `ReflectiveAnnotationScanner` / `SagaValidationResult` / `validateAll` → `ValidationReport` | Implemented, tested |
 | `DomainEvents.record` / `DomainEventScope` (thread-bound event recording) | Implemented, tested |
 | `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined; implemented by the engine (`saga-forge-engine`, [004](../specs/004-saga-engine/spec.md)), tested |
@@ -19,7 +19,8 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `EventHandoff`/`HandedOffEvents`, `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the engine, tested; `JdbcTransactionBoundary` in the Postgres module |
 | `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the engine, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
 | Saga engine runtime (`saga-forge-engine`: event routing, saga-scoped unit of work, one unit of work per instance, outbox-ready handoff, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
-| Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the engine, persisted by Postgres, unit-tested ([005](../specs/005-step-retry/spec.md)); the Postgres container suites are not yet run |
+| Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the engine, persisted by Postgres, tested, including the Postgres container suites ([005](../specs/005-step-retry/spec.md)) |
+| Compensation (`@StartCompensation`, `@SagaCompensation` run by the engine, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`REQUIRES_INTERVENTION`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the engine, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Transports (in-memory, Kafka) | Not implemented |
 | Spring Boot autoconfiguration | Not implemented |
@@ -228,25 +229,34 @@ transaction already active on the thread depends on the `TransactionBoundary` (G
 
 ### Failure categorization and automatic compensation dispatch
 
-A step's failure must resolve to exactly one of two outcomes:
+This is now **implemented** ([006](../specs/006-saga-compensation/spec.md), building on the classification of
+[005](../specs/005-step-retry/spec.md)). Everything inside one saga-scoped unit of work is already atomic, so
+compensation undoes only steps whose units of work **already committed**:
 
-- **Compensatable** — a `@SagaCompensation(forStep = "...")` method exists for the failed step (or for a
-  prior completed step whose effect must now be undone), and running it returns the aggregate(s) involved to
-  a consistent state.
-- **Requires intervention** — no compensation applies, or compensation itself cannot proceed safely. The saga
-  must be left in a terminal, inspectable failed state (not silently retried forever) so a human can decide
-  the next action.
+- **Triggers.** A business failure is declared: the step that handles the failure event carries
+  `@StartCompensation` next to `@SagaStep`, and its commit moves the instance to `COMPENSATING`. A technical failure
+  starts compensation only when 005 classifies it `FINAL` (marked `FinalFailure`) or `EXHAUSTED` (retries used up)
+  and at least one step had committed. An `UNCLASSIFIED` failure, or a final one with nothing committed, still ends
+  the saga `FAILED`. The instance records the `CompensationTrigger` once: kind, step, event type or failure, time.
+- **What runs, in which order.** Every `COMPLETED` step except the triggering `@StartCompensation` step, most
+  recently completed first, by `StepRecord.completionSequence`. A step without a `@SagaCompensation` is
+  `NOTHING_TO_COMPENSATE`; a step whose unit of work rolled back is never compensated.
+- **How it runs.** Each compensation runs in its own saga-scoped unit of work, in the handling call that triggered
+  compensation and under the instance lock: it may dispatch commands (with 005 identities scoped to the compensation
+  method) and read and write `SagaContext`, and it may take the `CompensationTrigger` as its parameter. Its effects
+  and its `COMPENSATED` mark commit together, and the last commit also ends the saga `COMPENSATED`. No forward step
+  runs while compensating.
+- **Requires intervention.** A compensation that fails is never retried: the unwinding stops, the step is recorded
+  `FAILED` with the classified failure, steps not reached stay `NOT_ATTEMPTED`, and the saga ends
+  `REQUIRES_INTERVENTION`. The stored instance alone shows the trigger and every committed step's compensation status
+  and time.
+- **Resume.** After a crash, the next event routed to a `COMPENSATING` instance (the redelivered trigger, or any
+  forward event, whose step does not run) resumes with the first compensation not yet committed.
 
-A failed saga is now recorded explicitly: after a rollback, the instance is written as `FAILED` with a
-`SagaFailure` (failed step, cause type, message, time), so it is distinguishable from a saga that hasn't run
-yet. Since [005](../specs/005-step-retry/spec.md) the failure carries a `FailureClassification`, which the
-compensation spec ([006](../specs/006-saga-compensation/spec.md)) builds on. What is still missing is the split
-between the two outcomes above: `saga-forge-core` does not model "compensatable" versus "requires intervention",
-and every failure that is not retried ends the saga `FAILED` for now. The
-semantics of compensation, including **when compensation is invoked automatically** (which failure
-categories, from which step) versus explicitly, belong to a separate spec. Until then, declaring
-`@SagaCompensation(forStep = "...")` only makes the compensation *discoverable*, not *automatically wired* to
-any particular failure.
+Known limitations: an instance left `COMPENSATING` with no further event never resumes (G-006-05); a compensation
+sees the trigger's event type, not the event (G-006-06); compensations run on the caller's thread holding the
+instance (G-006-08); a failed compensation is never retried and there is no operator path out of "requires
+intervention" (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02).
 
 ## jMolecules consideration
 
@@ -310,5 +320,9 @@ Saga Forge borrows its vocabulary from DDD / EventStorming rather than inventing
 - **Outcome** — the `@EndSaga` step a completed saga reached, recorded as `SagaInstance.outcome`. A saga may
   declare several `@EndSaga` steps, one per possible outcome.
 - **Compensation** — the declared undo for a step whose business effect must be reversed after a later step
-  fails. Declared with `@SagaCompensation(forStep = "...")`, scoped to exactly one step by name. Its runtime
-  semantics belong to a separate spec.
+  fails. Declared with `@SagaCompensation(forStep = "...")`, scoped to exactly one step by name, and run by the
+  engine in its own unit of work when the saga compensates (see "Failure categorization and automatic compensation
+  dispatch").
+- **Failure outcome** — a `@StartCompensation` step: the step that handles a business-failure event and, by
+  committing, starts compensation. Its name is recorded in the instance's `CompensationTrigger`, the way an
+  `@EndSaga` step's name is recorded as the outcome.

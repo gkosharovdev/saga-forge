@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
@@ -45,6 +46,8 @@ class ForwardTransitionPropertyTest {
     private static final Instant MODIFIED_AT = CREATED_AT.plusSeconds(60);
     private static final SagaFailure FAILURE =
             new SagaFailure("B", "java.lang.IllegalStateException", "boom", MODIFIED_AT);
+    private static final CompensationTrigger TRIGGER =
+            CompensationTrigger.failureOutcome("D", "com.example.DeliveryRejectedEvent", MODIFIED_AT);
     private static final List<AggregateReference> AGGREGATES = List.of(
             new AggregateReference("com.example.Order", "42"),
             new AggregateReference("com.example.Payment", "p-7"),
@@ -97,13 +100,21 @@ class ForwardTransitionPropertyTest {
                 return false;
             }
         }
-        boolean terminal = previous.status() == SagaStatus.COMPLETED || previous.status() == SagaStatus.FAILED;
+        if (previous.compensationTrigger() != null
+                && !previous.compensationTrigger().equals(incoming.compensationTrigger())) {
+            return false;
+        }
+        if (previous.status() == SagaStatus.COMPENSATING && !SagaInstance.isCompensation(incoming.status())) {
+            return false;
+        }
+        boolean terminal = previous.status() == SagaStatus.COMPLETED || previous.status() == SagaStatus.FAILED
+                || previous.status() == SagaStatus.COMPENSATED;
         return !terminal || incoming.status() == previous.status();
     }
 
     @Provide
     Arbitrary<SagaInstance> instances() {
-        return Combinators.combine(stepMaps(), Arbitraries.of(SagaStatus.class))
+        return Combinators.combine(stepMaps(), statuses())
                 .as(ForwardTransitionPropertyTest::instance);
     }
 
@@ -113,7 +124,7 @@ class ForwardTransitionPropertyTest {
                         incomingSteps(previous.steps()),
                         Arbitraries.frequencyOf(
                                 Tuple.of(1, Arbitraries.just(previous.status())),
-                                Tuple.of(1, Arbitraries.of(SagaStatus.class))))
+                                Tuple.of(1, statuses())))
                 .as((steps, status) -> Tuple.of(previous, instance(steps, status))));
     }
 
@@ -153,9 +164,18 @@ class ForwardTransitionPropertyTest {
         return Map.copyOf(copy);
     }
 
+    /**
+     * Every status except {@code REQUIRES_INTERVENTION}, which needs a failed compensation these step records never
+     * carry (covered by {@code CompensationPersistenceTest}).
+     */
+    private static Arbitrary<SagaStatus> statuses() {
+        return Arbitraries.of(SagaStatus.class).filter(status -> status != SagaStatus.REQUIRES_INTERVENTION);
+    }
+
     private static SagaInstance instance(Map<String, StepRecord> steps, SagaStatus status) {
         return new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"), status, CREATED_AT,
                 MODIFIED_AT, steps, status == SagaStatus.COMPLETED ? "A" : null,
-                status == SagaStatus.FAILED ? FAILURE : null);
+                status == SagaStatus.FAILED ? FAILURE : null, null,
+                SagaInstance.isCompensation(status) ? TRIGGER : null);
     }
 }

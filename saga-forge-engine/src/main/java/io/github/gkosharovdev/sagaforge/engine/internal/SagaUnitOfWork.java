@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
@@ -37,15 +38,18 @@ import java.util.Set;
  * <h2>{@link #run()}</h2>
  * <ol>
  *   <li>{@code begin()}; {@code StorageProvider.findByIdAndLock(sagaId)} as the first storage call. A missing
- *       instance is {@code UNMATCHED}, one whose triggering (non-start) step already completed {@code DUPLICATE}
- *       (005 FR-006, checked first), a terminal one {@code UNEXPECTED}, a still-{@code CREATED} one reached by a
- *       non-start step {@code NOT_HANDLED}; each rolls back and runs nothing (rows 2, 3).</li>
+ *       instance is {@code UNMATCHED}; a {@code COMPENSATING} one rolls back and returns {@link Compensating}, so the
+ *       loop resumes its compensations (006 research §10, checked before the duplicate check); one whose triggering
+ *       (non-start) step already completed is {@code DUPLICATE} (005 FR-006), a terminal one {@code UNEXPECTED}, a
+ *       still-{@code CREATED} one reached by a non-start step {@code NOT_HANDLED}; each rolls back and runs nothing
+ *       (rows 2, 3).</li>
  *   <li>Loads the instance's {@code SagaContext} values into an {@link EngineSagaContext}, creates a fresh saga
  *       object ({@code SagaObjectProvider}, else the no-argument constructor) and injects its {@code @SagaId},
  *       {@code SagaContext} and {@code CommandGateway} fields (row 4, FR-009).</li>
  *   <li>Binds itself as the thread's recorder and runs the triggered step, then every queued event in recording
  *       order. After each step {@code recordStepCompleted}; at the first {@code @EndSaga} step {@code complete} and
- *       stop; at an empty queue {@code advance} (row 5).</li>
+ *       stop; at the first {@code @StartCompensation} step {@code startCompensation} and stop (006 FR-002, the
+ *       committed result then carries {@code compensationStarted}); at an empty queue {@code advance} (row 5).</li>
  *   <li>Saves the instance with the entries the lifecycle produced, commits, and hands every event not run
  *       in-process to the {@code EventHandoff} as one batch, after the commit (rows 6, 8).</li>
  * </ol>
@@ -104,7 +108,8 @@ final class SagaUnitOfWork implements UnitOfWork {
      * The attempt committed. {@link #handOff()} runs the {@code AFTER_COMMIT} handoff and returns the result; the
      * caller releases the instance lock first.
      */
-    record Committed(java.util.function.Supplier<SagaHandlingResult> afterRelease) implements AttemptResult {
+    record Committed(java.util.function.Supplier<SagaHandlingResult> afterRelease, boolean compensationStarted,
+            String unitOfWorkId) implements AttemptResult {
 
         SagaHandlingResult handOff() {
             return afterRelease.get();
@@ -120,6 +125,13 @@ final class SagaUnitOfWork implements UnitOfWork {
      * back and ran nothing, so the loop can claim the next attempt first (research §9).
      */
     record Resume(PendingRetry retry, Correlation correlation) implements AttemptResult {
+    }
+
+    /**
+     * The locked instance is {@code COMPENSATING}: the event's step did not run and the attempt rolled back, so the
+     * loop can resume the remaining compensations (006 research §10).
+     */
+    record Compensating(Correlation correlation) implements AttemptResult {
     }
 
     /** A recorded event and whether a step of this instance has run it. */
@@ -156,8 +168,10 @@ final class SagaUnitOfWork implements UnitOfWork {
     private final int attempt;
     private String currentStep;
     private boolean ended;
+    private boolean compensationStarted;
     private boolean writing;
     private Throwable firstFailure;
+    private CompensationTrigger lifecycleTrigger;
 
     /**
      * @param attempt     the attempt this unit of work is, counting the first as 1; recorded on the steps it completes
@@ -204,7 +218,10 @@ final class SagaUnitOfWork implements UnitOfWork {
             ReentrancyGuard.exit();
         }
         with.diagnostics().unitOfWorkCommitted(correlation, outcome(), stepsRun);
-        return new Committed(() -> committedResult(handOffAfterCommit()));
+        if (compensationStarted) {
+            with.diagnostics().compensationStarted(correlation, lifecycleTrigger);
+        }
+        return new Committed(() -> committedResult(handOffAfterCommit()), compensationStarted, unitOfWorkId);
     }
 
     /** The id of this attempt's unit of work. */
@@ -259,6 +276,10 @@ final class SagaUnitOfWork implements UnitOfWork {
             return notRun(transaction, unmatched());
         }
         SagaInstance instance = locked.get();
+        if (instance.status() == SagaStatus.COMPENSATING) {
+            transaction.rollback();
+            return Optional.of(new Compensating(correlation.inUnitOfWork(null)));
+        }
         if (!trigger.step().start() && isCompleted(instance, trigger.step().name())) {
             return notRun(transaction, duplicate());
         }
@@ -305,6 +326,13 @@ final class SagaUnitOfWork implements UnitOfWork {
             if (next.step().end()) {
                 lifecycle.complete(trigger.sagaId(), next.step().name());
                 ended = true;
+                return;
+            }
+            if (next.step().startsCompensation()) {
+                lifecycleTrigger = CompensationTrigger.failureOutcome(next.step().name(),
+                        next.recorded().event.getClass().getName(), settings.sources().now());
+                lifecycle.startCompensation(trigger.sagaId(), lifecycleTrigger);
+                compensationStarted = true;
                 return;
             }
         }
@@ -498,6 +526,9 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     private HandlingOutcome outcome() {
+        if (compensationStarted) {
+            return HandlingOutcome.COMPENSATED;
+        }
         return ended ? HandlingOutcome.COMPLETED : HandlingOutcome.WAITING;
     }
 

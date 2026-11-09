@@ -89,6 +89,50 @@ class LifecycleHistoryTest {
     }
 
     @Test
+    @DisplayName("006: the five compensation kinds round-trip, COMPENSATION_STARTED with its trigger")
+    void compensationEntriesRoundTrip() {
+        io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger trigger =
+                io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger.failureOutcome("C",
+                        "com.example.DeliveryRejected", T1);
+        SagaFailure refused = new SagaFailure("A", "com.example.Refused", "refused", T3,
+                io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.FINAL, 1);
+        StepRecord aDone = new StepRecord(io.github.gkosharovdev.sagaforge.core.spi.StepStatus.COMPLETED, List.of(), 1,
+                List.of(), 1, null);
+        provider.save(instance(SagaStatus.RUNNING, CREATED_AT, steps(aDone, StepRecord.notRun(), StepRecord.notRun()),
+                null, null), List.of(created()));
+        SagaInstance compensating = new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                SagaStatus.COMPENSATING, CREATED_AT, T1,
+                steps(aDone.withCompensation(io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.notAttempted()),
+                        StepRecord.notRun(), StepRecord.notRun()), null, null, null, trigger);
+        provider.save(compensating, List.of(
+                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPENSATION_STARTED, null, List.of(), null,
+                        null, T1, trigger),
+                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.STEP_COMPENSATED, "B", List.of(), null, null,
+                        T2),
+                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPENSATED, null, List.of(), null, null, T2)));
+        SagaInstance requiresIntervention = new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                SagaStatus.REQUIRES_INTERVENTION, CREATED_AT, T3,
+                steps(aDone.withCompensation(io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.failed(refused)),
+                        StepRecord.notRun(), StepRecord.notRun()), null, null, null, trigger);
+        provider.save(requiresIntervention, List.of(
+                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPENSATION_FAILED, "A", List.of(), null,
+                        refused, T3),
+                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.REQUIRES_INTERVENTION, null, List.of(), null,
+                        null, T3)));
+
+        List<Map<String, Object>> rows = history(SAGA_ID);
+
+        assertThat(rows).extracting(row -> row.get("kind")).containsExactly("CREATED", "COMPENSATION_STARTED",
+                "STEP_COMPENSATED", "COMPENSATED", "COMPENSATION_FAILED", "REQUIRES_INTERVENTION");
+        assertThat(SagaInstanceRows.decodeTrigger("compensation_trigger", (String) rows.get(1).get("compensation_trigger")))
+                .isEqualTo(trigger);
+        assertThat(rows.get(0).get("compensation_trigger")).isNull();
+        assertThat(rows).extracting(row -> row.get("step_name")).containsExactly(null, null, "B", null, "A", null);
+        assertThat(rows.get(4).get("failure_cause_type")).isEqualTo("com.example.Refused");
+        assertThat(rows.get(4).get("failure_classification")).isEqualTo("FINAL");
+    }
+
+    @Test
     @DisplayName("scenario 7: CREATED, STEP_COMPLETED(A), STEP_COMPLETED(B), COMPLETED in sequence order (SC-003)")
     void fullLifecycleInOrder() {
         StepRecord aDone = StepRecord.completed(List.of(ORDER_42));

@@ -3,7 +3,8 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 /**
  * Kind of transition a {@link SagaLifecycleEntry} records. Storage-agnostic: the engine produces one entry per
  * transition and hands it to storage with the instance write it belongs to. There is no kind for a change to
- * {@link SagaStatus#RUNNING} (a wait point records no status entry) or to {@link SagaStatus#COMPENSATING}.
+ * {@link SagaStatus#RUNNING} (a wait point records no status entry); entering {@link SagaStatus#COMPENSATING} is
+ * {@link #COMPENSATION_STARTED} ({@code specs/006-saga-compensation} FR-018).
  */
 public enum SagaLifecycleEventKind {
     /** The creation write: the instance was first persisted, {@link SagaStatus#CREATED} with no step run. */
@@ -18,5 +19,18 @@ public enum SagaLifecycleEventKind {
      * A unit of work failed transiently and the engine claimed another attempt, in its own write, before waiting
      * for it ({@code specs/005-step-retry} FR-018). The instance's status is unchanged.
      */
-    ATTEMPT_FAILED
+    ATTEMPT_FAILED,
+    /**
+     * The instance entered {@link SagaStatus#COMPENSATING}, with the recorded {@code CompensationTrigger}
+     * ({@code specs/006-saga-compensation} FR-018).
+     */
+    COMPENSATION_STARTED,
+    /** One step's {@code @SagaCompensation} committed, in its own unit of work. */
+    STEP_COMPENSATED,
+    /** One step's compensation failed; written with the {@code REQUIRES_INTERVENTION} write. */
+    COMPENSATION_FAILED,
+    /** Every applicable compensation committed: the instance is now {@link SagaStatus#COMPENSATED}. */
+    COMPENSATED,
+    /** A compensation failed: the instance is now {@link SagaStatus#REQUIRES_INTERVENTION}. */
+    REQUIRES_INTERVENTION
 }

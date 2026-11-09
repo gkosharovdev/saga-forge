@@ -8,17 +8,22 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
+import io.github.gkosharovdev.sagaforge.core.annotation.StartCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 import io.github.gkosharovdev.sagaforge.example.commands.ProcessPaymentCommand;
+import io.github.gkosharovdev.sagaforge.example.commands.RefundPaymentCommand;
 import io.github.gkosharovdev.sagaforge.example.commands.ReserveStockCommand;
 import io.github.gkosharovdev.sagaforge.example.events.OrderCompletedEvent;
 import io.github.gkosharovdev.sagaforge.example.events.OrderCreatedEvent;
 import io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent;
+import io.github.gkosharovdev.sagaforge.example.events.StockUnavailableEvent;
 
 /**
- * Canonical Saga Forge example: an order is paid for, its stock is reserved, and the saga ends.
+ * Canonical Saga Forge example: an order is paid for, its stock is reserved, and the saga ends; if the stock turns
+ * out to be unavailable after the payment, the payment is refunded.
  *
  * <p>The model is Axon-style. Every step is triggered by a domain event and returns {@code void}; a step
  * dispatches commands through the {@link CommandGateway} field, a {@code @CommandHandler} on an aggregate or a
@@ -34,9 +39,14 @@ import io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent;
  *       <td>{@link PaymentProcessedEvent}</td></tr>
  *   <tr><td>{@code processPayment}</td><td>{@link PaymentProcessedEvent}</td>
  *       <td>{@link ReserveStockCommand}</td><td>{@link Order#handle} (aggregate instance method, loaded
- *       and saved through {@link OrderRepository})</td><td>{@link OrderCompletedEvent}</td></tr>
+ *       and saved through {@link OrderRepository})</td><td>{@link OrderCompletedEvent}, or
+ *       {@link StockUnavailableEvent} when the stock is not available</td></tr>
  *   <tr><td>{@code completeOrder} ({@code @EndSaga})</td><td>{@link OrderCompletedEvent}</td>
  *       <td>nothing</td><td>-</td><td>-</td></tr>
+ *   <tr><td>{@code rejectOrder} ({@code @StartCompensation})</td><td>{@link StockUnavailableEvent}</td>
+ *       <td>nothing; compensation follows</td><td>-</td><td>-</td></tr>
+ *   <tr><td>{@code compensatePayment} ({@code @SagaCompensation(forStep = "processPayment")})</td><td>-</td>
+ *       <td>{@link RefundPaymentCommand}</td><td>{@link PaymentService#handle} (service)</td><td>-</td></tr>
  * </table>
  *
  * <p>Every step associates its event with the saga instance through {@code orderId}. The
@@ -49,8 +59,13 @@ import io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent;
  * payment provider timeout, is retried first under the failing step's {@code @RetryPolicy}: the whole unit of work
  * runs again, and every command keeps its identity, so the provider sees the same idempotency key.</p>
  *
- * <p>{@code compensatePayment} keeps the existing step-targeted compensation mapping. When and how
- * compensation runs is specified separately and is not part of the unit-of-work model shown here.</p>
+ * <p>A business failure is declared, not thrown: when the order cannot be supplied, {@link Order} records
+ * {@link StockUnavailableEvent} and the {@code @StartCompensation} step {@code rejectOrder} handles it. Its unit of
+ * work commits with the payment step that preceded it, and the instance becomes {@code COMPENSATING}. The engine then
+ * runs the compensation of every other completed step, most recently completed first, each in its own unit of work:
+ * here {@code compensatePayment} refunds the payment, using the payment reference and amount kept in the
+ * {@link SagaContext}, and the saga ends {@code COMPENSATED} with {@code rejectOrder} recorded as its trigger. The
+ * refund command carries its own stable identity, so a refund that runs again after a crash refunds once.</p>
  */
 @Saga
 public class OrderProcessingSaga {
@@ -103,10 +118,23 @@ public class OrderProcessingSaga {
     }
 
     /**
-     * Compensation mapped to {@code processPayment}. Its execution semantics belong to a separate spec.
+     * Failure outcome "rejectOrder": the order's stock is not available after it was paid for. Runs like any step;
+     * when its unit of work commits, the saga compensates the steps that completed before it.
+     */
+    @StartCompensation
+    @SagaStep(associationProperty = "orderId")
+    public void rejectOrder(StockUnavailableEvent event) {
+        // The trigger records why; the compensation reads what it needs from the SagaContext.
+    }
+
+    /**
+     * Undoes {@code processPayment}: refunds the payment it recorded. Runs in its own unit of work after the saga
+     * entered compensation; {@code trigger} says why (here always the stock shortage).
      */
     @SagaCompensation(forStep = "processPayment")
-    public void compensatePayment() {
-        System.out.println("Compensating payment for saga: " + sagaId);
+    public void compensatePayment(CompensationTrigger trigger) {
+        String paymentId = context.getState("paymentId", String.class).orElseThrow();
+        BigDecimal amount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount));
     }
 }
