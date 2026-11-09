@@ -176,14 +176,19 @@ final class PostgresTestSupport {
     }
 
     static List<String> schemaStatements() {
+        return statements(SCHEMA_RESOURCE);
+    }
+
+    /** The statements of the SQL script {@code resource}, split as {@link #schemaStatements()} splits. */
+    static List<String> statements(String resource) {
         String script;
-        try (InputStream in = PostgresTestSupport.class.getResourceAsStream(SCHEMA_RESOURCE)) {
+        try (InputStream in = PostgresTestSupport.class.getResourceAsStream(resource)) {
             if (in == null) {
-                throw new IllegalStateException(SCHEMA_RESOURCE + " is not on the classpath");
+                throw new IllegalStateException(resource + " is not on the classpath");
             }
             script = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new IllegalStateException("could not read " + SCHEMA_RESOURCE, e);
+            throw new IllegalStateException("could not read " + resource, e);
         }
         String withoutComments = script.lines()
                 .filter(line -> !line.strip().startsWith("--"))

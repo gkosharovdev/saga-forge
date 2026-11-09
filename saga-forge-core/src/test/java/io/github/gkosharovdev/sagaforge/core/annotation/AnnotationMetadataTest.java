@@ -139,8 +139,46 @@ class AnnotationMetadataTest {
         }
 
         @Test
-        void hasExactlyOneAttribute() {
-            assertThat(SagaStep.class.getDeclaredMethods()).hasSize(1);
+        void hasRetryAttributeDefaultingToOneAttempt() throws NoSuchMethodException {
+            var method = SagaStep.class.getDeclaredMethod("retry");
+            assertThat(method.getReturnType()).isEqualTo(RetryPolicy.class);
+            RetryPolicy policy = (RetryPolicy) method.getDefaultValue();
+            assertThat(policy.maxAttempts()).isEqualTo(1);
+            assertThat(policy.initialBackoffMillis()).isZero();
+            assertThat(policy.multiplier()).isEqualTo(1.0);
+            assertThat(policy.maxBackoffMillis()).isZero();
+            assertThat(policy.retryOn()).isEmpty();
+        }
+
+        @Test
+        void hasExactlyTwoAttributes() {
+            assertThat(SagaStep.class.getDeclaredMethods()).hasSize(2);
+        }
+    }
+
+    // --- @RetryPolicy (specs/005-step-retry) ---
+
+    @Nested
+    @DisplayName("@RetryPolicy")
+    class RetryPolicyAnnotationTest {
+
+        @Test
+        void usableOnlyAsAnAttributeValue() {
+            Target target = RetryPolicy.class.getAnnotation(Target.class);
+            assertThat(target.value()).isEmpty();
+        }
+
+        @Test
+        void retentionIsRuntime() {
+            Retention retention = RetryPolicy.class.getAnnotation(Retention.class);
+            assertThat(retention.value()).isEqualTo(RetentionPolicy.RUNTIME);
+        }
+
+        @Test
+        void hasTheFiveDocumentedAttributes() {
+            assertThat(RetryPolicy.class.getDeclaredMethods()).extracting(java.lang.reflect.Method::getName)
+                    .containsExactlyInAnyOrder("maxAttempts", "initialBackoffMillis", "multiplier",
+                            "maxBackoffMillis", "retryOn");
         }
     }
 

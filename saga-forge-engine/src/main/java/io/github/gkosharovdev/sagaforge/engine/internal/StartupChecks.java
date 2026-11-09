@@ -5,6 +5,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
+import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -59,6 +60,7 @@ final class StartupChecks {
         for (Class<?> type : registered) {
             if (type.isAnnotationPresent(Saga.class)) {
                 sagaObjectError(type, settings).ifPresent(errors::add);
+                errors.addAll(retryBackoffErrors(type, settings));
                 continue;
             }
             if (type.isAnnotationPresent(Aggregate.class) && hasInstanceHandler(type)
@@ -69,6 +71,21 @@ final class StartupChecks {
             handlers(type).forEach(handler -> errors.addAll(unresolvableParameters(handler, settings)));
         }
         return List.copyOf(errors);
+    }
+
+    /**
+     * One error per {@code @SagaStep} whose retry policy waits longer in total than the engine allows (005 FR-014a);
+     * steps in method-name order. A policy the scanner rejects (R19) waits no positive total and adds nothing here.
+     */
+    private static List<String> retryBackoffErrors(Class<?> sagaType, EngineSettings settings) {
+        long max = settings.retry().maxTotalBackoff().toMillis();
+        return Reflection.annotatedMethods(sagaType, SagaStep.class).stream()
+                .sorted(java.util.Comparator.comparing(Method::getName))
+                .filter(method -> Backoff.total(method.getAnnotation(SagaStep.class).retry()) > max)
+                .map(method -> "@SagaStep " + sagaType.getSimpleName() + "." + method.getName()
+                        + ": total retry backoff " + Backoff.total(method.getAnnotation(SagaStep.class).retry())
+                        + " ms exceeds the engine maximum " + max + " ms")
+                .toList();
     }
 
     private static Optional<String> sagaObjectError(Class<?> sagaType, EngineSettings settings) {
@@ -113,15 +130,25 @@ final class StartupChecks {
             return List.of();
         }
         List<String> errors = new ArrayList<>();
+        List<Integer> commandIdPositions = new ArrayList<>();
         for (int position = 0; position < parameters.length; position++) {
             Parameter parameter = parameters[position];
-            boolean supported = position == commandPosition || settings.parameterResolvers().stream()
+            boolean commandId = position != commandPosition
+                    && EngineCommandGateway.isCommandIdParameter(handler, parameter);
+            if (commandId) {
+                commandIdPositions.add(position + 1);
+            }
+            boolean supported = position == commandPosition || commandId || settings.parameterResolvers().stream()
                     .anyMatch(resolver -> resolver.supports(handler, parameter));
             if (!supported) {
                 errors.add("@CommandHandler " + handlerName(handler) + " parameter #" + (position + 1) + " "
                         + parameter.getType().getSimpleName()
                         + " cannot be resolved: no HandlerParameterResolver supports it");
             }
+        }
+        if (commandIdPositions.size() > 1) {
+            errors.add("@CommandHandler " + handlerName(handler) + " declares more than one CommandId parameter: #"
+                    + commandIdPositions.stream().map(String::valueOf).collect(Collectors.joining(", #")));
         }
         return errors;
     }

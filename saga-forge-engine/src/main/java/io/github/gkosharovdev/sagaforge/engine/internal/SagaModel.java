@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
+import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
@@ -30,6 +31,11 @@ final class SagaModel {
     /** One {@code @SagaStep} method. */
     record Step(String name, Method method, Class<?> eventType, String associationProperty, boolean start,
             boolean end) {
+
+        /** The step's {@code @SagaStep(retry = ...)} policy (005). */
+        RetryPolicy retryPolicy() {
+            return method.getAnnotation(SagaStep.class).retry();
+        }
     }
 
     /** The values the engine sets on a fresh saga object, overwriting whatever the object held. */
@@ -87,6 +93,29 @@ final class SagaModel {
 
     Step startStep() {
         return startStep;
+    }
+
+    /**
+     * The retry policy of the step named {@code stepName}; the default one-attempt policy if no step has that name.
+     */
+    RetryPolicy retryPolicyOf(String stepName) {
+        return stepsByEventType.values().stream().filter(step -> step.name().equals(stepName)).findFirst()
+                .map(Step::retryPolicy)
+                .orElseGet(() -> DefaultRetryPolicy.INSTANCE);
+    }
+
+    /** Holder of the default {@code @RetryPolicy} value, read from {@code @SagaStep.retry()}. */
+    private static final class DefaultRetryPolicy {
+
+        static final RetryPolicy INSTANCE;
+
+        static {
+            try {
+                INSTANCE = (RetryPolicy) SagaStep.class.getDeclaredMethod("retry").getDefaultValue();
+            } catch (NoSuchMethodException impossible) {
+                throw new ExceptionInInitializerError(impossible);
+            }
+        }
     }
 
     /** Every step's name, sorted, for a new instance's {@code NOT_RUN} step records. */

@@ -7,8 +7,10 @@ method that reacts to a domain **event** and dispatches **commands** through a `
 `@CommandHandler` methods on aggregates or services. The framework correlates events to the right
 saga instance, runs the steps triggered within one unit of work together (all of them commit or none
 do), persists each step's status and the saga's `SagaContext` values, and waits between units of
-work for events from outside. Compensation is declared per step with `@SagaCompensation`; its
-semantics are defined in a future spec. You write steps; Saga Forge forges the process around them.
+work for events from outside. A step can declare a retry policy for transient failures, and every command it
+sends carries a stable identity, so a retried or redelivered step never applies a command's effect twice.
+Compensation is declared per step with `@SagaCompensation`; its semantics are defined in a future spec. You write
+steps; Saga Forge forges the process around them.
 
 ```java
 @Saga
@@ -30,7 +32,9 @@ public class CreateBookingSaga {
                 event.inventoryId(), event.bookingId(), event.checkIn(), event.checkOut()));
     }
 
-    @SagaStep(associationProperty = "bookingId")
+    // A payment-provider timeout is transient: run this step's unit of work up to 3 times, 200 ms then 400 ms apart.
+    @SagaStep(associationProperty = "bookingId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+            multiplier = 2.0, retryOn = PaymentTimeoutException.class))
     public void onAvailabilityClaimed(AvailabilityClaimedEvent event) {
         context.putState("claimId", event.claimId());
         long amount = context.getState("amount", Long.class).orElseThrow();
@@ -86,10 +90,27 @@ public class Inventory {
 }
 ```
 
+A handler that calls an outside system asks for the command's identity and passes it on as the system's
+idempotency key. The identity is the same on every retry and every redelivery:
+
+```java
+public class PaymentService {
+
+    @CommandHandler
+    public void handle(InitiatePayment command, CommandId commandId) {
+        String paymentId = provider.charge(commandId.value(), command.amount()); // charged once per key
+        DomainEvents.record(new PaymentInitiatedEvent(command.bookingId(), paymentId));
+    }
+}
+```
+
 The first unit of work runs `onBookingRequested` and `onAvailabilityClaimed`. No step reacts to
 `PaymentInitiatedEvent`, so that unit of work commits there and the saga waits `RUNNING`. The payment
 provider's callback starts the second unit of work, which reaches one of the two `@EndSaga` outcomes. If a
-step or handler fails, its unit of work rolls back and the saga ends `FAILED`. Loading and saving aggregates
+step or handler fails, its unit of work rolls back. A transient failure (marked `TransientFailure` or listed in
+`retryOn`) is retried under the failing step's policy, re-running the whole unit of work; any other failure, or
+running out of attempts, ends the saga `FAILED` with the failure's classification and attempt count. An event
+for a step that already completed is reported `DUPLICATE` and runs nothing. Loading and saving aggregates
 stays in your code, through `@AggregateLoader`/`@AggregateSaver` methods or, once the starter ships, its
 Spring Data adapter (not implemented yet).
 
@@ -152,8 +173,9 @@ The saga engine runtime exists in `saga-forge-engine` (feature 004): event routi
 saga-scoped unit of work in the host's local transaction (`TransactionBoundary`), one unit of work per instance at
 a time, an outbox-ready after-commit handoff, and fail-fast startup validation. It is verified by unit tests over
 in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
-`StorageProvider` joins the engine's transaction (feature 004). Not implemented yet: the Spring Boot starter, the
-transports, MySQL and MongoDB storage, compensation, step retry, and idempotent step execution. See
+`StorageProvider` joins the engine's transaction (feature 004). Step retry with failure classification, stable
+command identities and duplicate-event detection are implemented in the engine and persisted by Postgres (feature
+005). Not implemented yet: the Spring Boot starter, the transports, MySQL and MongoDB storage, and compensation. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as

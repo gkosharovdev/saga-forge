@@ -7,6 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.booking.AvailabilityClaimedEvent;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.booking.Booking;
@@ -161,11 +162,50 @@ class EngineCommandGatewayTest {
         }
     }
 
+    /** Command for {@link IdentityService}. */
+    @Command
+    record Stamp(String subject) {
+    }
+
+    /** A service handler that records the identity of each command it handles; fails if told to. */
+    public static final class IdentityService {
+
+        private final List<CommandId> seen = new ArrayList<>();
+        private boolean failNext;
+
+        @CommandHandler
+        public void handle(Stamp command, CommandId commandId) {
+            seen.add(commandId);
+            if (failNext) {
+                failNext = false;
+                throw new IllegalStateException("stamp failed");
+            }
+        }
+    }
+
     /** A bound engine unit of work that records events and failure reports. */
     private static final class RecordingUnitOfWork implements UnitOfWork {
 
         private final List<Object> recorded = new ArrayList<>();
         private final List<Throwable> failures = new ArrayList<>();
+        private final List<CommandId> handled = new ArrayList<>();
+        private final java.util.Set<CommandId> committed = new java.util.HashSet<>();
+        private int stamps;
+
+        @Override
+        public CommandId nextCommandId(Class<?> commandType) {
+            return CommandId.of("saga-1", "step", commandType.getName(), ++stamps);
+        }
+
+        @Override
+        public boolean alreadyHandled(CommandId id) {
+            return committed.contains(id);
+        }
+
+        @Override
+        public void commandHandled(CommandId id) {
+            handled.add(id);
+        }
 
         @Override
         public void record(Object domainEvent) {
@@ -187,6 +227,7 @@ class EngineCommandGatewayTest {
     private final InventoryRepository inventories = new InventoryRepository();
     private final BookingRepository bookings = new BookingRepository();
     private final AuditService audits = new AuditService();
+    private final IdentityService identities = new IdentityService();
     private final Auditor auditor = new Auditor();
     private final Auditor laterAuditor = new Auditor();
     private final RecordingUnitOfWork unitOfWork = new RecordingUnitOfWork();
@@ -197,9 +238,9 @@ class EngineCommandGatewayTest {
 
     private EngineCommandGateway gateway(List<HandlerParameterResolver> parameterResolvers) {
         List<Class<?>> registered = List.of(PaymentService.class, Inventory.class, InventoryRepository.class,
-                Booking.class, BookingRepository.class, Counter.class, AuditService.class);
+                Booking.class, BookingRepository.class, Counter.class, AuditService.class, IdentityService.class);
         MapHandlerInstanceProvider instances = new MapHandlerInstanceProvider()
-                .register(payments).register(inventories).register(bookings).register(audits);
+                .register(payments).register(inventories).register(bookings).register(audits).register(identities);
         List<AggregateResolver> resolvers = List.of(unsupporting, firstSupporting, secondSupporting);
         EventHandoff handoff = CapturingEventHandoff.afterCommit();
         EngineSettings settings = new EngineSettings(new TransactionalInMemoryStorageProvider(boundary),
@@ -408,6 +449,55 @@ class EngineCommandGatewayTest {
             assertThat(sent.thrown()).isSameAs(failure);
             assertThat(bookings.saveCount()).isZero();
             assertFailedUnitOfWork(sent);
+        }
+    }
+
+    @Nested
+    @DisplayName("command identity (specs/005-step-retry tasks.md T025)")
+    class Identity {
+
+        @Test
+        @DisplayName("the handler receives the identity the unit of work assigned, which is then recorded as handled")
+        void assignedAndRecorded() {
+            Sent sent = sendInUnitOfWork(new Stamp("a"));
+
+            assertThat(sent.thrown()).isNull();
+            CommandId expected = CommandId.of("saga-1", "step", Stamp.class.getName(), 1);
+            assertThat(identities.seen).containsExactly(expected);
+            assertThat(unitOfWork.handled).containsExactly(expected);
+        }
+
+        @Test
+        @DisplayName("a command whose identity already committed is not handled again and send returns normally")
+        void alreadyHandledIsSkipped() {
+            unitOfWork.committed.add(CommandId.of("saga-1", "step", Stamp.class.getName(), 1));
+
+            Sent sent = sendInUnitOfWork(new Stamp("a"));
+
+            assertThat(sent.thrown()).isNull();
+            assertThat(identities.seen).isEmpty();
+            assertThat(unitOfWork.handled).isEmpty();
+            assertThat(unitOfWork.failures).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a handler failure leaves the identity unrecorded")
+        void failureLeavesItUnrecorded() {
+            identities.failNext = true;
+
+            Sent sent = sendInUnitOfWork(new Stamp("a"));
+
+            assertFailedUnitOfWork(sent);
+            assertThat(identities.seen).hasSize(1);
+            assertThat(unitOfWork.handled).isEmpty();
+        }
+
+        @Test
+        @DisplayName("outside a unit of work the handler receives an unscoped identity")
+        void outsideAUnitOfWork() {
+            gateway.send(new Stamp("a"));
+
+            assertThat(identities.seen).singleElement().satisfies(id -> assertThat(id.sagaScoped()).isFalse());
         }
     }
 }

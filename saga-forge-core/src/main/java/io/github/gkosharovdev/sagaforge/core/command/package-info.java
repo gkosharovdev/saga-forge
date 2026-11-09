@@ -10,9 +10,11 @@
  *   <li>Handler-routing exceptions — {@link NoCommandHandlerException} when no handler exists for a
  *       command type, and {@link AggregateNotFoundException} when the target aggregate of an
  *       instance-method handler cannot be loaded.
+ *   <li>{@link CommandId} — the stable idempotency identity of a command sent from a saga step, which a
+ *       {@code @CommandHandler} receives by declaring a {@code CommandId} parameter.
  * </ul>
  *
- * <p>Only contracts (interfaces and their supporting exception types) live here. No production
+ * <p>Only contracts (interfaces and their supporting value and exception types) live here. No production
  * implementation ships in {@code saga-forge-core}; implementations are provided by the engine runtime,
  * the same posture as the {@code spi} package's {@code StorageProvider} and {@code EventDispatcher}.
  * Like the rest of {@code saga-forge-core}, this package is transport-agnostic and has zero

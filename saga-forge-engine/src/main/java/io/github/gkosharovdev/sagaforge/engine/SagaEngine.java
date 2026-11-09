@@ -18,8 +18,10 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.internal.Diagnostics;
 import io.github.gkosharovdev.sagaforge.engine.internal.EngineRuntime;
 import io.github.gkosharovdev.sagaforge.engine.internal.EngineSettings;
+import io.github.gkosharovdev.sagaforge.engine.internal.RetrySettings;
 import io.github.gkosharovdev.sagaforge.engine.internal.TimeAndIdentity;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -200,6 +202,8 @@ public final class SagaEngine implements EventReceiver {
         private Supplier<String> sagaIds = Builder::randomId;
         private Supplier<String> unitOfWorkIds = Builder::randomId;
         private System.Logger logger = System.getLogger(DEFAULT_LOGGER_NAME);
+        private Duration maxTotalRetryBackoff = RetrySettings.DEFAULT_MAX_TOTAL_BACKOFF;
+        private RetryPause retryPause = RetryPause.sleeping();
 
         private Builder() {
         }
@@ -288,6 +292,31 @@ public final class SagaEngine implements EventReceiver {
             return this;
         }
 
+        /**
+         * The most a step's {@code @RetryPolicy} may wait in total over all its attempts; {@code start()} refuses a
+         * step whose policy exceeds it ({@code specs/005-step-retry} FR-014a). Default: 30 seconds.
+         *
+         * @throws IllegalArgumentException if {@code maxTotalRetryBackoff} is {@code null}, zero or negative
+         */
+        public Builder maxTotalRetryBackoff(Duration maxTotalRetryBackoff) {
+            if (maxTotalRetryBackoff == null || maxTotalRetryBackoff.isNegative() || maxTotalRetryBackoff.isZero()) {
+                throw new IllegalArgumentException("maxTotalRetryBackoff must be positive, but is "
+                        + maxTotalRetryBackoff);
+            }
+            this.maxTotalRetryBackoff = maxTotalRetryBackoff;
+            return this;
+        }
+
+        /**
+         * How the engine waits between attempts of a retried unit of work. Default: {@link RetryPause#sleeping()}.
+         *
+         * @throws IllegalArgumentException if {@code retryPause} is {@code null}
+         */
+        public Builder retryPause(RetryPause retryPause) {
+            this.retryPause = requireNonNull(retryPause, "retryPause");
+            return this;
+        }
+
         /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
         public Builder logger(System.Logger logger) {
             this.logger = requireNonNull(logger, "logger");
@@ -327,7 +356,8 @@ public final class SagaEngine implements EventReceiver {
                     : EngineSettings.noHandlerInstances();
             return new EngineSettings(storage, contextStore, transactions, dispatcher, instances, aggregateResolvers,
                     parameterResolvers, Optional.ofNullable(sagaObjects), effectiveHandoff, timing,
-                    new TimeAndIdentity(clock, sagaIds, unitOfWorkIds));
+                    new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
+                    new RetrySettings(maxTotalRetryBackoff, retryPause::pause));
         }
 
         private static String randomId() {

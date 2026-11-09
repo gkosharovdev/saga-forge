@@ -1,9 +1,11 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaLifecycle;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
@@ -26,8 +28,9 @@ import java.util.Map;
  * entries to {@code StorageProvider.save(instance, entries)}. Entries follow data-model.md "Lifecycle entry
  * production": {@code start} → {@code CREATED} ({@code occurredAt = createdAt}), {@code recordStepCompleted} →
  * {@code STEP_COMPLETED}, {@code advance} → none, {@code complete} → {@code COMPLETED}, {@code fail} →
- * {@code FAILED}; each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
- * {@code lastModifiedAt}. {@code SagaInstance.state} is always empty (G-ENG-06).</p>
+ * {@code FAILED}, {@link #attemptFailed} → {@code ATTEMPT_FAILED} (005); each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
+ * {@code lastModifiedAt}. {@code SagaInstance.state} is always empty (G-ENG-06). A pending retry is kept across
+ * transitions until {@link #clearPendingRetry} or a terminal transition drops it (005 research §9).</p>
  *
  * <p>{@code start} checks for a duplicate against storage: an active instance of the same saga type with the same
  * association value raises {@link DuplicateSagaInstanceException} (001 FR-006). Every other transition on an
@@ -109,15 +112,25 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     @Override
     public SagaInstance recordStepCompleted(
             String sagaId, String stepName, List<AggregateReference> touchedAggregates) {
+        return recordStepCompleted(sagaId, stepName, touchedAggregates, 1, List.of());
+    }
+
+    /**
+     * {@link #recordStepCompleted(String, String, List)} with the attempt the step completed in and the identities of
+     * the commands it had handled (005 FR-004, FR-017).
+     */
+    SagaInstance recordStepCompleted(String sagaId, String stepName, List<AggregateReference> touchedAggregates,
+            int attempts, List<CommandId> handledCommands) {
         requireNonNull(stepName, "stepName");
         requireNonNull(touchedAggregates, "touchedAggregates");
+        requireNonNull(handledCommands, "handledCommands");
         SagaInstance current = requireActive(sagaId, "recordStepCompleted");
         if (!current.steps().containsKey(stepName)) {
             throw new IllegalArgumentException("Unknown step '" + stepName + "' for saga instance '" + sagaId
                     + "' of type " + current.sagaType());
         }
         Map<String, StepRecord> steps = new HashMap<>(current.steps());
-        steps.put(stepName, StepRecord.completed(touchedAggregates));
+        steps.put(stepName, StepRecord.completed(touchedAggregates, attempts, handledCommands));
         Instant now = evolve(current.status(), steps, Ending.NONE);
         pending.add(entry(SagaLifecycleEventKind.STEP_COMPLETED, now).step(stepName, touchedAggregates).build());
         return workingCopy;
@@ -149,6 +162,50 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     }
 
     /**
+     * Records that an attempt failed transiently and claims the next one: sets {@code retry} as the instance's
+     * pending retry, keeps its status, and produces an {@code ATTEMPT_FAILED} entry naming the failed step and
+     * carrying {@code retry.lastFailure()} (005 research §9).
+     *
+     * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's or it is terminal
+     */
+    SagaInstance attemptFailed(String sagaId, PendingRetry retry) {
+        requireNonNull(retry, "retry");
+        SagaInstance current = requireActive(sagaId, "attemptFailed");
+        workingCopy = current.withPendingRetry(retry);
+        Instant now = evolve(current.status(), current.steps(), Ending.NONE);
+        SagaFailure failure = retry.lastFailure();
+        pending.add(entry(SagaLifecycleEventKind.ATTEMPT_FAILED, now).failedStep(failure.stepName())
+                .failure(failure).build());
+        return workingCopy;
+    }
+
+    /**
+     * Claims attempt {@code retry.attemptsStarted()} for a redelivery that resumes a retry after a crash or an
+     * interrupted wait: sets {@code retry} as the pending retry; produces no entry, as no attempt failed (005
+     * research §9).
+     *
+     * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's or it is terminal
+     */
+    SagaInstance claimAttempt(String sagaId, PendingRetry retry) {
+        requireNonNull(retry, "retry");
+        SagaInstance current = requireActive(sagaId, "claimAttempt");
+        workingCopy = current.withPendingRetry(retry);
+        evolve(current.status(), current.steps(), Ending.NONE);
+        return workingCopy;
+    }
+
+    /**
+     * Drops the instance's pending retry if it was claimed for {@code triggerStep}; produces no entry.
+     */
+    void clearPendingRetry(String triggerStep) {
+        requireNonNull(triggerStep, "triggerStep");
+        if (workingCopy != null && workingCopy.pendingRetry() != null
+                && workingCopy.pendingRetry().triggerStep().equals(triggerStep)) {
+            workingCopy = workingCopy.withPendingRetry(null);
+        }
+    }
+
+    /**
      * The working copy and the entries produced since the last drain, for one write; clears the entries.
      *
      * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's
@@ -175,12 +232,16 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         }
     }
 
-    /** Replaces the working copy with {@code status}, {@code steps} and {@code ending}; returns the instant. */
+    /**
+     * Replaces the working copy with {@code status}, {@code steps} and {@code ending}, keeping its pending retry
+     * unless the new status is terminal; returns the instant.
+     */
     private Instant evolve(SagaStatus status, Map<String, StepRecord> steps, Ending ending) {
         Instant now = sources.now();
+        PendingRetry retry = isTerminal(status) ? null : workingCopy.pendingRetry();
         workingCopy = new SagaInstance(workingCopy.sagaId(), workingCopy.sagaType(), Map.of(),
                 workingCopy.associations(), status, workingCopy.createdAt(), now, steps, ending.outcomeStep(),
-                ending.failure());
+                ending.failure(), retry);
         return now;
     }
 
@@ -242,6 +303,11 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         EntryBuilder step(String name, List<AggregateReference> touched) {
             this.stepName = name;
             this.touchedAggregates = touched;
+            return this;
+        }
+
+        EntryBuilder failedStep(String name) {
+            this.stepName = name;
             return this;
         }
 

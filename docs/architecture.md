@@ -19,6 +19,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `EventHandoff`/`HandedOffEvents`, `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the engine, tested; `JdbcTransactionBoundary` in the Postgres module |
 | `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the engine, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
 | Saga engine runtime (`saga-forge-engine`: event routing, saga-scoped unit of work, one unit of work per instance, outbox-ready handoff, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
+| Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the engine, persisted by Postgres, unit-tested ([005](../specs/005-step-retry/spec.md)); the Postgres container suites are not yet run |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Transports (in-memory, Kafka) | Not implemented |
 | Spring Boot autoconfiguration | Not implemented |
@@ -173,35 +174,36 @@ What remains to be built (the runtime/persistence half):
 
 ### Idempotent step execution
 
-A step handling the same event twice (at-least-once delivery, consumer rebalance, manual retry) must not
-re-dispatch its commands or re-run its side effect. This requires a uniqueness check — most naturally a unique
-constraint on `(saga_id, step_name)` at the storage layer — consulted before a step's handler runs, so a
-duplicate dispatch is recognized and skipped rather than re-executed.
+**Implemented** by [005](../specs/005-step-retry/spec.md). An event for a step that already completed for the
+instance is recognized after the unit of work's locked read and reported `DUPLICATE`: the step does not run, nothing
+is written. This uses the instance's own step records, with no separate uniqueness table. Behind it, every command a
+step sends carries a `CommandId` derived from the instance, the step, the command type and its position among
+commands of that type in the step run. The identity is the same on every retry, redelivery and process. A handler
+receives it as a parameter and passes it to outside systems as their idempotency key. The identities a step's
+handlers handled commit with its `StepRecord`, and a command whose identity is already recorded is not handled again.
 
-A second, coarser-grained idempotency concern also needs coverage: deduplicating the *triggering command*
-itself (e.g. two requests to accept the same booking arriving concurrently) before a saga instance is even
-created or resumed, not just deduplicating individual step execution within an existing instance.
+Still a gap: deduplicating the *triggering command* or request (two concurrent requests to accept the same booking)
+before a saga instance exists, and a redelivered start event after a saga ended, which starts a new saga
+(G-005-04).
 
 ### Per-step retry policy with failure classification
 
-Each step must be able to declare its own retry policy (max attempts, backoff strategy) because different
-steps call different downstream systems with different failure characteristics. Retries must apply only to
-transient infrastructure failures (timeouts, connection errors) — never to domain rule violations, which are
-terminal and resolve via compensation or intervention (see below). This means the framework needs its own
-failure-classification contract (e.g. a marker interface or exception hierarchy a step can throw to signal
-"transient" vs. "terminal") that doesn't depend on any particular retry library's exception taxonomy, since
-`saga-forge-core` has zero runtime dependencies and the eventual Spring starter should not require step
-authors to catch or throw a Spring-specific exception type just to get correct retry behavior.
+**Implemented** by [005](../specs/005-step-retry/spec.md), framework-owned (Constitution Principle II):
 
-Retry attributes do not belong on `@SagaStep` as an alias into a third-party retry annotation — they must be
-framework-owned primitive data (attempt count, backoff parameters) that the engine itself reads and executes,
-so the same `@SagaStep` contract can eventually be honored by a non-Spring runtime. Any addition of retry
-attributes to `@SagaStep` must be proposed as a change to `.kiro/specs/saga-forge-framework/design.md` first,
-since it changes the annotation's formal contract and validation rules.
+- A step declares `@SagaStep(retry = @RetryPolicy(maxAttempts, initialBackoffMillis, multiplier, maxBackoffMillis,
+  retryOn))`. The scanner validates it (rule R19, Property 29 in `.kiro/specs/saga-forge-framework/design.md`), and
+  engine startup rejects a policy whose total wait exceeds `SagaEngine.Builder.maxTotalRetryBackoff` (default 30 s).
+- Failures are classified with the core markers `TransientFailure` and `FinalFailure`, implemented by any exception
+  class, and the policy's `retryOn` types. The result is `FailureClassification`: `TRANSIENT` (retried), `FINAL`,
+  `EXHAUSTED` (transient, attempts used up) or `UNCLASSIFIED` (unmarked and not listed, for example a programming
+  error; never retried).
+- A retry re-runs the whole unit of work from its triggering event after an in-process, interruptible wait, holding
+  the instance's in-process lock throughout. Before each wait the next attempt is claimed on
+  `SagaInstance.pendingRetry` in its own write, so a restart never grants more attempts than the policy allows. A
+  `FAILED` instance records the classification and attempt count on its `SagaFailure`.
 
-Until that design exists, any failure inside a unit of work rolls it back and ends the saga `FAILED` (see
-"Truthful state and transaction boundaries"). The retry design will revisit this: a transient failure should
-be retried rather than end the saga.
+Known limitations: no long or scheduled backoff (G-005-01); a waiting retry blocks the caller and holds the instance
+(G-005-02); a retry of a start unit of work does not resume after a crash (G-005-06).
 
 ### Transaction boundary relative to the triggering dispatch
 
@@ -237,8 +239,10 @@ A step's failure must resolve to exactly one of two outcomes:
 
 A failed saga is now recorded explicitly: after a rollback, the instance is written as `FAILED` with a
 `SagaFailure` (failed step, cause type, message, time), so it is distinguishable from a saga that hasn't run
-yet. What is still missing is the split between the two outcomes above — `saga-forge-core` does not model
-"compensatable" versus "requires intervention", and every failure ends the saga `FAILED` for now. The
+yet. Since [005](../specs/005-step-retry/spec.md) the failure carries a `FailureClassification`, which the
+compensation spec ([006](../specs/006-saga-compensation/spec.md)) builds on. What is still missing is the split
+between the two outcomes above: `saga-forge-core` does not model "compensatable" versus "requires intervention",
+and every failure that is not retried ends the saga `FAILED` for now. The
 semantics of compensation, including **when compensation is invoked automatically** (which failure
 categories, from which step) versus explicitly, belong to a separate spec. Until then, declaring
 `@SagaCompensation(forStep = "...")` only makes the compensation *discoverable*, not *automatically wired* to

@@ -70,14 +70,22 @@ public final class DifferentialRun {
 
     /**
      * What one side ended with for one instance, without {@code SagaInstance.state}, which the engine always leaves
-     * empty (G-ENG-06).
+     * empty (G-ENG-06), and without what only the engine records since {@code specs/005-step-retry}: a step's
+     * attempts and handled command identities, the failure's classification and attempt count, and a pending retry
+     * (the 002 harness is the reference for the 004 semantics only).
      */
     public record InstanceView(String sagaId, SagaStatus status, Map<String, String> associations,
             Map<String, StepRecord> steps, String outcome, SagaFailure failure) {
 
         static InstanceView of(SagaInstance instance) {
+            Map<String, StepRecord> steps = new java.util.HashMap<>();
+            instance.steps().forEach((name, step) -> steps.put(name,
+                    new StepRecord(step.status(), step.touchedAggregates())));
+            SagaFailure failure = instance.failure() == null ? null
+                    : new SagaFailure(instance.failure().stepName(), instance.failure().causeType(),
+                            instance.failure().message(), instance.failure().failedAt());
             return new InstanceView(instance.sagaId(), instance.status(), instance.associations(),
-                    Map.copyOf(instance.steps()), instance.outcome(), instance.failure());
+                    Map.copyOf(steps), instance.outcome(), failure);
         }
     }
 

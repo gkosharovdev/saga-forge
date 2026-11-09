@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
+import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -315,6 +316,62 @@ class EngineSagaLifecycleTest {
             resumed.load(stored("a", ThreeStepSaga.class, SagaStatus.RUNNING));
             assertThatThrownBy(() -> resumed.load(stored("c", ThreeStepSaga.class, SagaStatus.RUNNING)))
                     .isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("pending retry (specs/005-step-retry research §9, tasks.md T055)")
+    class PendingRetries {
+
+        private PendingRetry claimFor(String triggerStep) {
+            SagaFailure failure = SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("timeout"),
+                    START, io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.TRANSIENT, 1);
+            return new PendingRetry(triggerStep, 2, failure);
+        }
+
+        @Test
+        @DisplayName("attemptFailed sets the claim, keeps the status and produces one ATTEMPT_FAILED entry")
+        void attemptFailed() {
+            String sagaId = started().sagaId();
+            lifecycle.drain(sagaId);
+            PendingRetry claim = claimFor(ThreeStepSaga.START_STEP);
+
+            SagaInstance instance = lifecycle.attemptFailed(sagaId, claim);
+
+            assertThat(instance.pendingRetry()).isEqualTo(claim);
+            assertThat(instance.status()).isEqualTo(SagaStatus.CREATED);
+            assertThat(lifecycle.drain(sagaId).entries()).singleElement().satisfies(entry -> {
+                assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.ATTEMPT_FAILED);
+                assertThat(entry.stepName()).isEqualTo(ThreeStepSaga.RESERVED_STEP);
+                assertThat(entry.failure()).isEqualTo(claim.lastFailure());
+            });
+        }
+
+        @Test
+        @DisplayName("only a commit for the claim's trigger step clears it; other transitions keep it")
+        void clearedOnlyForItsTriggerStep() {
+            String sagaId = started().sagaId();
+            lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.RESERVED_STEP));
+
+            lifecycle.clearPendingRetry(ThreeStepSaga.START_STEP);
+            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of());
+            SagaInstance advanced = lifecycle.advance(sagaId);
+            assertThat(advanced.pendingRetry()).isNotNull();
+
+            lifecycle.clearPendingRetry(ThreeStepSaga.RESERVED_STEP);
+            assertThat(lifecycle.drain(sagaId).instance().pendingRetry()).isNull();
+        }
+
+        @Test
+        @DisplayName("a terminal transition drops the claim")
+        void droppedWhenTerminal() {
+            String sagaId = started().sagaId();
+            lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.START_STEP));
+
+            SagaInstance failed = lifecycle.fail(sagaId, SagaFailure.of(ThreeStepSaga.START_STEP,
+                    new IllegalStateException("final"), START));
+
+            assertThat(failed.pendingRetry()).isNull();
         }
     }
 }

@@ -12,7 +12,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -25,9 +28,13 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
  *
  * <p>{@code state} and {@code steps} are {@code JSONB} through {@link JsonCodec}. {@code steps} is first mapped to
  * plain maps and lists in the shape
- * {@code {"<step>": {"status": "...", "touchedAggregates": [{"aggregateType": "...", "aggregateId": "..."}]}}},
- * because {@link JsonCodec} accepts no records. {@link SagaFailure} is flattened into the four {@code failure_*}
- * columns. Timestamps are {@code timestamptz}, written as UTC {@link OffsetDateTime}s.</p>
+ * {@code {"<step>": {"status": "...", "touchedAggregates": [{"aggregateType": "...", "aggregateId": "..."}],
+ * "attempts": n, "handledCommands": [{"sagaId": "...", "stepName": "...", "commandType": "...", "ordinal": n,
+ * "value": "..."}]}}}, because {@link JsonCodec} accepts no records; {@code attempts} and {@code handledCommands}
+ * (005) default to 1 (0 if not completed) and {@code []} when absent, so rows written before 005 load unchanged.
+ * {@link SagaFailure} is flattened into the six {@code failure_*} columns (classification and attempts since 005,
+ * defaulting to {@code UNCLASSIFIED} and 1). {@link PendingRetry} is the {@code pending_retry} {@code JSONB} column
+ * (005, contracts/storage-delta.md). Timestamps are {@code timestamptz}, written as UTC {@link OffsetDateTime}s.</p>
  *
  * <p>Rows are only ever written from an already-valid {@link SagaInstance}, so reading does not re-validate the
  * record's invariants beyond what its own constructor checks (FR-011).</p>
@@ -37,15 +44,30 @@ final class SagaInstanceRows {
     /** The {@code saga_instance} columns, in the order {@link #bindInstance} binds them. */
     static final List<String> COLUMNS = List.of("saga_id", "saga_type", "state", "status", "created_at",
             "last_modified_at", "steps", "outcome", "failure_step_name", "failure_cause_type", "failure_message",
-            "failure_failed_at");
+            "failure_failed_at", "failure_classification", "failure_attempts", "pending_retry");
 
     static final String STATE_FIELD = "saga_instance.state";
     static final String STEPS_FIELD = "saga_instance.steps";
+    static final String PENDING_RETRY_FIELD = "saga_instance.pending_retry";
 
     private static final String STATUS = "status";
     private static final String TOUCHED_AGGREGATES = "touchedAggregates";
     private static final String AGGREGATE_TYPE = "aggregateType";
     private static final String AGGREGATE_ID = "aggregateId";
+    private static final String ATTEMPTS = "attempts";
+    private static final String HANDLED_COMMANDS = "handledCommands";
+    private static final String SAGA_ID = "sagaId";
+    private static final String STEP_NAME = "stepName";
+    private static final String COMMAND_TYPE = "commandType";
+    private static final String ORDINAL = "ordinal";
+    private static final String VALUE = "value";
+    private static final String TRIGGER_STEP = "triggerStep";
+    private static final String ATTEMPTS_STARTED = "attemptsStarted";
+    private static final String LAST_FAILURE = "lastFailure";
+    private static final String CAUSE_TYPE = "causeType";
+    private static final String MESSAGE = "message";
+    private static final String FAILED_AT = "failedAt";
+    private static final String CLASSIFICATION = "classification";
 
     private SagaInstanceRows() {
     }
@@ -59,8 +81,8 @@ final class SagaInstanceRows {
     }
 
     /**
-     * Binds {@code instance} to parameters 1 to 12, in {@link #COLUMNS} order; {@code state} (3) and {@code steps}
-     * (7) are JSON text for {@code ?::jsonb} placeholders. Everything is encoded before the first parameter is
+     * Binds {@code instance} to parameters 1 to 15, in {@link #COLUMNS} order; {@code state} (3), {@code steps} (7)
+     * and {@code pending_retry} (15, or SQL {@code NULL}) are JSON text for {@code ?::jsonb} placeholders. Everything is encoded before the first parameter is
      * set, so an unsupported value fails with {@link IllegalArgumentException} before any SQL runs.
      *
      * @throws IllegalArgumentException if {@code sagaId}, {@code sagaType}, {@code status}, {@code createdAt}, or
@@ -71,6 +93,7 @@ final class SagaInstanceRows {
         requireStorable(instance);
         String state = encodeState(instance.state());
         String steps = encodeSteps(instance.steps());
+        String pendingRetry = encodePendingRetry(instance.pendingRetry());
 
         statement.setString(1, instance.sagaId());
         statement.setString(2, instance.sagaType());
@@ -81,6 +104,7 @@ final class SagaInstanceRows {
         statement.setString(7, steps);
         statement.setString(8, instance.outcome());
         bindFailure(statement, 9, instance.failure());
+        statement.setString(15, pendingRetry);
     }
 
     /**
@@ -100,7 +124,8 @@ final class SagaInstanceRows {
                 getInstant(row, "last_modified_at"),
                 decodeSteps(row.getString("steps")),
                 row.getString("outcome"),
-                failureFromRow(row));
+                failureFromRow(row),
+                decodePendingRetry(row.getString("pending_retry")));
     }
 
     // --- state ----------------------------------------------------------------------------------------------
@@ -121,6 +146,8 @@ final class SagaInstanceRows {
             Map<String, Object> step = new LinkedHashMap<>();
             step.put(STATUS, entry.getValue().status().name());
             step.put(TOUCHED_AGGREGATES, toPlain(entry.getValue().touchedAggregates()));
+            step.put(ATTEMPTS, entry.getValue().attempts());
+            step.put(HANDLED_COMMANDS, commandsToPlain(entry.getValue().handledCommands()));
             plain.put(entry.getKey(), step);
         }
         return JsonCodec.encodeObject(STEPS_FIELD, plain);
@@ -135,8 +162,14 @@ final class SagaInstanceRows {
                     requireType(String.class, path + "." + STATUS, step.get(STATUS)));
             List<AggregateReference> touched =
                     aggregatesFromPlain(path + "." + TOUCHED_AGGREGATES, step.get(TOUCHED_AGGREGATES));
+            int attempts = step.containsKey(ATTEMPTS)
+                    ? requireType(Number.class, path + "." + ATTEMPTS, step.get(ATTEMPTS)).intValue()
+                    : status == StepStatus.COMPLETED ? 1 : 0;
+            List<CommandId> commands = step.containsKey(HANDLED_COMMANDS)
+                    ? commandsFromPlain(path + "." + HANDLED_COMMANDS, step.get(HANDLED_COMMANDS))
+                    : List.of();
             try {
-                steps.put(entry.getKey(), new StepRecord(status, touched));
+                steps.put(entry.getKey(), new StepRecord(status, touched, attempts, commands));
             } catch (IllegalArgumentException e) {
                 throw new IllegalStateException(path + " holds an invalid step record: " + e.getMessage(), e);
             }
@@ -203,6 +236,12 @@ final class SagaInstanceRows {
         statement.setString(firstIndex + 1, failure == null ? null : failure.causeType());
         statement.setString(firstIndex + 2, failure == null ? null : failure.message());
         setInstant(statement, firstIndex + 3, failure == null ? null : failure.failedAt());
+        statement.setString(firstIndex + 4, failure == null ? null : failure.classification().name());
+        if (failure == null) {
+            statement.setNull(firstIndex + 5, Types.INTEGER);
+        } else {
+            statement.setInt(firstIndex + 5, failure.attempts());
+        }
     }
 
     /**
@@ -214,8 +253,100 @@ final class SagaInstanceRows {
         if (stepName == null) {
             return null;
         }
+        String classification = row.getString("failure_classification");
+        Object storedAttempts = row.getObject("failure_attempts");
+        int attempts = storedAttempts instanceof Number number && number.intValue() >= 1 ? number.intValue() : 1;
         return new SagaFailure(stepName, row.getString("failure_cause_type"), row.getString("failure_message"),
-                getInstant(row, "failure_failed_at"));
+                getInstant(row, "failure_failed_at"),
+                classification == null ? FailureClassification.UNCLASSIFIED
+                        : parseEnum(FailureClassification.class, "failure_classification", classification),
+                attempts);
+    }
+
+    // --- handled commands and pending retry (005) ------------------------------------------------------------
+
+    static List<Object> commandsToPlain(List<CommandId> ids) {
+        List<Object> plain = new ArrayList<>(ids.size());
+        for (CommandId id : ids) {
+            Map<String, Object> element = new LinkedHashMap<>();
+            element.put(SAGA_ID, id.sagaId());
+            element.put(STEP_NAME, id.stepName());
+            element.put(COMMAND_TYPE, id.commandType());
+            element.put(ORDINAL, id.ordinal());
+            element.put(VALUE, id.value());
+            plain.add(element);
+        }
+        return plain;
+    }
+
+    static List<CommandId> commandsFromPlain(String field, Object plain) {
+        List<?> elements = requireType(List.class, field, plain);
+        List<CommandId> ids = new ArrayList<>(elements.size());
+        int index = 0;
+        for (Object element : elements) {
+            String path = field + "[" + index + "]";
+            Map<?, ?> map = requireType(Map.class, path, element);
+            try {
+                ids.add(new CommandId(requireType(String.class, path + "." + SAGA_ID, map.get(SAGA_ID)),
+                        requireType(String.class, path + "." + STEP_NAME, map.get(STEP_NAME)),
+                        requireType(String.class, path + "." + COMMAND_TYPE, map.get(COMMAND_TYPE)),
+                        requireType(Number.class, path + "." + ORDINAL, map.get(ORDINAL)).intValue(),
+                        requireType(String.class, path + "." + VALUE, map.get(VALUE)), true));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(path + " holds an invalid command identity: " + e.getMessage(), e);
+            }
+            index++;
+        }
+        return ids;
+    }
+
+    /** @return {@code retry} as JSON text, or {@code null} for SQL {@code NULL} */
+    static String encodePendingRetry(PendingRetry retry) {
+        if (retry == null) {
+            return null;
+        }
+        SagaFailure failure = retry.lastFailure();
+        Map<String, Object> last = new LinkedHashMap<>();
+        last.put(STEP_NAME, failure.stepName());
+        last.put(CAUSE_TYPE, failure.causeType());
+        if (failure.message() != null) {
+            last.put(MESSAGE, failure.message());
+        }
+        last.put(FAILED_AT, failure.failedAt().toString());
+        last.put(CLASSIFICATION, failure.classification().name());
+        last.put(ATTEMPTS, failure.attempts());
+        Map<String, Object> plain = new LinkedHashMap<>();
+        plain.put(TRIGGER_STEP, retry.triggerStep());
+        plain.put(ATTEMPTS_STARTED, retry.attemptsStarted());
+        plain.put(LAST_FAILURE, last);
+        return JsonCodec.encodeObject(PENDING_RETRY_FIELD, plain);
+    }
+
+    /** @return the pending retry stored as {@code json}, or {@code null} for SQL {@code NULL} */
+    static PendingRetry decodePendingRetry(String json) {
+        if (json == null) {
+            return null;
+        }
+        String path = PENDING_RETRY_FIELD;
+        Map<String, Object> plain = JsonCodec.decodeObject(path, json);
+        Map<?, ?> last = requireType(Map.class, path + "." + LAST_FAILURE, plain.get(LAST_FAILURE));
+        String lastPath = path + "." + LAST_FAILURE;
+        try {
+            SagaFailure failure = new SagaFailure(
+                    requireType(String.class, lastPath + "." + STEP_NAME, last.get(STEP_NAME)),
+                    requireType(String.class, lastPath + "." + CAUSE_TYPE, last.get(CAUSE_TYPE)),
+                    last.get(MESSAGE) == null ? null
+                            : requireType(String.class, lastPath + "." + MESSAGE, last.get(MESSAGE)),
+                    Instant.parse(requireType(String.class, lastPath + "." + FAILED_AT, last.get(FAILED_AT))),
+                    parseEnum(FailureClassification.class, lastPath + "." + CLASSIFICATION,
+                            requireType(String.class, lastPath + "." + CLASSIFICATION, last.get(CLASSIFICATION))),
+                    requireType(Number.class, lastPath + "." + ATTEMPTS, last.get(ATTEMPTS)).intValue());
+            return new PendingRetry(requireType(String.class, path + "." + TRIGGER_STEP, plain.get(TRIGGER_STEP)),
+                    requireType(Number.class, path + "." + ATTEMPTS_STARTED, plain.get(ATTEMPTS_STARTED)).intValue(),
+                    failure);
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(path + " holds an invalid pending retry: " + e.getMessage(), e);
+        }
     }
 
     // --- timestamps -----------------------------------------------------------------------------------------

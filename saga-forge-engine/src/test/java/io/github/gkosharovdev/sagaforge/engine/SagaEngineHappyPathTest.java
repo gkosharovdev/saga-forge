@@ -141,7 +141,13 @@ class SagaEngineHappyPathTest {
             assertThat(instance.outcome()).isEqualTo(ThreeStepSaga.END_STEP);
             assertThat(instance.failure()).isNull();
             assertThat(instance.associations()).isEqualTo(Map.of("orderId", ORDER));
-            assertThat(instance.steps()).isEqualTo(Map.of(
+            assertThat(instance.steps().values()).allSatisfy(step -> assertThat(step.handledCommands())
+                    .hasSizeLessThanOrEqualTo(1)
+                    .allSatisfy(id -> assertThat(id.sagaId()).isEqualTo(result.sagaId())));
+            Map<String, StepRecord> withoutCommands = new java.util.HashMap<>();
+            instance.steps().forEach((name, step) -> withoutCommands.put(name,
+                    StepRecord.completed(step.touchedAggregates(), step.attempts(), List.of())));
+            assertThat(withoutCommands).isEqualTo(Map.of(
                     ThreeStepSaga.START_STEP, StepRecord.completed(List.of(AggregateReference.of(Reservation.class,
                             ReservationService.reservationIdFor(ORDER)))),
                     ThreeStepSaga.RESERVED_STEP, StepRecord.completed(List.of(AggregateReference.of(Invoice.class,

@@ -44,6 +44,8 @@ class OrderProcessingSagaEngineTest {
     private final InMemorySagaContextStore contextStore = new InMemorySagaContextStore();
     private final TestTransport transport = new TestTransport();
     private final OrderRepository orders = new OrderRepository();
+    private final PaymentProvider provider = new PaymentProvider();
+    private final List<java.time.Duration> waits = new java.util.ArrayList<>();
 
     private SagaEngine startedEngine() {
         SagaEngine engine = SagaEngine.builder()
@@ -52,7 +54,9 @@ class OrderProcessingSagaEngineTest {
                 .contextStore(contextStore)
                 .transactions(boundary)
                 .dispatcher(transport)
-                .handlerInstances(new MapHandlerInstanceProvider().register(orders).register(new PaymentService()))
+                .handlerInstances(new MapHandlerInstanceProvider().register(orders)
+                        .register(new PaymentService(provider)))
+                .retryPause(waits::add)
                 .build();
         engine.start();
         transport.connect(engine);
@@ -139,5 +143,41 @@ class OrderProcessingSagaEngineTest {
 
         assertThat(transport.registeredSagaTypes()).containsExactly(OrderProcessingSaga.class);
         assertThat(contextStore.all()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("005: a payment provider timeout is retried; the customer is charged once and the order completes")
+    void timeoutIsRetriedWithoutChargingTwice() {
+        startedEngine();
+        orders.save(new Order(ORDER));
+        provider.timeOutNext(1);
+
+        SagaHandlingResult result = onlyResult(transport.deliver(new OrderCreatedEvent(ORDER, AMOUNT)));
+
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
+        assertThat(provider.charges()).hasSize(1);
+        assertThat(provider.charges().values().iterator().next()).isEqualByComparingTo(AMOUNT);
+        assertThat(waits).containsExactly(java.time.Duration.ofMillis(200));
+        SagaInstance instance = committed(result.sagaId());
+        assertThat(instance.steps().values()).extracting(StepRecord::attempts).containsOnly(2);
+        assertThat(instance.steps().get("handleOrderCreated").handledCommands()).singleElement()
+                .satisfies(id -> assertThat("payment-" + id.value()).isEqualTo(
+                        provider.charges().keySet().iterator().next()));
+    }
+
+    @Test
+    @DisplayName("005: a redelivered PaymentProcessedEvent after completion is a DUPLICATE; nothing runs again")
+    void redeliveryIsADuplicate() {
+        startedEngine();
+        orders.save(new Order(ORDER));
+        SagaHandlingResult result = onlyResult(transport.deliver(new OrderCreatedEvent(ORDER, AMOUNT)));
+        String paymentId = provider.charges().keySet().iterator().next();
+
+        SagaHandlingResult repeated = onlyResult(transport.deliver(
+                new io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent(paymentId, ORDER, AMOUNT)));
+
+        assertThat(repeated.outcome()).isEqualTo(HandlingOutcome.DUPLICATE);
+        assertThat(repeated.sagaId()).isEqualTo(result.sagaId());
+        assertThat(committed(result.sagaId()).status()).isEqualTo(SagaStatus.COMPLETED);
     }
 }

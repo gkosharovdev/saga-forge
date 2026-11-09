@@ -27,12 +27,19 @@ public enum HandlingOutcome {
      */
     DUPLICATE_START,
 
+    /**
+     * The event triggers a step that is already {@link StepStatus#COMPLETED} for the instance, whatever the
+     * instance's status: a redelivered or repeated event ({@code specs/005-step-retry} FR-006). No unit of work ran;
+     * nothing changed.
+     */
+    DUPLICATE,
+
     /** The event triggers a non-start step, but no instance of the saga type correlates. Nothing changed. */
     UNMATCHED,
 
     /**
      * The event triggers a non-start step, but only terminal instances correlate, or the locked instance turned
-     * terminal. Nothing changed.
+     * terminal, and the step has not completed for it ({@link #DUPLICATE} otherwise). Nothing changed.
      */
     UNEXPECTED,
 
@@ -40,7 +47,8 @@ public enum HandlingOutcome {
      * The event was not handled for this instance and the transport may redeliver it: either a unit of work ran
      * and lost a write-time conflict ({@link SagaConcurrencyConflictException}; rolled back, no {@code FAILED}
      * write), or the instance is still {@link SagaStatus#CREATED} because its start unit of work has not committed
-     * (no unit of work ran). Nothing changed.
+     * (no unit of work ran), or the engine was interrupted while waiting to retry the unit of work (the claimed
+     * attempt stays recorded). Nothing changed.
      */
     NOT_HANDLED
 }

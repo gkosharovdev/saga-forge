@@ -19,6 +19,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
@@ -45,13 +46,18 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * (FR-019). A parameter no resolver supports fails with {@link IllegalStateException} naming handler and
  * parameter; US6 rejects such a model at startup.</p>
  *
+ * <p>A {@code CommandId} parameter is supplied by the engine itself, before any host resolver is asked: it is the
+ * identity of the command being handled (005 contracts/command-identity.md).</p>
+ *
  * <h2>{@link #send(Object)}</h2>
  * <ul>
  *   <li>Inside an engine unit of work bound on this thread: runs the route synchronously in it. Any failure
  *       ({@code null} or non-{@code @Command} command → {@link IllegalArgumentException}, no route →
  *       {@link NoCommandHandlerException}, or an exception of the handler, loader, saver, resolver, provider or
  *       parameter resolver) first marks the current {@link LocalTransaction} rollback-only and reports itself to
- *       the unit of work, then leaves {@code send} unchanged (002 FR-012).</li>
+ *       the unit of work, then leaves {@code send} unchanged (002 FR-012). Before routing, the unit of work assigns
+ *       the command its identity; a command whose identity already committed for the instance is not handled
+ *       again ({@code saga.command.skipped}, 005 FR-004), and a handled one is recorded with the running step.</li>
  *   <li>Outside one (including a thread a handler started): validates the command, then runs the route in a new
  *       {@link NonSagaUnitOfWork} (FR-016).</li>
  * </ul>
@@ -67,15 +73,43 @@ final class EngineCommandGateway implements CommandGateway {
         void handle(Object command);
     }
 
+    /**
+     * Supplies a {@code CommandId} handler parameter: the identity of the command being handled. Consulted before
+     * the host's resolvers (005 research §2).
+     */
+    private static final HandlerParameterResolver COMMAND_ID = new HandlerParameterResolver() {
+
+        @Override
+        public boolean supports(Executable handler, Parameter parameter) {
+            return parameter.getType() == CommandId.class;
+        }
+
+        @Override
+        public Object resolve(Executable handler, Parameter parameter) {
+            return CommandIds.bound().orElseThrow(() -> new IllegalStateException(
+                    "No command is being handled on this thread for the CommandId parameter of " + handler));
+        }
+    };
+
     private final Map<Class<?>, CommandRoute> routes;
     private final TransactionBoundary transactions;
     private final Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork;
+    private final Diagnostics diagnostics;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
-            Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork) {
+            Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
         this.nonSagaUnitsOfWork = nonSagaUnitsOfWork;
+        this.diagnostics = diagnostics;
+    }
+
+    /**
+     * Whether {@code parameter} of {@code handler} is the engine-supplied {@code CommandId} (005 FR-003); startup
+     * checks count it as resolvable.
+     */
+    static boolean isCommandIdParameter(Executable handler, Parameter parameter) {
+        return COMMAND_ID.supports(handler, parameter);
     }
 
     /**
@@ -92,7 +126,7 @@ final class EngineCommandGateway implements CommandGateway {
             factory.routesOf(host).forEach((commandType, route) -> addRoute(routes, commandType, route));
         }
         return new EngineCommandGateway(routes, settings.transactions(), () -> new NonSagaUnitOfWork(settings,
-                diagnostics, settings.sources().newUnitOfWorkId()));
+                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics);
     }
 
     @Override
@@ -109,7 +143,17 @@ final class EngineCommandGateway implements CommandGateway {
     private void sendWithin(UnitOfWork unitOfWork, Object command) {
         try {
             requireCommand(command);
-            routeFor(command).handle(command);
+            CommandRoute route = routeFor(command);
+            CommandId id = unitOfWork.nextCommandId(command.getClass());
+            if (unitOfWork.alreadyHandled(id)) {
+                diagnostics.commandSkipped(id);
+                return;
+            }
+            CommandIds.withBound(id, () -> {
+                route.handle(command);
+                return null;
+            });
+            unitOfWork.commandHandled(id);
         } catch (RuntimeException | Error failure) {
             transactions.current().ifPresent(LocalTransaction::setRollbackOnly);
             unitOfWork.failed(failure);
@@ -230,6 +274,8 @@ final class EngineCommandGateway implements CommandGateway {
                 if (commandPosition < 0 && parameter.getType().isAnnotationPresent(Command.class)) {
                     commandPosition = position;
                     resolvers.add(Optional.empty());
+                } else if (COMMAND_ID.supports(handler, parameter)) {
+                    resolvers.add(Optional.of(COMMAND_ID));
                 } else {
                     resolvers.add(candidates.stream()
                             .filter(candidate -> candidate.supports(handler, parameter))

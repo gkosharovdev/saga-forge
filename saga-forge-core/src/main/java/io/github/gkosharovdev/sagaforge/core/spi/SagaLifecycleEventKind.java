@@ -13,5 +13,10 @@ public enum SagaLifecycleEventKind {
     /** An {@code @EndSaga} step ended the instance, now {@link SagaStatus#COMPLETED}, with that step as outcome. */
     COMPLETED,
     /** The {@code FAILED} write after a rolled-back unit of work: the instance is now {@link SagaStatus#FAILED}. */
-    FAILED
+    FAILED,
+    /**
+     * A unit of work failed transiently and the engine claimed another attempt, in its own write, before waiting
+     * for it ({@code specs/005-step-retry} FR-018). The instance's status is unchanged.
+     */
+    ATTEMPT_FAILED
 }

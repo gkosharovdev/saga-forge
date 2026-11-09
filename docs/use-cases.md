@@ -24,7 +24,8 @@ public class OrderProcessingSaga {
     private CommandGateway commandGateway;
 
     @StartSaga
-    @SagaStep(associationProperty = "orderId")
+    @SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+            multiplier = 2.0, maxBackoffMillis = 1_000)) // a payment-provider timeout is retried
     public void handleOrderCreated(OrderCreatedEvent event) {
         context.putState("orderAmount", event.amount());
         commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
@@ -59,8 +60,10 @@ The two Command Handlers, abbreviated. `PaymentService` is a service-hosted hand
 ```java
 public class PaymentService {
     @CommandHandler
-    public void handle(ProcessPaymentCommand command) {
-        String paymentId = UUID.randomUUID().toString(); // a real service would charge the customer here
+    public void handle(ProcessPaymentCommand command, CommandId commandId) {
+        // The identity is the same on every retry and redelivery: the provider charges once per key. A timeout
+        // throws PaymentGatewayTimeoutException, which implements TransientFailure, so the step is retried.
+        String paymentId = provider.charge(commandId.value(), command.amount());
         DomainEvents.record(new PaymentProcessedEvent(paymentId, command.orderId(), command.amount()));
     }
 }
@@ -195,14 +198,15 @@ separate spec. There, the availability compensation targets `onBookingRequested`
 `ClaimAvailability` Command caused the effect; an earlier draft of this document wrongly mapped it to
 `onAvailabilityClaimed`.
 
-Production lessons this example carries, none of which `saga-forge-core` enforces yet (see architecture.md's
-feature gaps):
+Production lessons this example carries (see architecture.md's feature gaps):
 
-- **Idempotency is still a gap.** If `AvailabilityClaimedEvent` is delivered twice (at-least-once transport),
-  `onAvailabilityClaimed` must not dispatch `InitiatePayment` a second time. That needs a uniqueness check on
-  `(sagaId, stepName)` at the storage layer before the Step runs, which is not modeled yet.
-- **Retry is still a gap.** A transient failure (a timeout calling the payment gateway) should be retried with
-  backoff. Today any rollback ends the saga `FAILED`; a Step retry design will revisit this.
+- **Idempotency** ([005](../specs/005-step-retry/spec.md)). If `AvailabilityClaimedEvent` is delivered twice
+  (at-least-once transport) after `onAvailabilityClaimed` completed, the engine reports `DUPLICATE` and does not
+  dispatch `InitiatePayment` again. If the unit of work is run again before it committed, `InitiatePayment` keeps its
+  `CommandId`, and a payment handler that passes it to the gateway as the idempotency key charges once.
+- **Retry** ([005](../specs/005-step-retry/spec.md)). A transient failure (a timeout calling the payment gateway,
+  marked `TransientFailure` or listed in the step's `retryOn`) is retried with backoff under the step's
+  `@RetryPolicy`. Running out of attempts ends the saga `FAILED` with classification `EXHAUSTED`.
 - **Domain rejection leads to compensation.** A domain rejection (card declined) should not be retried; it
   should compensate the availability claim. That behavior is defined in a separate compensation spec.
 

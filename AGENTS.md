@@ -43,6 +43,15 @@
   rejection and fail-fast startup validation. Production implementations of `SagaContext`, `SagaLifecycle`,
   `CommandGateway` and `EventPublisher` live there, package-private. The 002 harness stays as a test-only reference
   the engine is compared against.
+- Implemented and unit-tested, added by `specs/005-step-retry`: step retry and idempotent command processing.
+  `@SagaStep(retry = @RetryPolicy(...))` (scanner rule R19, Property 29); core `core.failure` markers
+  `TransientFailure`/`FinalFailure` and `FailureClassification` (`TRANSIENT`, `FINAL`, `EXHAUSTED`,
+  `UNCLASSIFIED`); `core.command.CommandId`, supplied to a `@CommandHandler` that declares a `CommandId` parameter;
+  `HandlingOutcome.DUPLICATE` for an event of an already completed step; `SagaInstance.pendingRetry`,
+  `StepRecord.attempts`/`handledCommands`, `SagaFailure.classification`/`attempts`, lifecycle kind `ATTEMPT_FAILED`.
+  The engine's `AttemptLoop` re-runs a unit of work after an in-process, bounded wait (`RetryPause`,
+  `maxTotalRetryBackoff`, default 30 s). Postgres persists the new fields; existing databases apply
+  `schema-upgrade-005.sql`.
 - Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; the 004 container
   tests have not been run yet (G-003-23).
 - Not implemented: MySQL and MongoDB storage, both transports (no `EventDispatcher` implementation), and Spring Boot
@@ -134,11 +143,17 @@
 - `.specify/memory/memory.md` is the register of known gaps, deferred decisions and limitations (IDs such as
   `G-003-01`); check it before extending a feature.
 - See `docs/architecture.md#feature-gaps` for the full backlog: queryable process-level state (highest
-  priority), idempotent step execution, per-step retry with failure classification, transaction boundary
-  relative to the triggering dispatch, and failure categorization with compensation dispatch.
-- `@SagaStep` has no retry/backoff attributes yet. Don't silently add this without updating the spec in
-  `.kiro/specs/saga-forge-framework/` first — retry attributes must be framework-owned, not aliased into a
-  third-party retry annotation.
+  priority), transaction boundary relative to the triggering dispatch, and failure categorization with
+  compensation dispatch (`specs/006-saga-compensation`, specified, builds on 005's classification).
+- Retry attributes live on `@SagaStep(retry = @RetryPolicy(...))`. Change them only together with
+  `.kiro/specs/saga-forge-framework/design.md` (R19, Property 29); keep them framework-owned, never an alias of a
+  third-party retry annotation. A handler that calls an outside system takes a `CommandId` parameter and passes
+  `commandId.value()` on as the idempotency key.
+- Retry and idempotency limitations, see memory.md G-005-01 to G-005-07: no long or scheduled backoff (G-005-01); a
+  waiting retry blocks the caller and holds the instance (G-005-02); outside systems are safe only if handlers pass
+  the identity on (G-005-03); the triggering request is not deduplicated before a saga exists (G-005-04); a crash
+  during a fresh event's first attempt is not counted (G-005-05); a retry of a start unit of work does not resume
+  after a crash (G-005-06).
 - No compensation-vs-intervention-required outcome categorization exists in code yet.
 - `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the engine leaves
   `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
@@ -151,8 +166,8 @@
 - Deferred to the Spring starter: a Spring Data repository adapter behind `AggregateResolver`.
 - Compensation semantics (when/how `@SagaCompensation` runs) belong to a separate spec; a `FAILED` saga's
   committed effects currently stay in place.
-- Step retry needs its own design; today a rollback ends the saga `FAILED`. Don't preclude retrying a failed
-  step with the `SagaContext` values it already wrote.
+- A retried attempt sees the `SagaContext` values earlier attempts wrote (they live outside the transaction); steps
+  should write them so that writing again is harmless.
 - Deferred: whether a `@StartSaga` step may also be a `@CommandHandler`. Dropped for now: programmatic abort
   (e.g. `SagaLifecycle.abort()`) — don't add it without a spec.
 - No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled

@@ -180,9 +180,27 @@ Marks a method that terminates a saga instance. Must co-occur with `@SagaStep`. 
 @Documented
 public @interface SagaStep {
     String associationProperty();
+    RetryPolicy retry() default @RetryPolicy;   // specs/005-step-retry
 }
 ```
 Marks an event-handling method. The `associationProperty` names the field on the incoming `@DomainEvent` class used to correlate the event to the correct saga instance. The method must accept exactly one parameter whose type is annotated with `@DomainEvent`, must return `void` (commands are dispatched through the saga's `CommandGateway` field), and no two `@SagaStep` methods of one saga may react to the same event type (`specs/002-transactional-step-sequence` FR-001, FR-006).
+
+`retry` declares how often the engine may run the step's unit of work and how long it waits in between (`specs/005-step-retry` FR-011). The default is one attempt, so a step without a policy behaves as before 005.
+
+#### @RetryPolicy
+```java
+@Target({})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface RetryPolicy {
+    int maxAttempts() default 1;                         // attempts including the first, >= 1
+    long initialBackoffMillis() default 0;               // wait before attempt 2, >= 0
+    double multiplier() default 1.0;                     // growth per further attempt, >= 1.0 (1.0 = fixed)
+    long maxBackoffMillis() default 0;                   // cap on one wait; 0 = same as initialBackoffMillis
+    Class<? extends Throwable>[] retryOn() default {};   // unmarked failure types treated as transient
+}
+```
+Used only as the value of `@SagaStep.retry`. Framework-owned primitive data, not an alias of a third-party retry annotation (Constitution Principle II). The wait before attempt `k >= 2` is `min(initialBackoffMillis * multiplier^(k-2), cap)`. Which failures are retried is decided with the core markers `TransientFailure` / `FinalFailure` and `retryOn` (`specs/005-step-retry/contracts/retry-policy.md`); the total wait is bounded by the engine at startup, which the scanner cannot check.
 
 #### @SagaCompensation
 ```java
@@ -382,8 +400,9 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R16 | — (spec 002 FR-014) | `@DomainEvent(aggregate = X.class)` names a class annotated `@Aggregate` (`validateAll` only) |
 | R17 | — (spec 002 FR-013) | `@AggregateLoader`: exactly one parameter, returns an `@Aggregate` type; `@AggregateSaver`: exactly one `@Aggregate`-typed parameter (host rule, `validateAll` only) |
 | R18 | — (spec 002 FR-014) | At most one well-formed `@AggregateLoader` and one well-formed `@AggregateSaver` per aggregate type (model rule, `validateAll` only) |
+| R19 | — (`specs/005-step-retry` FR-012) | Every `@SagaStep.retry` policy is valid: `maxAttempts >= 1`; `initialBackoffMillis >= 0`; `multiplier` finite and `>= 1.0`; `maxBackoffMillis` is `0` or `>= initialBackoffMillis`; `retryOn` names no `java.lang.Error` type; with `maxAttempts == 1` every other attribute keeps its default |
 
-R1 to R11 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 run only in `validateAll`.
+R1 to R11 and R19 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 run only in `validateAll`.
 
 ```java
 package io.github.gkosharovdev.sagaforge.core.scanner;
@@ -409,6 +428,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateNoCommandHandlers(sagaClass, errors);                      // R10
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
+        validateRetryPolicies(sagaClass, stepMethods, errors);             // R19
 
         return new SagaValidationResult(sagaClass, errors);
     }
@@ -763,9 +783,15 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/004-saga-engine` FR-025, FR-026, SC-003** (tests: `ConcurrentUnitsOfWorkTest`, `ConcurrencyConflictTest`)
 
+### Property 29: RetryPolicy values validity
+
+*For any* `@SagaStep` method of a `@Saga` class, the `AnnotationScanner` shall report one validation error for each violated rule of R19 on its `retry` policy, and no R19 error for a policy that satisfies all of them (including the default `@RetryPolicy`).
+
+**Validates: Feature spec `specs/005-step-retry` FR-011, FR-012** (test: `RetryPolicyValidationTest`, including the property `retryPolicyValidity`)
+
 ### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
 
-None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule.
+None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged.
 
 ## Error Handling
 
@@ -804,6 +830,7 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Saver shape (R17) | `@AggregateSaver` without exactly one `@Aggregate`-typed param | `"@AggregateSaver method {methodName} in {className} must take exactly one @Aggregate-typed parameter"` |
 | Duplicate loader (R18, model error) | >1 well-formed `@AggregateLoader` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateLoader: {className}.{methodName}, {className}.{methodName}"` |
 | Duplicate saver (R18, model error) | >1 well-formed `@AggregateSaver` for one aggregate type | `"Aggregate {aggregateType} has more than one @AggregateSaver: {className}.{methodName}, {className}.{methodName}"` |
+| Invalid retry policy (R19) | A `@SagaStep.retry` attribute violates R19 | `"@SagaStep method {methodName} in {className} has an invalid retry policy: {attribute} {reason}"` where `{reason}` is one of `must be at least 1, found {value}`, `must not be negative, found {value}`, `must be a finite number of at least 1.0, found {value}`, `must be 0 or at least initialBackoffMillis {initial}, found {value}`, `must not name Error type {typeName}`, `must keep its default when maxAttempts is 1` |
 
 All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, and R18 messages are sorted in ascending lexicographic order (method names for R9, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.
 
@@ -871,6 +898,7 @@ Alternative simpler approach: maintain a set of pre-built test fixture classes (
 | `validSagaClassesPassValidation` | Property 6 | For any structurally valid saga class, validation passes |
 | `nonConcreteSagaClassesRejected` | Property 7 | For any interface/abstract @Saga class, validation fails |
 | `validationResultImmutability` | Property 8 | For any SagaValidationResult, errors list is unmodifiable |
+| `retryPolicyValidity` | Property 29 | For any generated retry policy, R19 errors appear exactly for the violated rules |
 
 Properties 9 to 20 are covered by fixture-based tests with exact error messages: Properties 9 to 13 in `ReflectiveAnnotationScannerTest` (Properties 10 to 13 in its nested `TransactionalStepSequenceRuleTests`), and Properties 14 to 20 in `ValidateAllTest`.
 

@@ -23,9 +23,15 @@ import java.util.Map;
  * @param outcome          name of the reached {@code @EndSaga} step; non-null if and only if
  *                         {@code status == COMPLETED}
  * @param failure          the recorded failure; non-null if and only if {@code status == FAILED}
+ * @param pendingRetry     the attempt the engine claimed for a retry of the current unit of work; nullable, and
+ *                         {@code null} unless {@code status} is {@code CREATED} or {@code RUNNING}
+ *                         ({@code specs/005-step-retry} FR-015). Written in its own transaction, like
+ *                         {@code failure}
  * @throws IllegalArgumentException if {@code steps} is {@code null} or contains a {@code null} key or value,
  *                                  if {@code outcome} is present without {@code COMPLETED} (or absent with it),
- *                                  or if {@code failure} is present without {@code FAILED} (or absent with it)
+ *                                  if {@code failure} is present without {@code FAILED} (or absent with it), or if
+ *                                  {@code pendingRetry} is present on an instance that is not {@code CREATED} or
+ *                                  {@code RUNNING}
  */
 public record SagaInstance(
     String sagaId,
@@ -37,7 +43,8 @@ public record SagaInstance(
     Instant lastModifiedAt,
     Map<String, StepRecord> steps,
     String outcome,
-    SagaFailure failure
+    SagaFailure failure,
+    PendingRetry pendingRetry
 ) {
     public SagaInstance {
         state = Map.copyOf(state);
@@ -55,6 +62,34 @@ public record SagaInstance(
                 "failure must be non-null if and only if status is FAILED, but status is " + status
                     + " and failure is " + failure);
         }
+        boolean active = status == SagaStatus.CREATED || status == SagaStatus.RUNNING;
+        if (pendingRetry != null && !active) {
+            throw new IllegalArgumentException(
+                "pendingRetry must be null unless status is CREATED or RUNNING, but status is " + status);
+        }
+    }
+
+    /**
+     * An instance without a pending retry.
+     *
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public SagaInstance(String sagaId, String sagaType, Map<String, Object> state, Map<String, String> associations,
+            SagaStatus status, Instant createdAt, Instant lastModifiedAt, Map<String, StepRecord> steps,
+            String outcome, SagaFailure failure) {
+        this(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps, outcome, failure,
+            null);
+    }
+
+    /**
+     * @param retry the pending retry to record; nullable
+     * @return this instance with {@code pendingRetry} replaced
+     * @throws IllegalArgumentException if {@code retry} is non-null and the status is not {@code CREATED} or
+     *                                  {@code RUNNING}
+     */
+    public SagaInstance withPendingRetry(PendingRetry retry) {
+        return new SagaInstance(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps,
+            outcome, failure, retry);
     }
 
     private static Map<String, StepRecord> copySteps(Map<String, StepRecord> steps) {
