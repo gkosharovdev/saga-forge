@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
+import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
@@ -14,6 +15,8 @@ import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Collabora
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Trigger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * The {@code EventReceiver.receive} algorithm (contracts/event-receiver.md, FR-001 to FR-006).
@@ -36,9 +39,14 @@ import java.util.List;
  *   </li>
  * </ol>
  *
- * <p>Transitional (US1): an exception from storage, the creation write or a unit of work propagates from
- * {@code receive} and stops the fan-out; T053 adds the FR-005 error path, T072 the duplicate-start and instance
- * locks, T086 the reentrancy check.</p>
+ * <h2>No outcome recorded (FR-005, contracts/event-receiver.md "Failure")</h2>
+ * <p>When for a saga type or instance no outcome could be recorded (the store was unavailable in
+ * {@code findByAssociation} or {@code findByIdAndLock}, the creation write failed, or the {@code FAILED} write
+ * failed), the cause is collected and the router goes on with the remaining saga types and instances. Afterwards
+ * it logs {@code saga.event.notHandled} and throws {@link EventHandlingException} carrying the results that were
+ * recorded and every cause. A failed creation write creates nothing and has no result of its own.</p>
+ *
+ * <p>T072 adds the duplicate-start and instance locks, T086 the reentrancy check.</p>
  *
  * <p>Immutable; thread-safe if the host plug-ins are. Each call runs on the calling thread.</p>
  */
@@ -73,9 +81,13 @@ final class EventRouter {
             with.diagnostics().eventIgnored(event);
             return new HandlingReport(event, List.of());
         }
-        List<SagaHandlingResult> results = new ArrayList<>();
-        reactions.forEach(reaction -> results.addAll(handle(reaction)));
-        return new HandlingReport(event, results);
+        Attempts attempts = new Attempts();
+        reactions.forEach(reaction -> handle(reaction, attempts));
+        HandlingReport report = new HandlingReport(event, attempts.results);
+        if (!attempts.failures.isEmpty()) {
+            throw notHandled(event, report, attempts.failures);
+        }
+        return report;
     }
 
     private List<Reaction> reactionsTo(Object event) {
@@ -87,8 +99,13 @@ final class EventRouter {
         return reactions;
     }
 
-    private List<SagaHandlingResult> handle(Reaction reaction) {
-        return reaction.step().start() ? List.of(start(reaction)) : resume(reaction);
+    private void handle(Reaction reaction, Attempts attempts) {
+        if (reaction.step().start()) {
+            attempts.attempt(() -> start(reaction)).ifPresent(attempts.results::add);
+        } else {
+            attempts.attempt(() -> correlatedInstances(reaction))
+                    .ifPresent(correlated -> resume(reaction, correlated, attempts));
+        }
     }
 
     private SagaHandlingResult start(Reaction reaction) {
@@ -116,23 +133,27 @@ final class EventRouter {
         }
     }
 
-    private List<SagaHandlingResult> resume(Reaction reaction) {
-        List<SagaInstance> correlated = settings.storage()
+    /** The instances of the reaction's saga type that carry the event's association value, in storage order. */
+    private List<SagaInstance> correlatedInstances(Reaction reaction) {
+        return settings.storage()
                 .findByAssociation(reaction.step().associationProperty(), reaction.associationValue()).stream()
                 .filter(instance -> instance.sagaType().equals(reaction.saga().typeName()))
                 .toList();
+    }
+
+    /** One unit of work per active instance, each attempted on its own; else one UNEXPECTED or UNMATCHED result. */
+    private void resume(Reaction reaction, List<SagaInstance> correlated, Attempts attempts) {
         List<SagaInstance> active = correlated.stream()
                 .filter(instance -> !EngineSagaLifecycle.isTerminal(instance.status()))
                 .toList();
         if (!active.isEmpty()) {
-            List<SagaHandlingResult> results = new ArrayList<>();
-            active.forEach(instance -> results.add(runUnitOfWork(reaction, instance.sagaId(), false)));
-            return results;
+            active.forEach(instance -> attempts.attempt(() -> runUnitOfWork(reaction, instance.sagaId(), false))
+                    .ifPresent(attempts.results::add));
+        } else if (!correlated.isEmpty()) {
+            attempts.results.add(unexpected(reaction, correlated.get(correlated.size() - 1).sagaId()));
+        } else {
+            attempts.results.add(unmatched(reaction));
         }
-        if (!correlated.isEmpty()) {
-            return List.of(unexpected(reaction, correlated.get(correlated.size() - 1).sagaId()));
-        }
-        return List.of(unmatched(reaction));
     }
 
     private SagaHandlingResult runUnitOfWork(Reaction reaction, String sagaId, boolean started) {
@@ -156,6 +177,14 @@ final class EventRouter {
         return noUnitOfWork(reaction, HandlingOutcome.UNMATCHED, null);
     }
 
+    private EventHandlingException notHandled(Object event, HandlingReport report, List<RuntimeException> causes) {
+        EventHandlingException failure = new EventHandlingException("No outcome could be recorded for "
+                + causes.size() + " of the saga types or instances reacting to " + event.getClass().getName()
+                + "; the event should be redelivered", report, List.<Throwable>copyOf(causes));
+        with.diagnostics().eventNotHandled(event, failure);
+        return failure;
+    }
+
     private static SagaHandlingResult noUnitOfWork(Reaction reaction, HandlingOutcome outcome, String sagaId) {
         return new SagaHandlingResult(reaction.saga().typeName(), sagaId, outcome, false, null, null, null,
                 List.of());
@@ -175,5 +204,25 @@ final class EventRouter {
                 "Event " + event.getClass().getName() + " has no value for association property '"
                         + step.associationProperty() + "' of step " + step.name() + " of saga "
                         + saga.typeName()));
+    }
+
+    /**
+     * The results recorded for one event and the failures for which none could be; confined to one
+     * {@code receive} call.
+     */
+    private static final class Attempts {
+
+        private final List<SagaHandlingResult> results = new ArrayList<>();
+        private final List<RuntimeException> failures = new ArrayList<>();
+
+        /** Runs {@code work}; a {@link RuntimeException} is collected as a failure and yields empty. */
+        <T> Optional<T> attempt(Supplier<T> work) {
+            try {
+                return Optional.of(work.get());
+            } catch (RuntimeException failure) {
+                failures.add(failure);
+                return Optional.empty();
+            }
+        }
     }
 }

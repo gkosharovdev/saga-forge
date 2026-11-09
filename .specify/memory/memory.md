@@ -497,6 +497,15 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Origin**: 004 T031, T035, T038, T041, T042.
 - **Status**: open (confirm or change in the US1 tests or US6).
 
+### G-ENG-21: `SagaObjectProvider.supports` is asked per unit of work, not at engine start
+- **Description**: The US1 unit of work called `SagaObjectProvider.newInstance` for every saga type, whether or not
+  `supports` accepted it, contrary to the SPI Javadoc. Fixed in 004 T052: a unit of work now uses the provider only if
+  `supports(type)` is true, else the no-argument constructor. The SPI says `supports` is called once at engine start;
+  until US6 (T095) resolves the provider per saga type at `start()`, it is asked at the start of every unit of work.
+  `supports` is side-effect free by contract, so the only cost is the repeated call.
+- **Origin**: 004 T038 (found while writing T056's `FailureSagaObjects`).
+- **Status**: open (resolve at `start()` in T095).
+
 ## Dependency alignment with Spring Boot 4.1.2 (future starter feature)
 
 Noted only; nothing is bumped until the starter feature decides.

@@ -1,7 +1,6 @@
 package io.github.gkosharovdev.sagaforge.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowable;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
@@ -220,18 +219,13 @@ class SagaEngineHappyPathTest {
                     .build();
             engine.start();
 
-            Throwable failure = catchThrowable(() -> engine.receive(new TicketOpened("ticket-1")));
+            SagaHandlingResult result = onlyResult(engine.receive(new TicketOpened("ticket-1")));
 
-            // US1 rethrows the rolled-back unit of work's failure; from US2 on it is reported as FAILED instead.
-            if (failure != null) {
-                assertThat(failure).isInstanceOf(SagaStateTypeMismatchException.class);
-            } else {
-                SagaInstance instance = storage.committed().all().get(0);
-                assertThat(instance.status()).isEqualTo(SagaStatus.FAILED);
-                assertThat(instance.failure().causeType()).isEqualTo(SagaStateTypeMismatchException.class.getName());
-            }
+            assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
+            assertThat(result.failure().stepName()).isEqualTo("onTicketPriced");
+            assertThat(result.failure().causeType()).isEqualTo(SagaStateTypeMismatchException.class.getName());
             assertThat(storage.committed().all()).singleElement().satisfies(instance -> {
-                assertThat(instance.status()).isNotEqualTo(SagaStatus.COMPLETED);
+                assertThat(instance.status()).isEqualTo(SagaStatus.FAILED);
                 assertThat(instance.steps().values()).extracting(StepRecord::status)
                         .doesNotContain(StepStatus.COMPLETED);
             });

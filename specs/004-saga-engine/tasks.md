@@ -561,14 +561,14 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
 
 ### Implementation for User Story 2
 
-- [ ] T051 [P] [US2] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/FailedWrite.java`
+- [x] T051 [P] [US2] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/FailedWrite.java`
   (data-model.md row 9, research.md §7): in its own transaction `begin()`, `findByIdAndLock(sagaId)`, then if the
   stored instance is terminal (or missing) write nothing, roll back, log `saga.instance.failedNotRecorded` and report
   `FAILED` with the failure and the instance unchanged; else `EngineSagaLifecycle.load` + `fail(sagaId, failure)`,
   `save(failed, [FAILED])`, `commit()`, log `saga.instance.failed`. It always updates the committed creation record,
   never creates one. A failure of this write propagates to the caller (no outcome recorded, FR-005). G-ENG-10 window
   documented in the Javadoc.
-- [ ] T052 [US2] Extend `.../engine/internal/SagaUnitOfWork.java` (shared) with the failure path of data-model.md
+- [x] T052 [US2] Extend `.../engine/internal/SagaUnitOfWork.java` (shared) with the failure path of data-model.md
   row 9: any exception from loading the context record, creating the saga object, a step, a handler (reported through
   `failed(Throwable)` even if the step caught it), `save` or `commit`, and a rollback-only transaction found before
   `save`, ends the run: roll back (if still active), discard queue, buffer and pending entries, build
@@ -576,13 +576,13 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   clock.instant())`, log `saga.uow.rolledBack` (with the throwable), run `FailedWrite`, return a `FAILED`
   `SagaHandlingResult` with that failure (`started` as passed in). No further step runs. A failure of `FailedWrite`
   propagates. Remove the T038 rethrow.
-- [ ] T053 [US2] Extend `.../engine/internal/EventRouter.java` (shared) with the FR-005 error path (contracts/
+- [x] T053 [US2] Extend `.../engine/internal/EventRouter.java` (shared) with the FR-005 error path (contracts/
   event-receiver.md "Failure"): when for an instance no outcome could be recorded (storage unavailable in
   `findByAssociation`/`findByIdAndLock`, creation write failed, `FailedWrite` failed), record the cause, continue with
   the remaining saga types and instances, then throw `EventHandlingException` carrying the partial `HandlingReport`
   and all causes; log `saga.event.notHandled`. A creation-write failure creates nothing and has no `SagaHandlingResult`
   of its own.
-- [ ] T054 [P] [US2] Create public `saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/JdbcTransactionBoundary.java`
+- [x] T054 [P] [US2] Create public `saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/JdbcTransactionBoundary.java`
   implementing `TransactionBoundary` over a `DataSource` per contracts/transaction-boundary.md "JdbcTransactionBoundary":
   `begin()` throws `IllegalStateException` if a transaction is bound on the thread, else takes a connection, remembers
   and sets `autoCommit = false`, binds it; `commit()`/`rollback()` end it, restore `autoCommit`, close and unbind (a
@@ -590,7 +590,7 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   throws `IllegalStateException`; `resource(Connection.class)` returns the bound connection, any other type empty.
   Javadoc: never suspends; the pool needs two connections per concurrent unit of work (transaction + context store).
   Mention it in `.../storage/postgres/package-info.java`. JDBC only, no dependency (FR-023, FR-037).
-- [ ] T055 [US2] Extend `.../storage/postgres/PostgresStorageProvider.java` (shared) with joining (FR-022, FR-023,
+- [x] T055 [US2] Extend `.../storage/postgres/PostgresStorageProvider.java` (shared) with joining (FR-022, FR-023,
   contracts/storage-provider.md table): add constructor `(DataSource, TransactionBoundary)` (both non-null); for
   `save(instance, entries)`, `findById`, `findByAssociation` and `delete`, when the boundary has an active transaction
   use `current().flatMap(tx -> tx.resource(Connection.class))` (absent → `IllegalStateException` naming
@@ -601,7 +601,7 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
 
 ### Unit tests for User Story 2
 
-- [ ] T056 [P] [US2] Create the failure fixture in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/failure/`
+- [x] T056 [P] [US2] Create the failure fixture in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/failure/`
   (SC-002 positions; `ThreeStepSaga` has service handlers only): `FailureSaga` (`@StartSaga onParcelRequested`
   writes context `weight` and sends `ChargeFee`; `onFeeCharged` writes context `feeId` and sends `ReserveSlot`;
   `@EndSaga onSlotReserved` sends `PrintLabel`; all `associationProperty = "parcelId"`); service `FeeService`
@@ -617,7 +617,7 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   `SagaObjectProvider` injecting the `FaultPlan`); `FailingHandlerInstances` (wraps `MapHandlerInstanceProvider`,
   throws at `HANDLER_INSTANCE_PROVIDER`). `FeeService`, `SlotRepository` and `LabelResolver` are `Snapshottable` and
   expose their committed state.
-- [ ] T057 [US2] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/FailurePositionTest.java`
+- [x] T057 [US2] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/FailurePositionTest.java`
   (`@ParameterizedTest` over every `FaultPoint`, plus the instance write via
   `TransactionalInMemoryStorageProvider.failNextSave` and the commit via `InMemoryTransactionBoundary.failNextCommit`,
   so at least 14 positions): zero aggregate changes in `FeeService`, `SlotRepository`, `LabelResolver`; no step of the
@@ -628,27 +628,27 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   delivered for the `FAILED` instance → `UNEXPECTED`, no effect (US2-5); a failing `FAILED` write
   (`failNextFindByIdAndLock` armed from inside the failing step, so it hits the `FAILED` write's lock, not the unit
   of work's) → `EventHandlingException` with the partial report, instance as last committed; a failing creation write → `EventHandlingException`, no instance (FR-005).
-- [ ] T058 [US2] Create `.../engine/FailureDifferentialTest.java` with `support/DifferentialRun`: the 002 failure
+- [x] T058 [US2] Create `.../engine/FailureDifferentialTest.java` with `support/DifferentialRun`: the 002 failure
   scenarios on `ThreeStepSaga` (each of `ReservationService`, `InvoiceService`, `ShipmentService` armed with
   `failNext()`) and on `CreateBookingSaga`'s first unit of work (the booking fixtures' `FaultSwitch`) give equal status,
   step records, failure step and cause type, aggregate state, context values and dispatched events on harness and
   engine (SC-001, SC-009).
-- [ ] T059 [US2] Create `.../engine/LifecycleHistoryPropertyTest.java` (jqwik, `@Property(tries = 200)`, Property 27,
+- [x] T059 [US2] Create `.../engine/LifecycleHistoryPropertyTest.java` (jqwik, `@Property(tries = 200)`, Property 27,
   Javadoc `**Validates: Requirements FR-033, SC-010**`): for any `Optional<FaultPoint>` on `FailureSaga`, the stored
   history is `CREATED` then either `STEP_COMPLETED(onParcelRequested)`, `STEP_COMPLETED(onFeeCharged)`,
   `STEP_COMPLETED(onSlotReserved)`, `COMPLETED(onSlotReserved)` or `FAILED`; numbers consecutive from 0; no entry of
   the rolled-back unit of work.
-- [ ] T060 [P] [US2] Create `saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/JdbcFake.java`
+- [x] T060 [P] [US2] Create `saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/JdbcFake.java`
   (JDK only, `java.lang.reflect.Proxy` over `DataSource`, `Connection`, `PreparedStatement`, `ResultSet`; research.md
   §15): records per connection the SQL text, bound parameters per batch row, and `setAutoCommit`/`commit`/`rollback`/
   `close` calls; returns scripted rows chosen by SQL prefix (instance rows with an `associations` JSON column, the
   `NEXT_SEQUENCE_NUMBER` value, the upsert's `inserted` flag); can throw a `SQLException` for a matching statement.
   Never references `PostgresTestSupport`.
-- [ ] T061 [US2] Create `.../postgres/JdbcTransactionBoundaryTest.java` over `JdbcFake`: `begin` sets `autoCommit =
+- [x] T061 [US2] Create `.../postgres/JdbcTransactionBoundaryTest.java` over `JdbcFake`: `begin` sets `autoCommit =
   false` and binds; `current()`/`resource(Connection.class)` return it, other types empty; `commit`/`rollback` end,
   restore `autoCommit`, close; a second `begin` on the thread throws; commit on rollback-only rolls back and throws;
   ended-transaction calls throw; a failing commit is wrapped and the connection still closed.
-- [ ] T062 [US2] Create `.../postgres/PostgresStorageProviderJoinTest.java` over `JdbcFake`: joined (inside a
+- [x] T062 [US2] Create `.../postgres/PostgresStorageProviderJoinTest.java` over `JdbcFake`: joined (inside a
   `JdbcTransactionBoundary` transaction) `save(instance, entries)`, `findById`, `findByAssociation` and `delete` use
   the bound connection and never commit, roll back, change `autoCommit` or close it; history rows are inserted in the
   given order, numbered from the scripted `MAX + 1`; a `SQLException` surfaces as `UncheckedSqlException`, marks the
@@ -657,7 +657,7 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   `Connection` resource → `IllegalStateException`. Not joined: 003's own-connection, `autoCommit=false`, commit,
   restore, close sequence unchanged; argument checks of T012 before any SQL. `PostgresSagaContextStore.save` takes its
   own connection while a transaction is bound (FR-022).
-- [ ] T063 [P] [US2] Create `.../postgres/JoinedTransactionContainerTest.java`, `@Tag("container")`, using
+- [x] T063 [P] [US2] Create `.../postgres/JoinedTransactionContainerTest.java`, `@Tag("container")`, using
   `PostgresTestSupport` and `JdbcTransactionBoundary` (**edit and compile only, never run**; G-ENG-03, FR-022, FR-023,
   G-003-23): `joinedSaveCommitsWithClientWrite` (inside one transaction a client `INSERT` on the bound connection into
   a test table created in the test, plus `save(instance, entries)`, both visible after commit),
@@ -665,7 +665,7 @@ checked with the JDBC fake (quickstart.md scenario 23, joined/not-joined part).
   (instance committed first, then a `PostgresSagaContextStore.save` during a joined transaction that rolls back is still
   readable), `withoutTransactionKeepsOwnTransaction` (the boundary-built provider outside a transaction commits on its
   own). Compile check: `/opt/homebrew/bin/mvn -B -pl saga-forge-storage-postgres -am -DskipTests clean verify`.
-- [ ] T064 [US2] Checkpoint (US2). Run
+- [x] T064 [US2] Checkpoint (US2). Run
   `/opt/homebrew/bin/mvn -B -pl saga-forge-engine,saga-forge-storage-postgres -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures, and the container guard (`JoinedTransactionContainerTest` compiled, not run).
 
