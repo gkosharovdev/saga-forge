@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventRecorder;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import java.lang.reflect.UndeclaredThrowableException;
@@ -17,6 +18,26 @@ interface UnitOfWork extends DomainEventRecorder {
 
     /** Reports a failure inside this unit of work; the first report is kept and fails it. */
     void failed(Throwable failure);
+
+    /**
+     * The identity of the next command of {@code commandType} sent in this unit of work (005 FR-001). The default,
+     * for units of work outside a saga, is a fresh {@linkplain CommandId#unscoped(String) unscoped} identity.
+     */
+    default CommandId nextCommandId(Class<?> commandType) {
+        return CommandId.unscoped(commandType.getName());
+    }
+
+    /**
+     * Whether handling of {@code id} already committed for this unit of work's instance (005 FR-004); its handler
+     * must then not be invoked again. Always {@code false} outside a saga.
+     */
+    default boolean alreadyHandled(CommandId id) {
+        return false;
+    }
+
+    /** Records that {@code id}'s handler returned in this unit of work; it commits with the running step. */
+    default void commandHandled(CommandId id) {
+    }
 
     /** The engine unit of work bound to the calling thread, if any; another recorder is not one. */
     static Optional<UnitOfWork> bound() {

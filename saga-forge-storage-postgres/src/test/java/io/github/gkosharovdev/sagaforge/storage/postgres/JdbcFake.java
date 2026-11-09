@@ -153,6 +153,10 @@ final class JdbcFake {
         row.put("failure_message", instance.failure() == null ? null : instance.failure().message());
         row.put("failure_failed_at", instance.failure() == null ? null
                 : OffsetDateTime.ofInstant(instance.failure().failedAt(), ZoneOffset.UTC));
+        row.put("failure_classification", instance.failure() == null ? null
+                : instance.failure().classification().name());
+        row.put("failure_attempts", instance.failure() == null ? null : instance.failure().attempts());
+        row.put("pending_retry", SagaInstanceRows.encodePendingRetry(instance.pendingRetry()));
         row.put("associations",
                 JsonCodec.encodeObject("associations", new LinkedHashMap<String, Object>(instance.associations())));
         return row;

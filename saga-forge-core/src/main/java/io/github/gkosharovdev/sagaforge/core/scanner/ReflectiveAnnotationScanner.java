@@ -25,6 +25,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
+import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
@@ -51,6 +52,8 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  *   <li>{@code validateNoCommandHandlers} — a @Saga class declares no @CommandHandler method</li>
  *   <li>{@code validateLifecycle} — R3: @StartSaga/@EndSaga cardinality and co-occurrence (task 4.3)</li>
  *   <li>{@code validateCompensation} — R6: @SagaCompensation.forStep validity (task 4.4)</li>
+ *   <li>{@code validateRetryPolicies} — R19: every @SagaStep.retry policy is valid (specs/005-step-retry,
+ *       Property 29)</li>
  * </ul>
  * Handler, loader, and saver host rules ({@code validateAll} only):
  * <ul>
@@ -94,6 +97,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateNoCommandHandlers(sagaClass, errors);
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
+        validateRetryPolicies(sagaClass, stepMethods, errors);
 
         return new SagaValidationResult(sagaClass, errors);
     }
@@ -656,6 +660,59 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         }
 
         return stepMethods;
+    }
+
+    /**
+     * R19 (Property 29): each @SagaStep's {@code retry} policy is valid. One error per violated rule, steps in
+     * method-name order, rules in attribute-declaration order.
+     */
+    private void validateRetryPolicies(Class<?> sagaClass, Map<String, Method> stepMethods, List<String> errors) {
+        String className = sagaClass.getSimpleName();
+        stepMethods.keySet().stream().sorted().forEach(name -> {
+            RetryPolicy policy = stepMethods.get(name).getAnnotation(SagaStep.class).retry();
+            String prefix = "@SagaStep method " + name + " in " + className + " has an invalid retry policy: ";
+            retryPolicyViolations(policy).forEach(violation -> errors.add(prefix + violation));
+        });
+    }
+
+    /** The R19 violations of {@code policy}, each as "{attribute} {reason}". */
+    static List<String> retryPolicyViolations(RetryPolicy policy) {
+        List<String> violations = new ArrayList<>();
+        if (policy.maxAttempts() < 1) {
+            violations.add("maxAttempts must be at least 1, found " + policy.maxAttempts());
+        }
+        if (policy.initialBackoffMillis() < 0) {
+            violations.add("initialBackoffMillis must not be negative, found " + policy.initialBackoffMillis());
+        }
+        if (!Double.isFinite(policy.multiplier()) || policy.multiplier() < 1.0) {
+            violations.add("multiplier must be a finite number of at least 1.0, found " + policy.multiplier());
+        }
+        if (policy.maxBackoffMillis() != 0 && policy.maxBackoffMillis() < policy.initialBackoffMillis()) {
+            violations.add("maxBackoffMillis must be 0 or at least initialBackoffMillis "
+                    + policy.initialBackoffMillis() + ", found " + policy.maxBackoffMillis());
+        } else if (policy.maxBackoffMillis() < 0) {
+            violations.add("maxBackoffMillis must not be negative, found " + policy.maxBackoffMillis());
+        }
+        for (Class<? extends Throwable> type : policy.retryOn()) {
+            if (Error.class.isAssignableFrom(type)) {
+                violations.add("retryOn must not name Error type " + type.getSimpleName());
+            }
+        }
+        if (policy.maxAttempts() == 1) {
+            if (policy.initialBackoffMillis() != 0) {
+                violations.add("initialBackoffMillis must keep its default when maxAttempts is 1");
+            }
+            if (policy.multiplier() != 1.0) {
+                violations.add("multiplier must keep its default when maxAttempts is 1");
+            }
+            if (policy.maxBackoffMillis() != 0) {
+                violations.add("maxBackoffMillis must keep its default when maxAttempts is 1");
+            }
+            if (policy.retryOn().length != 0) {
+                violations.add("retryOn must keep its default when maxAttempts is 1");
+            }
+        }
+        return violations;
     }
 
     /**

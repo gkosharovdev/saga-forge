@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import java.lang.System.Logger;
@@ -98,7 +100,40 @@ public final class Diagnostics {
 
     void instanceFailed(Correlation about, SagaFailure failure) {
         logger.log(Level.WARNING, Line.of("saga.instance.failed").saga(about).instance(about)
-                .with("step", failure.stepName()).with("cause", describe(failure)).toString());
+                .with("step", failure.stepName()).with("classification", failure.classification())
+                .with("attempts", failure.attempts()).with("cause", describe(failure)).toString());
+        if (failure.classification() == FailureClassification.EXHAUSTED) {
+            logger.log(Level.WARNING, Line.of("saga.uow.exhausted").saga(about).instance(about)
+                    .with("step", failure.stepName()).with("attempts", failure.attempts())
+                    .with("cause", failure.causeType()).toString());
+        }
+    }
+
+    /** {@code saga.event.duplicate}: the event's step already completed for the instance (005 FR-006). */
+    void eventDuplicate(Correlation about, String step) {
+        logger.log(Level.DEBUG, () -> Line.of("saga.event.duplicate").event(about).saga(about).instance(about)
+                .with("step", step).toString());
+    }
+
+    /** {@code saga.command.skipped}: a command whose handling already committed was not handled again (FR-004). */
+    void commandSkipped(CommandId id) {
+        logger.log(Level.INFO, Line.of("saga.command.skipped").with("sagaId", id.sagaId())
+                .with("step", id.stepName()).with("command", id.commandType()).with("commandId", id.value())
+                .toString());
+    }
+
+    /** {@code saga.uow.retrying}: an attempt failed transiently and the next one was claimed (005 FR-013). */
+    void unitOfWorkRetrying(Correlation about, SagaFailure failure, int nextAttempt, long waitMillis) {
+        logger.log(Level.INFO, Line.of("saga.uow.retrying").event(about).saga(about).instance(about)
+                .unitOfWork(about).with("step", failure.stepName()).with("failedAttempt", failure.attempts())
+                .with("nextAttempt", nextAttempt).with("waitMillis", waitMillis)
+                .with("cause", failure.causeType()).toString());
+    }
+
+    /** {@code saga.uow.retryInterrupted}: the wait for a claimed attempt was interrupted (005 FR-014b). */
+    void retryInterrupted(Correlation about, int claimedAttempt) {
+        logger.log(Level.WARNING, Line.of("saga.uow.retryInterrupted").event(about).saga(about).instance(about)
+                .with("claimedAttempt", claimedAttempt).toString());
     }
 
     void instanceFailedNotRecorded(Correlation about, Throwable cause) {

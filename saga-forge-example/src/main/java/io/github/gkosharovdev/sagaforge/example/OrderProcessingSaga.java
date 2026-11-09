@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.example;
 import java.math.BigDecimal;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
+import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
@@ -44,7 +45,9 @@ import io.github.gkosharovdev.sagaforge.example.events.PaymentProcessedEvent;
  * same saga instance, so they are delivered within that unit of work, and the unit of work commits at the
  * {@code @EndSaga} step {@code completeOrder}: the payment and the order change either both commit or both
  * roll back. A failure anywhere in the chain rolls the whole unit of work back and the saga is
- * {@code FAILED}; values already written to the {@link SagaContext} stay readable.</p>
+ * {@code FAILED}; values already written to the {@link SagaContext} stay readable. A transient failure, such as a
+ * payment provider timeout, is retried first under the failing step's {@code @RetryPolicy}: the whole unit of work
+ * runs again, and every command keeps its identity, so the provider sees the same idempotency key.</p>
  *
  * <p>{@code compensatePayment} keeps the existing step-targeted compensation mapping. When and how
  * compensation runs is specified separately and is not part of the unit-of-work model shown here.</p>
@@ -60,10 +63,14 @@ public class OrderProcessingSaga {
     private CommandGateway commandGateway;
 
     /**
-     * Starts the saga for a new order, remembers its amount, and asks for payment.
+     * Starts the saga for a new order, remembers its amount, and asks for payment. The payment provider can time out
+     * ({@link PaymentGatewayTimeoutException}, a transient failure), so the step's unit of work may run up to three
+     * times, 200 ms then 400 ms apart; {@link PaymentService} passes the command's identity to the provider, so a
+     * retry never charges twice.
      */
     @StartSaga
-    @SagaStep(associationProperty = "orderId")
+    @SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+            multiplier = 2.0, maxBackoffMillis = 1_000))
     public void handleOrderCreated(OrderCreatedEvent event) {
         context.putState("orderAmount", event.amount());
         commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));

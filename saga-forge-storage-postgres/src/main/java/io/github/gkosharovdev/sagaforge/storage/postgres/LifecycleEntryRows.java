@@ -17,7 +17,8 @@ final class LifecycleEntryRows {
     /** The eleven history columns, in bind order. */
     static final String INSERT_HISTORY = "INSERT INTO saga_lifecycle_history (saga_id, sequence_number, "
             + "kind, step_name, touched_aggregates, outcome_step, failure_step_name, failure_cause_type, "
-            + "failure_message, failure_failed_at, occurred_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)";
+            + "failure_message, failure_failed_at, failure_classification, failure_attempts, occurred_at) "
+            + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     private static final String TOUCHED_AGGREGATES_FIELD = "saga_lifecycle_history.touched_aggregates";
 
@@ -81,6 +82,6 @@ final class LifecycleEntryRows {
                 entry.touchedAggregates()));
         insert.setString(6, entry.outcomeStep());
         SagaInstanceRows.bindFailure(insert, 7, entry.failure());
-        SagaInstanceRows.setInstant(insert, 11, entry.occurredAt());
+        SagaInstanceRows.setInstant(insert, 13, entry.occurredAt());
     }
 }

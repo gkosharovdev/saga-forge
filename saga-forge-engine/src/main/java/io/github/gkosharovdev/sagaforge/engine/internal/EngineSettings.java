@@ -46,7 +46,8 @@ public record EngineSettings(
         Optional<SagaObjectProvider> sagaObjects,
         EventHandoff handoff,
         EventHandoff.Timing handoffTiming,
-        TimeAndIdentity sources) {
+        TimeAndIdentity sources,
+        RetrySettings retry) {
 
     /**
      * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -61,6 +62,7 @@ public record EngineSettings(
         requireNonNull(handoff, "handoff");
         requireNonNull(handoffTiming, "handoffTiming");
         requireNonNull(sources, "sources");
+        requireNonNull(retry, "retry");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
         parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
     }
@@ -69,6 +71,16 @@ public record EngineSettings(
      * The provider used when no registered class hosts a service handler, loader or saver; it is never asked, and
      * fails with {@link IllegalStateException} if it is.
      */
+    /** Settings with {@link RetrySettings#defaults()}. */
+    public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
+            EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
+            List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
+            Optional<SagaObjectProvider> sagaObjects, EventHandoff handoff, EventHandoff.Timing handoffTiming,
+            TimeAndIdentity sources) {
+        this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
+                parameterResolvers, sagaObjects, handoff, handoffTiming, sources, RetrySettings.defaults());
+    }
+
     public static HandlerInstanceProvider noHandlerInstances() {
         return handlerType -> {
             throw new IllegalStateException("No HandlerInstanceProvider was registered; cannot supply "

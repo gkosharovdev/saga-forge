@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +29,8 @@ class SchemaTest {
 
     private static final String INSERT_INSTANCE = "INSERT INTO saga_instance (saga_id, saga_type, state, status, "
             + "created_at, last_modified_at, steps, outcome, failure_step_name, failure_cause_type, "
-            + "failure_message, failure_failed_at) "
-            + "VALUES (?, 'com.example.OrderSaga', '{}'::jsonb, ?, now(), now(), '{}'::jsonb, ?, ?, ?, NULL, ?)";
+            + "failure_message, failure_failed_at, failure_classification, failure_attempts) "
+            + "VALUES (?, 'com.example.OrderSaga', '{}'::jsonb, ?, now(), now(), '{}'::jsonb, ?, ?, ?, NULL, ?, ?, ?)";
 
     @BeforeEach
     void resetDatabase() {
@@ -127,7 +129,65 @@ class SchemaTest {
         boolean hasFailure = failureStepName != null;
         execute(INSERT_INSTANCE, sagaId, status, outcome, failureStepName,
                 hasFailure ? IllegalStateException.class.getName() : null,
-                hasFailure ? OffsetDateTime.now() : null);
+                hasFailure ? OffsetDateTime.now() : null,
+                hasFailure ? "UNCLASSIFIED" : null,
+                hasFailure ? 1 : null);
+    }
+
+    @Test
+    @DisplayName("005: a FAILED row needs a classification and an attempt count")
+    void failureNeedsClassificationAndAttempts() {
+        assertThatThrownBy(() -> execute("INSERT INTO saga_instance (saga_id, saga_type, state, status, created_at,"
+                + " last_modified_at, steps, failure_step_name, failure_cause_type, failure_failed_at) VALUES ('s-1',"
+                + " 'com.example.OrderSaga', '{}'::jsonb, 'FAILED', now(), now(), '{}'::jsonb, 'processPayment',"
+                + " 'java.lang.IllegalStateException', now())"))
+                .isInstanceOf(SQLException.class)
+                .satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo(CHECK_VIOLATION));
+    }
+
+    @Test
+    @DisplayName("005: pending_retry is allowed only while CREATED or RUNNING")
+    void pendingRetryOnlyWhileActive() throws SQLException {
+        insertInstance("s-1", "RUNNING", null, null);
+        execute("UPDATE saga_instance SET pending_retry = '{}'::jsonb WHERE saga_id = ?", "s-1");
+
+        assertThatThrownBy(() -> execute("UPDATE saga_instance SET pending_retry = '{}'::jsonb, status = 'COMPLETED',"
+                + " outcome = 'completeOrder' WHERE saga_id = ?", "s-1"))
+                .isInstanceOf(SQLException.class)
+                .satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo(CHECK_VIOLATION));
+    }
+
+    @Test
+    @DisplayName("005: schema-upgrade-005.sql upgrades a pre-005 schema; old FAILED rows become UNCLASSIFIED, 1")
+    void upgradeScriptApplies() throws SQLException {
+        try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("DROP SCHEMA IF EXISTS pre005 CASCADE");
+            statement.execute("CREATE SCHEMA pre005");
+            statement.execute("SET search_path TO pre005");
+            try {
+                for (String sql : PostgresTestSupport.statements("schema-before-005.sql")) {
+                    statement.execute(sql);
+                }
+                statement.execute("INSERT INTO saga_instance (saga_id, saga_type, state, status, created_at,"
+                        + " last_modified_at, steps, failure_step_name, failure_cause_type, failure_failed_at)"
+                        + " VALUES ('old', 'com.example.OrderSaga', '{}'::jsonb, 'FAILED', now(), now(), '{}'::jsonb,"
+                        + " 'processPayment', 'java.lang.IllegalStateException', now())");
+                for (String sql : PostgresTestSupport.statements("schema-upgrade-005.sql")) {
+                    statement.execute(sql);
+                }
+                try (ResultSet row = statement.executeQuery(
+                        "SELECT failure_classification, failure_attempts, pending_retry FROM saga_instance")) {
+                    assertThat(row.next()).isTrue();
+                    assertThat(row.getString(1)).isEqualTo("UNCLASSIFIED");
+                    assertThat(row.getInt(2)).isEqualTo(1);
+                    assertThat(row.getString(3)).isNull();
+                }
+            } finally {
+                statement.execute("SET search_path TO public");
+                statement.execute("DROP SCHEMA pre005 CASCADE");
+            }
+        }
     }
 
     private static void execute(String sql, Object... params) throws SQLException {

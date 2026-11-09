@@ -604,6 +604,91 @@ Noted only; nothing is bumped until the starter feature decides.
   transport types; no third-party dependency). The amendment should name it, since SLF4J and the JTA API would land
   there rather than in core.
 
+## Step retry and command idempotency (005)
+
+### G-005-01: No long or scheduled backoff
+- **Description**: Retries wait in-process within the handling call, with the total backoff bounded by a
+  framework-wide maximum (`specs/005-step-retry` FR-014, FR-014a). Waiting minutes or hours between attempts
+  needs a durable scheduler, which does not exist; such policies are rejected at startup.
+- **Origin**: `specs/005-step-retry/spec.md` FR-014a; user decision, 2026-11-09.
+- **Status**: open (deferred; overlaps the "no waiting timeouts" deadline gap).
+
+### G-005-02: In-process retry blocks the caller and holds the instance
+- **Description**: While a retry waits, the instance's unit-of-work lock is held and the caller (for Kafka, the
+  consumer thread) is blocked, so other events for that instance wait and a long total backoff can trip
+  transport-side timeouts.
+- **Origin**: `specs/005-step-retry/spec.md` FR-014, Assumptions.
+- **Status**: open (bounded by FR-014a; revisit with the Kafka transport).
+
+### G-005-03: Outside systems are idempotent only if handlers pass the identity on
+- **Description**: The framework guarantees a stable command identity and never re-handles a command whose
+  handling committed, but a handler calling an outside system must pass the identity as that system's
+  idempotency key; the framework cannot enforce it.
+- **Origin**: `specs/005-step-retry/spec.md` FR-003, Assumptions.
+- **Status**: open (documentation and example responsibility).
+
+### G-005-04: Triggering commands are not deduplicated before a saga instance exists
+- **Description**: 005 covers commands dispatched from saga steps and duplicate events for completed steps.
+  Deduplicating the command or request that leads to a saga's start (two concurrent requests for the same
+  booking) is not covered.
+- **Origin**: `specs/005-step-retry/spec.md` FR-005, FR-021; `docs/architecture.md` "Idempotent step execution".
+- **Status**: open (deferred).
+
+### G-005-05: A crash during the first attempt is not counted
+- **Description**: The attempt count is written only after a failed attempt claims the next one
+  (`specs/005-step-retry` research §9). If the process stops during the first attempt of a fresh event, nothing
+  is recorded, so a redelivery starts again at attempt 1; that one attempt is not counted against `maxAttempts`.
+  Recording every first attempt would add a write to every unit of work.
+- **Origin**: `specs/005-step-retry/research.md` §9; SC-005.
+- **Status**: open (accepted trade-off).
+
+### G-005-06: A retry of a start unit of work cannot resume after a crash
+- **Description**: A retry claimed for the unit of work opened by a saga's start event (`pendingRetry.triggerStep` is
+  the `@StartSaga` step) is resumed only within the same handling call. If the process stops while waiting, the
+  redelivered start event finds the existing, still active instance and is reported `DUPLICATE_START`, so the claimed
+  attempt never runs and the instance stays `CREATED`/`RUNNING` with its `pendingRetry` (like G-ENG-05). Retries of
+  units of work opened by non-start events resume as designed.
+- **Origin**: `specs/005-step-retry` research §9; found while writing `IdempotencyFaultInjectionTest` (T056).
+- **Status**: open (decide with G-ENG-05 whether a redelivered start event may resume an active instance's claimed
+  retry).
+
+### G-005-07: No test for an event waiting on the instance during a retry
+- **Description**: The attempt loop holds the in-process instance lock across attempts and waits, so a second event
+  for the same instance waits until the loop ends (004 FR-025 holds). This follows from the structure (one lease per
+  handling call) but no concurrency test asserts it; tasks.md T046 listed one.
+- **Origin**: `specs/005-step-retry/tasks.md` T046.
+- **Status**: open.
+
+## Compensation (006)
+
+### G-006-01: Retry exhaustion is a contract without a retry design
+- **Description**: `specs/006-saga-compensation` FR-006a makes exhausted retries a final failure that starts
+  compensation, but step retry is not designed; until it is, a step has one attempt and an unmarked failure ends
+  `FAILED`. The retry design must reuse 005's failure classification (transient / final / final-by-exhaustion)
+  and change `.kiro/specs/saga-forge-framework/` before adding attributes to `@SagaStep`.
+- **Origin**: `specs/006-saga-compensation/spec.md` FR-006a, FR-006b; `docs/architecture.md` "Per-step retry
+  policy with failure classification".
+- **Status**: closed 2026-11-09 by `specs/005-step-retry`: retry with failure classification is implemented
+  (`FailureClassification`, `SagaFailure.classification`/`attempts`), and 006 FR-006 to FR-006b reference it.
+
+### G-006-02: A compensation does not wait for confirmation of the undo
+- **Description**: A compensation is complete when its unit of work commits (FR-013). A refund refused by the
+  provider after the command was accepted is not seen by the saga, which still ends "compensated".
+- **Origin**: `specs/006-saga-compensation/spec.md` FR-013 (user decision, 2026-11-09).
+- **Status**: open (deferred).
+
+### G-006-03: No operator path out of "requires intervention"
+- **Description**: A saga whose compensation failed ends "requires intervention"; resuming compensation or
+  marking it resolved by hand is out of scope (FR-021).
+- **Origin**: `specs/006-saga-compensation/spec.md` FR-016, FR-021.
+- **Status**: open (deferred).
+
+### G-006-04: No way to mark a step irreversible
+- **Description**: A committed step without `@SagaCompensation` is treated as "nothing to compensate". A step
+  whose effect cannot be undone cannot force "requires intervention".
+- **Origin**: `specs/006-saga-compensation/spec.md` FR-007, Assumptions.
+- **Status**: open (possible later extension).
+
 ## Repository hygiene
 
 ### G-REPO-01: Eclipse files untracked and not ignored

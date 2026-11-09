@@ -55,6 +55,16 @@ final class ForwardTransition {
                         + " recorded touchedAggregates " + before.touchedAggregates()
                         + " but the incoming snapshot has " + now.touchedAggregates());
             }
+            if (now.attempts() != before.attempts()) {
+                throw new ConcurrentSagaUpdateException(sagaId, "completed step " + step.getKey()
+                        + " recorded attempts " + before.attempts() + " but the incoming snapshot has "
+                        + now.attempts());
+            }
+            if (!now.handledCommands().equals(before.handledCommands())) {
+                throw new ConcurrentSagaUpdateException(sagaId, "completed step " + step.getKey()
+                        + " recorded handledCommands " + before.handledCommands()
+                        + " but the incoming snapshot has " + now.handledCommands());
+            }
         }
         SagaStatus previousStatus = previous.status();
         boolean terminal = previousStatus == SagaStatus.COMPLETED || previousStatus == SagaStatus.FAILED;

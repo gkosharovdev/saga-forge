@@ -93,6 +93,32 @@ class PostgresStorageProviderTest {
         }
 
         @Test
+        @DisplayName("005: attempts, handled command identities, a pending retry and a classified failure survive a"
+                + " restart")
+        void retryFieldsSurviveRestart() {
+            io.github.gkosharovdev.sagaforge.core.command.CommandId charge =
+                    io.github.gkosharovdev.sagaforge.core.command.CommandId.of("s-1", "handleOrderCreated",
+                            "com.example.Charge", 1);
+            SagaFailure attempt = new SagaFailure("processPayment", "com.example.CourierTimeout", "timed out",
+                    MODIFIED_AT, io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.TRANSIENT, 1);
+            SagaInstance waiting = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.RUNNING, CREATED_AT, MODIFIED_AT,
+                    Map.of("handleOrderCreated", StepRecord.completed(List.of(), 2, List.of(charge)),
+                            "processPayment", StepRecord.notRun()),
+                    null, null, new io.github.gkosharovdev.sagaforge.core.spi.PendingRetry("processPayment", 2,
+                            attempt));
+            provider.save(waiting);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(waiting);
+
+            SagaInstance exhausted = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.FAILED, CREATED_AT, MODIFIED_AT, waiting.steps(), null,
+                    attempt.classifiedAs(io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.EXHAUSTED,
+                            3));
+            provider.save(exhausted);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(exhausted);
+        }
+
+        @Test
         @DisplayName("scenario 2: findById for an unknown id returns Optional.empty()")
         void unknownIdIsEmpty() {
             assertThat(provider.findById("missing")).isEmpty();

@@ -13,6 +13,7 @@ import java.util.Map;
 
 import javax.sql.DataSource;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -54,6 +55,14 @@ class JoinedTransactionContainerTest {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE IF NOT EXISTS " + CLIENT_TABLE + " (id text PRIMARY KEY)");
             statement.execute("DELETE FROM " + CLIENT_TABLE);
+        }
+    }
+
+    /** Drops the client table so suites sharing the container (SchemaTest lists every table) never see it. */
+    @AfterEach
+    void dropClientTable() throws SQLException {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP TABLE IF EXISTS " + CLIENT_TABLE);
         }
     }
 

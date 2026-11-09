@@ -52,7 +52,8 @@ final class FailedWrite {
      *
      * @param about   the correlation of the rolled-back unit of work (saga type and instance set)
      * @param failure what failed, built by the unit of work
-     * @param cause   the exception that rolled the unit of work back; added as suppressed to a failure of this write
+     * @param cause   the exception that rolled the unit of work back; added as suppressed to a failure of this write;
+     *                {@code null} when a redelivery finds the retries exhausted without running (005)
      * @param started whether this event's creation write created the instance
      * @return a {@code FAILED} result carrying {@code failure} and the rolled-back unit of work's id
      * @throws RuntimeException the failure of this write, after rolling back; nothing was recorded
@@ -64,7 +65,8 @@ final class FailedWrite {
             Optional<SagaInstance> stored = settings.storage().findByIdAndLock(sagaId);
             if (stored.isEmpty() || EngineSagaLifecycle.isTerminal(stored.get().status())) {
                 transaction.rollback();
-                diagnostics.instanceFailedNotRecorded(about, cause);
+                diagnostics.instanceFailedNotRecorded(about, cause != null ? cause
+                        : new IllegalStateException(failure.causeType() + ": " + failure.message()));
             } else {
                 markFailed(stored.get(), failure);
                 transaction.commit();
@@ -72,7 +74,7 @@ final class FailedWrite {
             }
         } catch (RuntimeException | Error writeFailure) {
             LocalTransactions.rollBackAfter(settings.transactions(), transaction, writeFailure);
-            if (writeFailure != cause) {
+            if (cause != null && writeFailure != cause) {
                 writeFailure.addSuppressed(cause);
             }
             diagnostics.instanceFailedNotRecorded(about, writeFailure);

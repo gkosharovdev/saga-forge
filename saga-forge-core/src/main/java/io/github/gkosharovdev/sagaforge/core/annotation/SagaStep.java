@@ -25,4 +25,13 @@ public @interface SagaStep {
      * the event to the correct saga instance.
      */
     String associationProperty();
+
+    /**
+     * How often the engine may run this step's unit of work after a transient failure, and how long it waits in
+     * between ({@code specs/005-step-retry}). The default allows one attempt, so a step without a policy is never
+     * retried. Validated by the scanner (rule R19, Property 29).
+     *
+     * @return the step's retry policy
+     */
+    RetryPolicy retry() default @RetryPolicy;
 }

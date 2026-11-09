@@ -94,8 +94,9 @@ class RoutingOutcomesTest {
     }
 
     @Test
-    @DisplayName("an event correlated only to COMPLETED instances is one UNEXPECTED for the most recently returned")
-    void unexpectedForMostRecent() {
+    @DisplayName("an event for a completed step, correlated only to COMPLETED instances, is one DUPLICATE for the"
+            + " most recently returned (specs/005-step-retry FR-006)")
+    void duplicateForMostRecent() {
         String first = onlyResult(engine.receive(new OrderPlaced(ORDER, 250L, 3))).sagaId();
         String second = onlyResult(engine.receive(new OrderPlaced(ORDER, 250L, 3))).sagaId();
         Map<String, SagaInstance> before = committedById();
@@ -105,12 +106,13 @@ class RoutingOutcomesTest {
         SagaHandlingResult result = onlyResult(engine.receive(itemsReserved(ORDER)));
 
         assertThat(first).isNotEqualTo(second);
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.UNEXPECTED);
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.DUPLICATE);
         assertThat(result.sagaId()).isEqualTo(second);
         assertThat(result.unitOfWorkId()).isNull();
         assertThat(committedById()).isEqualTo(before);
         assertNothingRan(begins);
-        assertThat(logger.byEvent("saga.event.unexpected")).singleElement()
+        assertThat(logger.byEvent("saga.event.unexpected")).isEmpty();
+        assertThat(logger.byEvent("saga.event.duplicate")).singleElement()
                 .satisfies(logged -> assertThat(logged.keys()).containsEntry("sagaId", second));
     }
 

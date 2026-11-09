@@ -65,7 +65,9 @@ class OrderProcessingSagaValidationTest {
     @Test
     void handlersRecordTheEventsThatTriggerTheNextSteps() {
         List<Object> paymentEvents = DomainEvents.capture(() ->
-                new PaymentService().handle(new ProcessPaymentCommand("order-1", new BigDecimal("42.00"))));
+                new PaymentService().handle(new ProcessPaymentCommand("order-1", new BigDecimal("42.00")),
+                        io.github.gkosharovdev.sagaforge.core.command.CommandId.of("saga-1", "handleOrderCreated",
+                                ProcessPaymentCommand.class.getName(), 1)));
         assertThat(paymentEvents).singleElement().isInstanceOfSatisfying(PaymentProcessedEvent.class, event -> {
             assertThat(event.orderId()).isEqualTo("order-1");
             assertThat(event.amount()).isEqualByComparingTo("42.00");

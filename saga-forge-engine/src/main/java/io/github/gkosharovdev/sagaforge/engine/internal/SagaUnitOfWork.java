@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
@@ -9,21 +10,24 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
+import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 import io.github.gkosharovdev.sagaforge.engine.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.engine.internal.EngineSagaLifecycle.PendingWrite;
-import io.github.gkosharovdev.sagaforge.engine.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaModel.Injection;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaModel.Step;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * One saga-scoped unit of work: one triggering event, one saga instance, one host transaction (002
@@ -33,7 +37,8 @@ import java.util.Optional;
  * <h2>{@link #run()}</h2>
  * <ol>
  *   <li>{@code begin()}; {@code StorageProvider.findByIdAndLock(sagaId)} as the first storage call. A missing
- *       instance is {@code UNMATCHED}, a terminal one {@code UNEXPECTED}, a still-{@code CREATED} one reached by a
+ *       instance is {@code UNMATCHED}, one whose triggering (non-start) step already completed {@code DUPLICATE}
+ *       (005 FR-006, checked first), a terminal one {@code UNEXPECTED}, a still-{@code CREATED} one reached by a
  *       non-start step {@code NOT_HANDLED}; each rolls back and runs nothing (rows 2, 3).</li>
  *   <li>Loads the instance's {@code SagaContext} values into an {@link EngineSagaContext}, creates a fresh saga
  *       object ({@code SagaObjectProvider}, else the no-argument constructor) and injects its {@code @SagaId},
@@ -51,21 +56,22 @@ import java.util.Optional;
  * association value for that step's property; otherwise it is buffered (FR-008, FR-017). Events still queued when
  * an {@code @EndSaga} step ends the run are handed off with the buffered ones, in recording order.</p>
  *
- * <h2>Failures (data-model.md row 9)</h2>
+ * <h2>Failures (data-model.md row 9; 005 contracts/attempt-loop.md)</h2>
  * <p>Any exception from loading the context record, creating the saga object, a step, a handler (a failure
  * {@linkplain #failed(Throwable) reported} by the command gateway counts even if the step caught it), the instance
  * write or the commit, and a rollback-only transaction found before the write, end the run: no further step runs,
  * the transaction is rolled back if still active, queue, buffer and pending entries are discarded, and
- * {@code saga.uow.rolledBack} is logged. The {@link FailedWrite} then records {@code FAILED} with a
- * {@link SagaFailure} naming the step running or last run (the {@code @EndSaga} step for a write or commit failure)
- * and the first reported cause, and the result is {@code FAILED}. A failure of the {@code FAILED} write propagates,
- * as does a failure of the locked read itself (store unavailable): no outcome was recorded (FR-005).</p>
+ * {@code saga.uow.rolledBack} is logged. The result is {@link Failed}, naming the step running or last run (the
+ * {@code @EndSaga} step for a write or commit failure) and the first reported cause; the {@link AttemptLoop}
+ * classifies it and either retries or writes {@code FAILED}. A failure of the locked read itself (store
+ * unavailable) propagates: no outcome was recorded (FR-005). Since 005 one {@code SagaUnitOfWork} is one attempt:
+ * steps it completes record its attempt number, and its commit clears a retry claimed for its trigger step.</p>
  * <h2>Conflict and the instance lock (FR-025, FR-026, data-model.md rows 8 to 10)</h2>
  * <p>A {@link SagaConcurrencyConflictException} from the instance write or the commit is no saga failure: the run
  * rolls back and discards like a failure, writes no {@code FAILED}, logs {@code saga.uow.conflict} and reports
- * {@code NOT_HANDLED} with its {@code unitOfWorkId}. The in-process instance lock handed in by the router is released
- * after the commit and before the handoff, after the {@code FAILED} write, or after rolling back a run that ran
- * nothing or conflicted.</p>
+ * {@code NOT_HANDLED} with its {@code unitOfWorkId}. The in-process instance lock is the {@link AttemptLoop}'s: held
+ * across all attempts of one handling call and released after the last commit (before the handoff), after the
+ * {@code FAILED} write, or after a result that ran nothing.</p>
  * <h2>Handoff (contracts/event-handoff.md, FR-029 to FR-031) and reentrancy (FR-007)</h2>
  * <p>The thread is marked "unit of work running" ({@link ReentrancyGuard}) from {@code begin()} until the commit or
  * rollback (and any {@code FAILED} write) has finished. With an {@code IN_TRANSACTION} handoff the non-empty batch is
@@ -84,6 +90,36 @@ final class SagaUnitOfWork implements UnitOfWork {
 
     /** Collaborators shared by every unit of work of one engine. */
     record Collaborators(EngineSettings settings, CommandGateway gateway, Diagnostics diagnostics) {
+    }
+
+    /** How one attempt ended, for the {@link AttemptLoop} (005 contracts/attempt-loop.md). */
+    sealed interface AttemptResult {
+    }
+
+    /** Nothing more to do: the attempt ran nothing, or lost a write-time conflict. The transaction is closed. */
+    record Finished(SagaHandlingResult result) implements AttemptResult {
+    }
+
+    /**
+     * The attempt committed. {@link #handOff()} runs the {@code AFTER_COMMIT} handoff and returns the result; the
+     * caller releases the instance lock first.
+     */
+    record Committed(java.util.function.Supplier<SagaHandlingResult> afterRelease) implements AttemptResult {
+
+        SagaHandlingResult handOff() {
+            return afterRelease.get();
+        }
+    }
+
+    /** The attempt rolled back: {@code step} was running or last run, {@code cause} is the failure to classify. */
+    record Failed(String step, Throwable cause, Correlation correlation, int attempt) implements AttemptResult {
+    }
+
+    /**
+     * The first attempt of a handling call found a retry claimed for its trigger step by an earlier call; it rolled
+     * back and ran nothing, so the loop can claim the next attempt first (research §9).
+     */
+    record Resume(PendingRetry retry, Correlation correlation) implements AttemptResult {
     }
 
     /** A recorded event and whether a step of this instance has run it. */
@@ -112,39 +148,47 @@ final class SagaUnitOfWork implements UnitOfWork {
     private final List<String> stepsRun = new ArrayList<>();
     private List<AggregateReference> touched = new ArrayList<>();
     private Map<String, String> associations = Map.of();
-    private final Lease instanceLease;
+    private final boolean firstOfCall;
+    private final CommandIds commandIds;
+    private final Set<CommandId> committedCommands = new HashSet<>();
+    private final Set<String> completedSteps = new HashSet<>();
+    private List<CommandId> handledInStep = new ArrayList<>();
+    private final int attempt;
     private String currentStep;
     private boolean ended;
     private boolean writing;
     private Throwable firstFailure;
 
     /**
-     * @param instanceLease the in-process lock of the instance, held by the caller; this unit of work releases it
-     *                      after its commit (before the handoff), after its {@code FAILED} write, or after rolling
-     *                      back a run that ran nothing or conflicted
+     * @param attempt     the attempt this unit of work is, counting the first as 1; recorded on the steps it completes
+     * @param firstOfCall whether this is the first attempt of the handling call, which resumes a retry claimed by an
+     *                    earlier call instead of running
      */
-    SagaUnitOfWork(Trigger trigger, Collaborators with, Lease instanceLease) {
+    SagaUnitOfWork(Trigger trigger, Collaborators with, int attempt, boolean firstOfCall) {
         this.trigger = trigger;
         this.with = with;
-        this.instanceLease = instanceLease;
+        this.attempt = attempt;
+        this.firstOfCall = firstOfCall;
         this.settings = with.settings();
         this.unitOfWorkId = settings.sources().newUnitOfWorkId();
         this.correlation = Correlation.of(trigger.event()).forSaga(trigger.saga().typeName())
                 .instance(trigger.sagaId()).inUnitOfWork(unitOfWorkId);
         this.lifecycle = new EngineSagaLifecycle(trigger.saga(), settings.storage(), settings.sources());
         this.currentStep = trigger.step().name();
+        this.commandIds = new CommandIds(trigger.sagaId());
     }
 
     /**
-     * Runs this unit of work to its commit, to its {@code FAILED} write, or to a result that ran nothing.
+     * Runs this attempt to its commit, to its rollback, or to a result that ran nothing. Writes no {@code FAILED}
+     * and releases no lock: both are the {@link AttemptLoop}'s.
      *
-     * @throws RuntimeException if the locked read or the {@code FAILED} write fails; no outcome was recorded
+     * @throws RuntimeException if the locked read fails; nothing was recorded
      */
-    SagaHandlingResult run() {
+    AttemptResult run() {
         LocalTransaction transaction = settings.transactions().begin();
         ReentrancyGuard.enter();
         try {
-            Optional<SagaHandlingResult> notRunnable = lockInstanceOrRollBack(transaction);
+            Optional<AttemptResult> notRunnable = lockInstanceOrRollBack(transaction);
             if (notRunnable.isPresent()) {
                 return notRunnable.get();
             }
@@ -159,9 +203,13 @@ final class SagaUnitOfWork implements UnitOfWork {
         } finally {
             ReentrancyGuard.exit();
         }
-        instanceLease.close();
         with.diagnostics().unitOfWorkCommitted(correlation, outcome(), stepsRun);
-        return committedResult(handOffAfterCommit());
+        return new Committed(() -> committedResult(handOffAfterCommit()));
+    }
+
+    /** The id of this attempt's unit of work. */
+    String unitOfWorkId() {
+        return unitOfWorkId;
     }
 
     @Override
@@ -180,8 +228,23 @@ final class SagaUnitOfWork implements UnitOfWork {
         }
     }
 
+    @Override
+    public CommandId nextCommandId(Class<?> commandType) {
+        return commandIds.next(commandType);
+    }
+
+    @Override
+    public boolean alreadyHandled(CommandId id) {
+        return committedCommands.contains(id);
+    }
+
+    @Override
+    public void commandHandled(CommandId id) {
+        handledInStep.add(id);
+    }
+
     /** {@link #lockInstance}; a failure of the locked read rolls back and propagates, recording nothing. */
-    private Optional<SagaHandlingResult> lockInstanceOrRollBack(LocalTransaction transaction) {
+    private Optional<AttemptResult> lockInstanceOrRollBack(LocalTransaction transaction) {
         try {
             return lockInstance(transaction);
         } catch (RuntimeException | Error lockFailure) {
@@ -190,20 +253,34 @@ final class SagaUnitOfWork implements UnitOfWork {
         }
     }
 
-    private Optional<SagaHandlingResult> lockInstance(LocalTransaction transaction) {
+    private Optional<AttemptResult> lockInstance(LocalTransaction transaction) {
         Optional<SagaInstance> locked = settings.storage().findByIdAndLock(trigger.sagaId());
         if (locked.isEmpty()) {
             return notRun(transaction, unmatched());
         }
         SagaInstance instance = locked.get();
+        if (!trigger.step().start() && isCompleted(instance, trigger.step().name())) {
+            return notRun(transaction, duplicate());
+        }
         if (EngineSagaLifecycle.isTerminal(instance.status())) {
             return notRun(transaction, unexpected());
         }
         if (instance.status() == SagaStatus.CREATED && !trigger.step().start()) {
             return notRun(transaction, notStarted());
         }
+        PendingRetry claimed = instance.pendingRetry();
+        if (firstOfCall && claimed != null && claimed.triggerStep().equals(trigger.step().name())) {
+            transaction.rollback();
+            return Optional.of(new Resume(claimed, correlation));
+        }
         lifecycle.load(instance);
         associations = instance.associations();
+        instance.steps().values().stream().map(StepRecord::handledCommands).forEach(committedCommands::addAll);
+        instance.steps().forEach((name, step) -> {
+            if (step.status() == StepStatus.COMPLETED) {
+                completedSteps.add(name);
+            }
+        });
         return Optional.empty();
     }
 
@@ -219,6 +296,11 @@ final class SagaUnitOfWork implements UnitOfWork {
     private void runQueued(Object saga) {
         while (!queue.isEmpty()) {
             Queued next = queue.poll();
+            if (completedSteps.contains(next.step().name())) {
+                // A repeated event for a step already completed: not run, handed off like any non-queued event.
+                with.diagnostics().eventDuplicate(correlation, next.step().name());
+                continue;
+            }
             runStep(saga, next);
             if (next.step().end()) {
                 lifecycle.complete(trigger.sagaId(), next.step().name());
@@ -234,9 +316,12 @@ final class SagaUnitOfWork implements UnitOfWork {
         currentStep = next.step().name();
         stepsRun.add(currentStep);
         touched = new ArrayList<>();
+        handledInStep = new ArrayList<>();
+        commandIds.startStep(currentStep);
         trigger.saga().run(next.step(), saga, next.recorded().event);
         failIfReported();
-        lifecycle.recordStepCompleted(trigger.sagaId(), currentStep, touched);
+        lifecycle.recordStepCompleted(trigger.sagaId(), currentStep, touched, attempt, handledInStep);
+        completedSteps.add(currentStep);
     }
 
     private void commit(LocalTransaction transaction) {
@@ -245,6 +330,7 @@ final class SagaUnitOfWork implements UnitOfWork {
             throw new IllegalStateException("Unit of work " + unitOfWorkId + " of saga instance "
                     + trigger.sagaId() + " was marked rollback-only");
         }
+        lifecycle.clearPendingRetry(trigger.step().name());
         PendingWrite write = lifecycle.drain(trigger.sagaId());
         writing = true;
         settings.storage().save(write.instance(), write.entries());
@@ -255,17 +341,13 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     /**
-     * Rolls back, discards everything this unit of work buffered, and records {@code FAILED}. The cause is the first
-     * failure the command gateway reported, if any (a step may have caught it), else {@code thrown}.
+     * Rolls back and discards everything this unit of work buffered. The cause is the first failure the command
+     * gateway reported, if any (a step may have caught it), else {@code thrown}; the loop classifies it.
      */
-    private SagaHandlingResult failed(LocalTransaction transaction, Throwable thrown) {
+    private AttemptResult failed(LocalTransaction transaction, Throwable thrown) {
         Throwable cause = firstFailure != null ? firstFailure : thrown;
         abandon(transaction, cause);
-        SagaFailure failure = SagaFailure.of(currentStep, cause, settings.sources().now());
-        SagaHandlingResult result = new FailedWrite(trigger.saga(), settings, with.diagnostics())
-                .record(correlation, failure, cause, trigger.started());
-        instanceLease.close();
-        return result;
+        return new Failed(currentStep, cause, correlation, attempt);
     }
 
     /**
@@ -273,12 +355,11 @@ final class SagaUnitOfWork implements UnitOfWork {
      * {@code FAILED} and reports {@code NOT_HANDLED}, so the transport can redeliver. No in-process retry: the steps'
      * context writes and non-transactional side effects already happened.
      */
-    private SagaHandlingResult conflicted(LocalTransaction transaction, SagaConcurrencyConflictException conflict) {
+    private AttemptResult conflicted(LocalTransaction transaction, SagaConcurrencyConflictException conflict) {
         discard(transaction, conflict);
-        instanceLease.close();
         with.diagnostics().unitOfWorkConflict(correlation);
-        return new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(), HandlingOutcome.NOT_HANDLED,
-                trigger.started(), null, null, unitOfWorkId, List.of());
+        return new Finished(new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(),
+                HandlingOutcome.NOT_HANDLED, trigger.started(), null, null, unitOfWorkId, List.of()));
     }
 
     private void abandon(LocalTransaction transaction, Throwable failure) {
@@ -380,10 +461,9 @@ final class SagaUnitOfWork implements UnitOfWork {
         }
     }
 
-    private Optional<SagaHandlingResult> notRun(LocalTransaction transaction, SagaHandlingResult result) {
+    private Optional<AttemptResult> notRun(LocalTransaction transaction, SagaHandlingResult result) {
         transaction.rollback();
-        instanceLease.close();
-        return Optional.of(result);
+        return Optional.of(new Finished(result));
     }
 
     private SagaHandlingResult unmatched() {
@@ -394,6 +474,17 @@ final class SagaUnitOfWork implements UnitOfWork {
     private SagaHandlingResult unexpected() {
         with.diagnostics().eventUnexpected(correlation.inUnitOfWork(null), currentStep);
         return resultWithoutUnitOfWork(HandlingOutcome.UNEXPECTED, trigger.sagaId());
+    }
+
+    /** The triggering step already completed for the instance (005 FR-006): nothing runs, nothing is written. */
+    private SagaHandlingResult duplicate() {
+        with.diagnostics().eventDuplicate(correlation.inUnitOfWork(null), currentStep);
+        return resultWithoutUnitOfWork(HandlingOutcome.DUPLICATE, trigger.sagaId());
+    }
+
+    static boolean isCompleted(SagaInstance instance, String stepName) {
+        StepRecord step = instance.steps().get(stepName);
+        return step != null && step.status() == StepStatus.COMPLETED;
     }
 
     private SagaHandlingResult notStarted() {

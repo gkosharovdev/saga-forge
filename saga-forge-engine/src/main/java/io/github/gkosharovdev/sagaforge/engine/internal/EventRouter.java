@@ -183,7 +183,10 @@ final class EventRouter {
                 .toList();
     }
 
-    /** One unit of work per active instance, each attempted on its own; else one UNEXPECTED or UNMATCHED result. */
+    /**
+     * One unit of work per active instance, each attempted on its own; else one DUPLICATE (the latest ended instance
+     * completed the step), UNEXPECTED or UNMATCHED result.
+     */
     private void resume(Reaction reaction, List<SagaInstance> correlated, Attempts attempts) {
         List<SagaInstance> active = correlated.stream()
                 .filter(instance -> !EngineSagaLifecycle.isTerminal(instance.status()))
@@ -193,20 +196,24 @@ final class EventRouter {
                             instanceLocks.acquire(instance.sagaId())))
                     .ifPresent(attempts.results::add));
         } else if (!correlated.isEmpty()) {
-            attempts.results.add(unexpected(reaction, correlated.get(correlated.size() - 1).sagaId()));
+            SagaInstance latest = correlated.get(correlated.size() - 1);
+            attempts.results.add(SagaUnitOfWork.isCompleted(latest, reaction.step().name())
+                    ? duplicate(reaction, latest.sagaId())
+                    : unexpected(reaction, latest.sagaId()));
         } else {
             attempts.results.add(unmatched(reaction));
         }
     }
 
     /**
-     * Runs one unit of work holding {@code instanceLease}. The unit of work releases the lease at the point
-     * data-model.md row 8 or 9 names; closing it here again is a no-op that only guards the paths that raise.
+     * Runs the attempts of one unit of work holding {@code instanceLease} (005 {@link AttemptLoop}). The loop releases
+     * the lease at the point data-model.md row 8 or 9 names; closing it here again is a no-op that only guards the
+     * paths that raise.
      */
     private SagaHandlingResult runUnitOfWork(Reaction reaction, String sagaId, boolean started, Lease instanceLease) {
         try (instanceLease) {
             Trigger trigger = new Trigger(reaction.saga(), reaction.step(), reaction.event(), sagaId, started);
-            return new SagaUnitOfWork(trigger, with, instanceLease).run();
+            return new AttemptLoop(with).run(trigger, instanceLease);
         }
     }
 
@@ -214,6 +221,12 @@ final class EventRouter {
         with.diagnostics().eventDuplicateStart(reaction.correlation(), reaction.step().associationProperty(),
                 reaction.associationValue());
         return noUnitOfWork(reaction, HandlingOutcome.DUPLICATE_START, null);
+    }
+
+    /** Only ended instances correlate and the latest already completed the step (005 FR-006). */
+    private SagaHandlingResult duplicate(Reaction reaction, String sagaId) {
+        with.diagnostics().eventDuplicate(reaction.correlation().instance(sagaId), reaction.step().name());
+        return noUnitOfWork(reaction, HandlingOutcome.DUPLICATE, sagaId);
     }
 
     private SagaHandlingResult unexpected(Reaction reaction, String sagaId) {

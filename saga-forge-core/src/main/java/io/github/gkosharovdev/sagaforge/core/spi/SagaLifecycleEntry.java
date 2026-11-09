@@ -15,14 +15,16 @@ import java.util.List;
  *
  * @param sagaId            the owning instance's {@link SagaInstance#sagaId()}; non-null
  * @param kind              the transition; non-null
- * @param stepName          the completed step; non-null if and only if {@code kind == STEP_COMPLETED}
+ * @param stepName          the completed step, or for {@code ATTEMPT_FAILED} the step that failed; non-null if and
+ *                          only if {@code kind} is {@code STEP_COMPLETED} or {@code ATTEMPT_FAILED}
  * @param touchedAggregates the completed step's {@link StepRecord#touchedAggregates()}; non-null, with no
  *                          {@code null} elements, empty unless {@code kind == STEP_COMPLETED}; an unmodifiable
  *                          defensive copy
  * @param outcomeStep       the reached {@code @EndSaga} step ({@link SagaInstance#outcome()}); non-null if and
  *                          only if {@code kind == COMPLETED}
- * @param failure           the recorded {@link SagaInstance#failure()}; non-null if and only if
- *                          {@code kind == FAILED}
+ * @param failure           the recorded {@link SagaInstance#failure()}, or for {@code ATTEMPT_FAILED} the failure of
+ *                          the attempt; non-null if and only if {@code kind} is {@code FAILED} or
+ *                          {@code ATTEMPT_FAILED}
  * @param occurredAt        the clock instant of the transition; non-null
  * @throws IllegalArgumentException if {@code sagaId}, {@code kind}, {@code occurredAt}, {@code touchedAggregates}
  *                                  or one of its elements is {@code null}, or if {@code stepName},
@@ -56,9 +58,11 @@ public record SagaLifecycleEntry(
                 throw new IllegalArgumentException("touchedAggregates must not contain null elements");
             }
         }
-        requirePresentIff("stepName", stepName, SagaLifecycleEventKind.STEP_COMPLETED, kind);
-        requirePresentIff("outcomeStep", outcomeStep, SagaLifecycleEventKind.COMPLETED, kind);
-        requirePresentIff("failure", failure, SagaLifecycleEventKind.FAILED, kind);
+        requirePresentIff("stepName", stepName, kind == SagaLifecycleEventKind.STEP_COMPLETED
+            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED, "STEP_COMPLETED or ATTEMPT_FAILED", kind);
+        requirePresentIff("outcomeStep", outcomeStep, kind == SagaLifecycleEventKind.COMPLETED, "COMPLETED", kind);
+        requirePresentIff("failure", failure, kind == SagaLifecycleEventKind.FAILED
+            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED, "FAILED or ATTEMPT_FAILED", kind);
         if (kind != SagaLifecycleEventKind.STEP_COMPLETED && !touchedAggregates.isEmpty()) {
             throw new IllegalArgumentException(
                 "touchedAggregates must be empty unless kind is STEP_COMPLETED, but kind is " + kind);
@@ -66,11 +70,11 @@ public record SagaLifecycleEntry(
         touchedAggregates = List.copyOf(touchedAggregates);
     }
 
-    private static void requirePresentIff(String name, Object value, SagaLifecycleEventKind impliedBy,
+    private static void requirePresentIff(String name, Object value, boolean required, String requiringKinds,
                                           SagaLifecycleEventKind kind) {
-        if ((kind == impliedBy) != (value != null)) {
+        if (required != (value != null)) {
             throw new IllegalArgumentException(
-                name + " must be non-null if and only if kind is " + impliedBy + ", but kind is " + kind
+                name + " must be non-null if and only if kind is " + requiringKinds + ", but kind is " + kind
                     + " and " + name + " is " + value);
         }
     }
