@@ -493,26 +493,26 @@ on the 002 `SagaTestHarness` and compare (quickstart.md scenarios 2, 3, 4, 17, 2
 
 ### Unit tests for User Story 1 (`saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/`)
 
-- [ ] T043 [P] [US1] Create `internal/EngineSagaContextTest.java` (names, `null` rejection, type-safe reads and
+- [x] T043 [P] [US1] Create `internal/EngineSagaContextTest.java` (names, `null` rejection, type-safe reads and
   mismatch, structured update, write-through after every call, isolation between two sagaIds) and
   `internal/EngineSagaLifecycleTest.java` (each transition and its entry, `advance` adds none, terminal rejection,
   duplicate detection through the store, `drain` returns entries in transition order and clears them).
-- [ ] T044 [P] [US1] Create `DispatchingEventHandoffTest.java` (order, every event attempted after a failure, first
+- [x] T044 [P] [US1] Create `DispatchingEventHandoffTest.java` (order, every event attempted after a failure, first
   failure thrown with the rest suppressed) and `StartupReportTest.java` (`isValid`, `allErrors` order, copies,
   exception message).
-- [ ] T045 [US1] Create `internal/EngineCommandGatewayTest.java` over the core test-jar booking fixtures
+- [x] T045 [US1] Create `internal/EngineCommandGatewayTest.java` over the core test-jar booking fixtures
   (`PaymentService` service handler, `Inventory` via `InventoryRepository` loader/saver, `Booking` creation handler
   saved by `BookingRepository`) inside a bound unit of work: routing, `NoCommandHandlerException`,
   `AggregateNotFoundException`, first supporting `AggregateResolver` wins for load and save, a non-command parameter
   supplied by a `HandlerParameterResolver` (a handler class declared in the test), rollback-only set before a handler
   failure leaves `send`.
-- [ ] T046 [US1] Create `support/DifferentialRun.java` (runs one event sequence on a 002 `SagaTestHarness` and on a
+- [x] T046 [US1] Create `support/DifferentialRun.java` (runs one event sequence on a 002 `SagaTestHarness` and on a
   `SagaEngine` built over this phase's doubles with the same fixed `Clock`, the same deterministic saga-id supplier
   and separate fixture instances; exposes both sides' instances, step records, outcome, failure, context values,
   aggregate/service state and dispatched events for comparison) and `ThreeStepSagaDifferentialTest.java`: the 002
   User Story 1 happy-path scenarios for `ThreeStepSaga` give equal results on both (SC-001, SC-009; quickstart.md
   scenario 3).
-- [ ] T047 [US1] Create `SagaEngineHappyPathTest.java`: `ThreeStepSaga` → one instance `COMPLETED` with outcome
+- [x] T047 [US1] Create `SagaEngineHappyPathTest.java`: `ThreeStepSaga` → one instance `COMPLETED` with outcome
   `onShipmentScheduled`, every step `COMPLETED` with its touched aggregates, service effects committed (US1-1); an
   observer thread reading `TransactionalInMemoryStorageProvider.committed()` from inside a step sees no step record,
   status or outcome of the running unit of work (US1-2, quickstart 2); a later step reads the `SagaContext` value an
@@ -520,18 +520,18 @@ on the 002 `SagaTestHarness` and compare (quickstart.md scenarios 2, 3, 4, 17, 2
   via `ThreeStepSagaProbe` (US1-6, quickstart 4); `CreateBookingSaga`'s first unit of work loads and saves `Inventory`
   through `InventoryRepository` (US1-5) and hands `PaymentInitiatedEvent` to the dispatcher exactly once, after
   commit (US1-4).
-- [ ] T048 [US1] Create `LifecycleHistoryTest.java` (engine): `ThreeStepSaga` → history `CREATED`, `STEP_COMPLETED`
+- [x] T048 [US1] Create `LifecycleHistoryTest.java` (engine): `ThreeStepSaga` → history `CREATED`, `STEP_COMPLETED`
   for `onOrderPlaced`, `onItemsReserved`, `onInvoiceIssued`, `onShipmentScheduled` in that order (which is not
   alphabetical), then `COMPLETED(onShipmentScheduled)`; `CreateBookingSaga`'s first unit of work → `CREATED` plus two
   `STEP_COMPLETED`, no status entry for `RUNNING`; storage numbers are consecutive from 0 (US1-8, SC-010,
   quickstart 17 committed part).
-- [ ] T049 [US1] Create `OutsideUnitOfWorkTest.java`: `eventPublisher().publish(new OrderPlaced(...))` outside a unit
+- [x] T049 [US1] Create `OutsideUnitOfWorkTest.java`: `eventPublisher().publish(new OrderPlaced(...))` outside a unit
   of work reaches `RecordingEventDispatcher` immediately and starts nothing by itself; delivering it back through
   `receive` starts a new instance (US1-7); `commandGateway().send(new ReserveItems(...))` outside a unit of work
   commits `ReservationService`'s change and hands its `ItemsReserved` to the handoff with `sagaType`/`sagaId` `null`;
   with `ReservationService.failNext()` armed (registered as an `InMemoryTransactionBoundary` participant) it rolls
   back the change, hands nothing off and rethrows (FR-016, FR-018, quickstart 21).
-- [ ] T050 [US1] Checkpoint (US1). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
+- [x] T050 [US1] Checkpoint (US1). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures in core and engine, and the container guard.
 
 **Checkpoint**: MVP increment 1. The happy path runs on the engine and matches the harness.
