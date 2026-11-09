@@ -67,6 +67,18 @@ public final class EngineRuntime {
         return registered.stream().anyMatch(EngineRuntime::needsHostInstance);
     }
 
+    /**
+     * The engine's own startup errors of {@code registered} with {@code settings}' plug-ins
+     * (contracts/engine-startup.md "Engine checks and messages"); empty if the model is runnable. Calls only
+     * {@code supports} methods.
+     *
+     * @param registered the registered classes, in registration order
+     * @param settings   the host plug-ins
+     */
+    public static List<String> startupErrors(Collection<Class<?>> registered, EngineSettings settings) {
+        return StartupChecks.errorsOf(registered, settings);
+    }
+
     /** The registered {@code @Saga} classes, in registration order. */
     public List<Class<?>> sagaTypes() {
         return sagas.stream().<Class<?>>map(SagaModel::type).toList();

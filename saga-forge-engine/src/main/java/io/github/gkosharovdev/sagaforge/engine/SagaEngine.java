@@ -82,12 +82,13 @@ public final class SagaEngine implements EventReceiver {
     }
 
     /**
-     * Validates the registered model with {@code ReflectiveAnnotationScanner.validateAll}, builds the saga models
-     * and command routes, registers every {@code @Saga} class with the {@link EventDispatcher} in registration
-     * order, and starts accepting events (FR-034, FR-036).
+     * Validates the registered model with {@code ReflectiveAnnotationScanner.validateAll} and the engine's own checks
+     * (aggregate loading, handler parameters, saga objects; contracts/engine-startup.md), all errors of both in one
+     * report; then builds the saga models and command routes, registers every {@code @Saga} class with the
+     * {@link EventDispatcher} in registration order, and starts accepting events (FR-034 to FR-036).
      *
-     * @throws SagaEngineStartupException if the model is invalid or the dispatcher rejects a saga type; the engine
-     *                                    is then refused for good
+     * @throws SagaEngineStartupException if the model or plug-ins are not runnable or the dispatcher rejects a saga
+     *                                    type; the engine is then refused for good and processes nothing
      * @throws IllegalStateException      if {@code start()} was called before
      */
     public void start() {
@@ -96,7 +97,7 @@ public final class SagaEngine implements EventReceiver {
                 throw new IllegalStateException("start() was already called; the saga engine is " + state);
             }
             try {
-                startAccepting(validated());
+                startAccepting(checked());
             } catch (RuntimeException | Error failure) {
                 state = State.REFUSED;
                 throw failure;
@@ -131,10 +132,15 @@ public final class SagaEngine implements EventReceiver {
         return state == State.STARTED;
     }
 
-    private ValidationReport validated() {
+    /**
+     * Runs {@code validateAll} and the engine's own checks together, so one refusal lists every error of both
+     * (FR-034, FR-035).
+     */
+    private ValidationReport checked() {
         ValidationReport validation = new ReflectiveAnnotationScanner().validateAll(registered);
-        if (!validation.isValid()) {
-            throw refuse(new StartupReport(validation, List.of()));
+        StartupReport report = new StartupReport(validation, EngineRuntime.startupErrors(registered, settings));
+        if (!report.isValid()) {
+            throw refuse(report);
         }
         return validation;
     }

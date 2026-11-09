@@ -919,7 +919,7 @@ saga type is registered with the dispatcher before the first event (quickstart.m
 
 ### Implementation for User Story 6
 
-- [ ] T094 [P] [US6] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/StartupChecks.java`
+- [x] T094 [P] [US6] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/StartupChecks.java`
   (contracts/engine-startup.md "Engine checks and messages", exact message texts and placeholders): every
   `@Aggregate` with an instance-method `@CommandHandler` has a registered `@AggregateLoader` or a registered
   `AggregateResolver` whose `supports` is true (Property 21); every `@CommandHandler` parameter other than its
@@ -928,7 +928,7 @@ saga type is registered with the dispatcher before the first event (quickstart.m
   `SagaObjectProvider`, or without one declares a no-argument constructor of any visibility (Property 23). Returns
   `List<String>` of all errors in one pass; calls only `supports` methods (no saga object, bean or handler instance is
   created; handler/loader/saver host instances are not checked, spec Assumptions "Handler instances").
-- [ ] T095 [US6] Extend `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/SagaEngine.java`
+- [x] T095 [US6] Extend `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/SagaEngine.java`
   (shared) `start()`: run `validateAll` and `StartupChecks` together; any error from either → `REFUSED` (terminal),
   log `saga.startup.refused` plus one `ERROR` line per error, throw `SagaEngineStartupException(new
   StartupReport(validation, engineErrors))`; only when both are clean, call `registerSagaType` for every saga class in
@@ -938,26 +938,26 @@ saga type is registered with the dispatcher before the first event (quickstart.m
 
 ### Unit tests for User Story 6
 
-- [ ] T096 [P] [US6] Create the startup fixtures in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/startup/`:
+- [x] T096 [P] [US6] Create the startup fixtures in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/startup/`:
   `UnloadableAggregate` (`@Aggregate` with an instance-method `@CommandHandler`, no loader anywhere) with its command
   and event; `ServiceWithExtraParameter` (`@CommandHandler handle(StartupCommand, java.time.Clock)`);
   `SagaWithoutNoArgConstructor` (valid `@Saga` whose only constructor takes an argument); an invalid model reuses a
   core test-jar scanner fixture (e.g. `core.scanner.fixtures.NoSagaIdSaga`); a `RejectingDispatcher` whose
   `registerSagaType` throws for one class.
-- [ ] T097 [US6] Create `.../engine/StartupValidationTest.java` (quickstart 18): each error alone (US6-1 to US6-3, plus
+- [x] T097 [US6] Create `.../engine/StartupValidationTest.java` (quickstart 18): each error alone (US6-1 to US6-3, plus
   the provider-unsupported and dispatcher-rejection messages) and all together (US6-4) → one
   `SagaEngineStartupException` whose `report().allErrors()` lists every expected message once, `validateAll` errors
   first; a resolver whose `supports` is true for `UnloadableAggregate` clears that error; afterwards `receive`,
   `commandGateway().send` and `eventPublisher().publish` throw `IllegalStateException` and the stores are untouched
   (US6-5, SC-006); on success `RecordingEventDispatcher.registeredSagaTypes()` lists every saga in registration order
   before the first `receive` (FR-036); `start()` twice throws.
-- [ ] T098 [US6] Create `.../engine/StartupChecksPropertyTest.java` (jqwik `@Property(tries = 100)`, Properties 21 to
+- [x] T098 [US6] Create `.../engine/StartupChecksPropertyTest.java` (jqwik `@Property(tries = 100)`, Properties 21 to
   24; Javadoc `**Validates: Requirements FR-019, FR-034, FR-035, FR-036, SC-006**`): for any subset of {unloadable
   aggregate with or without a supporting resolver, extra-parameter handler with or without a supporting parameter
   resolver, saga without no-arg constructor with or without a supporting provider, an invalid saga} added to a valid
   base model (`ThreeStepSaga` and its services), the report holds an error for exactly the unsupported members, every
   one in a single report, and the refused engine accepts zero events.
-- [ ] T099 [US6] Checkpoint (US6). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
+- [x] T099 [US6] Checkpoint (US6). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures, and the container guard.
 
 **Checkpoint**: every user story is implemented and unit-tested.

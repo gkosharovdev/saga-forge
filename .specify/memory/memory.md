@@ -504,7 +504,10 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   until US6 (T095) resolves the provider per saga type at `start()`, it is asked at the start of every unit of work.
   `supports` is side-effect free by contract, so the only cost is the repeated call.
 - **Origin**: 004 T038 (found while writing T056's `FailureSagaObjects`).
-- **Status**: open (resolve at `start()` in T095).
+- **Status**: resolved in 004 T094/T095. `start()` asks `supports` once per saga type and refuses a type the
+  registered provider does not support (contracts/engine-startup.md); a unit of work then calls `newInstance`
+  without asking again. The per-unit-of-work `supports` filter of T052 was removed. With a provider registered,
+  there is no fallback to the no-argument constructor.
 
 ## Dependency alignment with Spring Boot 4.1.2 (future starter feature)
 

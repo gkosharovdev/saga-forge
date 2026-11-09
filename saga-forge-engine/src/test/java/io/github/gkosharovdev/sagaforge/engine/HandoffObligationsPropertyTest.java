@@ -7,6 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanc
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff.Timing;
 import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.failure.Fee;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.failure.FailingHandlerInstances;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.failure.FailureSaga;
@@ -105,6 +106,29 @@ class HandoffObligationsPropertyTest {
                 assertThat(batch.sagaId() == null).isEqualTo(batch.sagaType() == null));
     }
 
+    /**
+     * The one {@link SagaObjectProvider} of {@link World}: {@link FailureSaga} through {@link FailureSagaObjects}, the
+     * fan-out sagas through their constructors. A registered provider must support every saga type (startup check).
+     */
+    private record AllSagaObjects(FailureSagaObjects failureSagas) implements SagaObjectProvider {
+
+        @Override
+        public boolean supports(Class<?> sagaType) {
+            return failureSagas.supports(sagaType) || sagaType == AuditSaga.class || sagaType == ReviewSaga.class;
+        }
+
+        @Override
+        public Object newInstance(Class<?> sagaType) {
+            if (sagaType == AuditSaga.class) {
+                return new AuditSaga();
+            }
+            if (sagaType == ReviewSaga.class) {
+                return new ReviewSaga();
+            }
+            return failureSagas.newInstance(sagaType);
+        }
+    }
+
     /** One engine with every fixture registered and a capturing handoff of the given timing. */
     private static final class World {
 
@@ -135,7 +159,7 @@ class HandoffObligationsPropertyTest {
                     .handlerInstances(new FailingHandlerInstances(plan, instances))
                     .aggregateResolver(labels)
                     .parameterResolver(new FeeScheduleResolver(plan, new FeeSchedule(150)))
-                    .sagaObjects(new FailureSagaObjects(plan))
+                    .sagaObjects(new AllSagaObjects(new FailureSagaObjects(plan)))
                     .build();
             engine.start();
         }

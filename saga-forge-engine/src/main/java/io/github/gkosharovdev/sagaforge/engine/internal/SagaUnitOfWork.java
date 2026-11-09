@@ -338,9 +338,8 @@ final class SagaUnitOfWork implements UnitOfWork {
 
     private Object newSagaObject() {
         Class<?> type = trigger.saga().type();
-        Object saga = settings.sagaObjects()
-                .filter(provider -> provider.supports(type))
-                .map(provider -> provider.newInstance(type))
+        // start() refused any saga type a registered provider does not support (G-ENG-21).
+        Object saga = settings.sagaObjects().map(provider -> provider.newInstance(type))
                 .orElseGet(trigger.saga()::newInstance);
         if (!type.isInstance(saga)) {
             throw new IllegalStateException("SagaObjectProvider returned " + saga + " for @Saga class "
