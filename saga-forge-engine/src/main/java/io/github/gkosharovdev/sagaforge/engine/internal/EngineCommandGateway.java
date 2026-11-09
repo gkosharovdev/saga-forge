@@ -79,19 +79,20 @@ final class EngineCommandGateway implements CommandGateway {
     }
 
     /**
-     * Builds the routing table of {@code registered}.
+     * Builds the routing table of {@code registered}; {@code diagnostics} is where non-saga units of work log.
      *
      * @throws IllegalStateException if two handlers take the same command type ({@code validateAll} rejects that
      *                               first)
      */
-    static EngineCommandGateway of(Collection<Class<?>> registered, AggregateAccess access, EngineSettings settings) {
+    static EngineCommandGateway of(Collection<Class<?>> registered, AggregateAccess access, EngineSettings settings,
+            Diagnostics diagnostics) {
         RouteFactory factory = new RouteFactory(access, settings);
         Map<Class<?>, CommandRoute> routes = new LinkedHashMap<>();
         for (Class<?> host : registered) {
             factory.routesOf(host).forEach((commandType, route) -> addRoute(routes, commandType, route));
         }
-        return new EngineCommandGateway(routes, settings.transactions(), () -> new NonSagaUnitOfWork(
-                settings.transactions(), settings.handoff(), settings.sources().newUnitOfWorkId()));
+        return new EngineCommandGateway(routes, settings.transactions(), () -> new NonSagaUnitOfWork(settings,
+                diagnostics, settings.sources().newUnitOfWorkId()));
     }
 
     @Override

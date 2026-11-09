@@ -53,7 +53,7 @@ public final class EngineRuntime {
                 .toList();
         AggregateAccess access = AggregateAccess.of(registered, settings.handlerInstances(),
                 settings.aggregateResolvers());
-        EngineCommandGateway gateway = EngineCommandGateway.of(registered, access, settings);
+        EngineCommandGateway gateway = EngineCommandGateway.of(registered, access, settings, diagnostics);
         EventRouter router = new EventRouter(sagas, new SagaUnitOfWork.Collaborators(settings, gateway, diagnostics));
         return new EngineRuntime(sagas, router, gateway, new EngineEventPublisher(settings.dispatcher()));
     }

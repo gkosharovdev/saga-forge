@@ -840,35 +840,35 @@ engine test `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/en
 
 ### Implementation for User Story 5
 
-- [ ] T083 [P] [US5] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/ReentrancyGuard.java`:
+- [x] T083 [P] [US5] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/ReentrancyGuard.java`:
   a thread-bound "engine unit of work running" marker (`enter()`, `exit()`, `isRunning()`), set from `begin()` until
   the unit of work's commit or rollback has finished, and `requireNotRunning()` which reports the failure to the bound
   unit of work (`failed(Throwable)`, so a step that catches it still fails) and throws `IllegalStateException`
   (FR-007, research.md §6).
-- [ ] T084 [US5] Extend `.../engine/internal/SagaUnitOfWork.java` (shared): mark the thread with `ReentrancyGuard`
+- [x] T084 [US5] Extend `.../engine/internal/SagaUnitOfWork.java` (shared): mark the thread with `ReentrancyGuard`
   from `begin()` and clear it after commit/rollback, before the `AFTER_COMMIT` handoff; with an `IN_TRANSACTION`
   handoff, call `handOff` after `save(instance, entries)` and before `commit()`, inside the transaction, only for a
   non-empty batch, and treat its failure as a unit-of-work failure (T052 path, `SagaFailure.stepName` = the last step
   run); with `AFTER_COMMIT`, catch a `RuntimeException` from `handOff`, put it and its suppressed exceptions into
   `SagaHandlingResult.handoffFailures`, log `saga.handoff.failed`, and leave the committed instance untouched (FR-031).
-- [ ] T085 [US5] Extend `.../engine/internal/NonSagaUnitOfWork.java` (shared) the same way: `ReentrancyGuard` marker;
+- [x] T085 [US5] Extend `.../engine/internal/NonSagaUnitOfWork.java` (shared) the same way: `ReentrancyGuard` marker;
   `IN_TRANSACTION` handoff before `commit()` whose failure rolls back and is rethrown from `send`; an `AFTER_COMMIT`
   failure is logged (`saga.handoff.failed` without `sagaType`/`sagaId`) and not thrown (contracts/event-handoff.md
   "Failure handling").
-- [ ] T086 [US5] Extend `.../engine/internal/EventRouter.java` (shared): `receive` calls
+- [x] T086 [US5] Extend `.../engine/internal/EventRouter.java` (shared): `receive` calls
   `ReentrancyGuard.requireNotRunning()` before validation, so a call from a step, a handler or an `IN_TRANSACTION`
   handoff throws `IllegalStateException` and fails that unit of work, while a call from inside an `AFTER_COMMIT`
   handoff (marker cleared, instance lease released) is handled as a new unit of work (FR-007, US5-5).
 
 ### Unit tests for User Story 5 (`saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/`)
 
-- [ ] T087 [US5] Create `TestTransportEndToEndTest.java` (quickstart 14, US5-1, US5-5, SC-007 engine half): the
+- [x] T087 [US5] Create `TestTransportEndToEndTest.java` (quickstart 14, US5-1, US5-5, SC-007 engine half): the
   engine built with `TestTransport` as `EventDispatcher` and default handoff, `loopBack(true)`; `CreateBookingSaga`
   driven only through `transport.deliver(...)` reaches both outcomes; `AuditSaga`'s handed-off `CaseNoted` is looped
   back from inside `dispatch` and starts `ReviewSaga` as a new unit of work after `AuditSaga`'s committed (checked from
   inside `ReviewSaga`'s step through `TransactionalInMemoryStorageProvider.committed()`); every report matches
   contracts/event-receiver.md. The test touches only `EventReceiver` and the transport, never engine internals.
-- [ ] T088 [US5] Create `HandoffObligationsTest.java` with `CapturingEventHandoff` (`AFTER_COMMIT`): a rolled-back unit
+- [x] T088 [US5] Create `HandoffObligationsTest.java` with `CapturingEventHandoff` (`AFTER_COMMIT`): a rolled-back unit
   of work (`FailureSaga` with a fault) hands off nothing (US5-2, SC-005); `AuditSaga` with `CLOSE_THEN_ESCALATE` hands
   off `CaseEscalated`, still queued when `onCaseClosed` ended the unit of work, and `AuditSaga` with `NOTE` hands off
   `CaseNoted` (it triggers `ReviewSaga`'s start step, so it is never run in-process), in recording order, after
@@ -876,26 +876,26 @@ engine test `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/en
   instance committed and not `FAILED`, lists the exception in `handoffFailures` and logs `saga.handoff.failed` (US5-4,
   FR-031); `DispatchingEventHandoff` over a dispatcher failing on the middle event still dispatches the rest and lists
   the failure.
-- [ ] T089 [US5] Create `InTransactionHandoffTest.java` with `CapturingEventHandoff` (`IN_TRANSACTION`) (US5-7,
+- [x] T089 [US5] Create `InTransactionHandoffTest.java` with `CapturingEventHandoff` (`IN_TRANSACTION`) (US5-7,
   SC-011, quickstart 16): per committed unit of work the batch arrives before `commit()`, inside the unit of work's
   transaction (`TransactionBoundary.current()` is it), with `unitOfWorkId`, `sagaType` and `sagaId`, in recording
   order, and is retained after commit; with `failNextCommit` nothing is retained; a throwing handoff ends the saga
   `FAILED` naming the last step; a non-saga `send` with a throwing handoff rolls back and rethrows. Same builder as
   the default case except `.handoff(...)` (no engine change between timings).
-- [ ] T090 [US5] Create `HandoffObligationsPropertyTest.java` (jqwik `@Property(tries = 100)`, Property 26; Javadoc
+- [x] T090 [US5] Create `HandoffObligationsPropertyTest.java` (jqwik `@Property(tries = 100)`, Property 26; Javadoc
   `**Validates: Requirements FR-029, FR-030, SC-005, SC-011**`): for any generated sequence of runs (`FailureSaga` with
   an optional `FaultPoint`, `AuditSaga` with either mode, a non-saga `send`) under either timing, each committed unit
   of work's batch holds exactly its buffered events, once, in recording order, with a `unitOfWorkId` no other batch
   has, and `sagaType`/`sagaId` present iff saga-scoped; rolled-back units of work leave nothing.
-- [ ] T091 [US5] Create `ReentrancyTest.java` (FR-007, quickstart 19): `receive` from inside a step, from inside a
+- [x] T091 [US5] Create `ReentrancyTest.java` (FR-007, quickstart 19): `receive` from inside a step, from inside a
   handler and from inside an `IN_TRANSACTION` handoff → `IllegalStateException`, that unit of work `FAILED`; from
   inside an `AFTER_COMMIT` handoff → accepted, runs after the first unit of work finished.
-- [ ] T092 [US5] Create `HandlingReportOutcomesTest.java`: one case per row of contracts/event-receiver.md "Outcomes
+- [x] T092 [US5] Create `HandlingReportOutcomesTest.java`: one case per row of contracts/event-receiver.md "Outcomes
   per instance" (`WAITING`, `COMPLETED`, `FAILED` started and not started, `DUPLICATE_START`, `UNMATCHED`,
   `UNEXPECTED`, `NOT_HANDLED` for `CREATED` and for a conflict, ignored), asserting `outcome`, `started`, `sagaId`
   nullness, `outcomeStep`, `failure`, `unitOfWorkId` presence per data-model.md; a `FAILED` saga is returned
   normally, not thrown (US5-1, US5-6).
-- [ ] T093 [US5] Checkpoint (US5). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
+- [x] T093 [US5] Checkpoint (US5). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures, and the container guard.
 
 **Checkpoint**: both plug-in points are defined and verified.

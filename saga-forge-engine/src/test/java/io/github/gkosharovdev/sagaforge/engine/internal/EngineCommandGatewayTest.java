@@ -47,8 +47,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link EngineCommandGateway} inside a bound unit of work, over the core test-jar booking fixtures (specs/004-saga-engine
- * tasks.md T045, 002 contracts/command-gateway.md, FR-016, FR-019).
+ * {@link EngineCommandGateway} inside a bound unit of work, over the core test-jar booking fixtures
+ * (specs/004-saga-engine tasks.md T045, 002 contracts/command-gateway.md, FR-016, FR-019).
  */
 class EngineCommandGatewayTest {
 
@@ -206,7 +206,8 @@ class EngineCommandGatewayTest {
                 new InMemorySagaContextStore(), boundary, new RecordingEventDispatcher(), instances, resolvers,
                 parameterResolvers, Optional.empty(), handoff, handoff.timing(),
                 new TimeAndIdentity(Clock.fixed(NOW, ZoneOffset.UTC), () -> "saga-1", () -> "uow-1"));
-        return EngineCommandGateway.of(registered, AggregateAccess.of(registered, instances, resolvers), settings);
+        return EngineCommandGateway.of(registered, AggregateAccess.of(registered, instances, resolvers), settings,
+                new Diagnostics(System.getLogger(EngineCommandGatewayTest.class.getName())));
     }
 
     @BeforeEach
