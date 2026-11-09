@@ -1,6 +1,7 @@
 -- Saga Forge PostgreSQL schema (specs/003-postgres-saga-persistence/contracts/postgres-schema.md).
 -- Applied by the host application; this module ships no migration tool. A database created from the schema before
--- specs/005-step-retry is brought up to date with schema-upgrade-005.sql.
+-- specs/005-step-retry is brought up to date with schema-upgrade-005.sql, one created before
+-- specs/006-saga-compensation with schema-upgrade-006.sql.
 
 CREATE TABLE saga_instance (
     saga_id             TEXT PRIMARY KEY,
@@ -18,6 +19,7 @@ CREATE TABLE saga_instance (
     failure_classification TEXT,
     failure_attempts    INT,
     pending_retry       JSONB,
+    compensation_trigger JSONB,
     CONSTRAINT outcome_iff_completed
         CHECK ((status = 'COMPLETED') = (outcome IS NOT NULL)),
     CONSTRAINT failure_iff_failed
@@ -25,7 +27,10 @@ CREATE TABLE saga_instance (
             AND (status = 'FAILED') = (failure_classification IS NOT NULL)
             AND (status = 'FAILED') = (failure_attempts IS NOT NULL)),
     CONSTRAINT pending_retry_only_while_active
-        CHECK (pending_retry IS NULL OR status IN ('CREATED', 'RUNNING'))
+        CHECK (pending_retry IS NULL OR status IN ('CREATED', 'RUNNING')),
+    CONSTRAINT trigger_iff_compensation
+        CHECK ((status IN ('COMPENSATING', 'COMPENSATED', 'REQUIRES_INTERVENTION'))
+            = (compensation_trigger IS NOT NULL))
 );
 
 CREATE TABLE saga_association (
@@ -58,5 +63,6 @@ CREATE TABLE saga_lifecycle_history (
     failure_classification TEXT,
     failure_attempts    INT,
     occurred_at         TIMESTAMPTZ NOT NULL,
+    compensation_trigger JSONB,
     PRIMARY KEY (saga_id, sequence_number)
 );

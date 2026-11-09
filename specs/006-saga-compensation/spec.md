@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-09
 
-**Status**: Draft
+**Status**: Implemented (2026-11-09)
 
 **Input**: User description: "saga compensation steps. which should trigger in case of failures. For example after payment there has been established that a delivery is impossible maybe due to not enough stock or delivery partner refusing to accept the delivery request. Then a refund needs to be triggered. Or a technical failure is preventing future steps to complete and we need to rollback already completed steps with concrete business rules."
 
@@ -185,8 +185,10 @@ check that only the remaining two compensations run.
 - **Failure in the start step**: nothing committed yet; the saga ends `FAILED` without compensation (as today).
 - **No committed step has a compensation**: the saga ends "compensated" with every step recorded as "nothing
   to compensate" — the author declared that nothing needs undoing.
-- **Late forward events**: an event for a forward step (e.g. `DeliveryAcceptedEvent`) arriving while the saga
-  is compensating or after it ended is not handled and is reported as not handled, as for any ended saga.
+- **Late forward events**: an event for a forward step (e.g. `DeliveryAcceptedEvent`) never runs its step while
+  the saga is compensating or after it ended. After it ended, the event is reported as not handled, as for any ended
+  saga. While the saga is compensating (only after a crash interrupted compensation), the event resumes the remaining
+  compensations and the handling call reports their outcome (plan research §10).
 - **Concurrent triggers**: a rejection event and a technical failure for the same instance at nearly the same
   time start compensation once; the second trigger is recorded as not handled.
 - **Duplicate delivery of the trigger event**: covered by scenario 1.4 — compensation is not started twice.
@@ -269,7 +271,9 @@ check that only the remaining two compensations run.
 - **FR-018**: Lifecycle history MUST record the start of compensation, each compensation's outcome, and the
   terminal outcome, so storage implementations persist it like other lifecycle entries.
 - **FR-019**: The canonical example (`OrderProcessingSaga`) and the docs MUST show a working compensation
-  (refund on delivery rejection), with `associationProperty` and the start/end lifecycle annotations visible.
+  (a refund after a business failure that follows the payment; in the example, stock found unavailable after the
+  payment, because its forward flow runs in one unit of work; the delivery rejection is shown by the engine's test
+  fixture and the docs), with `associationProperty` and the start/end lifecycle annotations visible.
 
 **Scope boundaries**
 

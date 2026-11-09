@@ -10,13 +10,17 @@ import io.github.gkosharovdev.sagaforge.engine.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.engine.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.AttemptResult;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Collaborators;
+import io.github.gkosharovdev.sagaforge.engine.internal.CompensationRun.Summary;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Committed;
+import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Compensating;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Failed;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Finished;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Resume;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Trigger;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Runs the attempts of one event for one saga instance (005 contracts/attempt-loop.md).
@@ -32,6 +36,13 @@ import java.util.List;
  *
  * <p>The lock is released before the {@code AFTER_COMMIT} handoff of a committed attempt, and after the
  * {@code FAILED} write otherwise.</p>
+ *
+ * <p>Since 006 a committed attempt that started compensation, an attempt that found the instance already
+ * {@code COMPENSATING}, and a {@code FINAL} or {@code EXHAUSTED} failure after a step committed
+ * ({@link CompensationStartWrite} instead of {@code FailedWrite}) continue with {@link CompensationRun} under the same
+ * lock; the lock is released after the
+ * run's last write and every committed unit of work's {@code AFTER_COMMIT} handoff then runs in commit order
+ * (specs/006-saga-compensation contracts/compensation-run.md).</p>
  */
 final class AttemptLoop {
 
@@ -61,13 +72,21 @@ final class AttemptLoop {
                         return finished.result();
                     }
                     case Committed committed -> {
+                        if (committed.compensationStarted()) {
+                            return compensate(trigger, instanceLease, compensationCorrelation(trigger),
+                                    () -> committed.handOff().handoffFailures(), committed.unitOfWorkId());
+                        }
                         instanceLease.close();
                         return committed.handOff();
+                    }
+                    case Compensating compensating -> {
+                        with.diagnostics().compensationResumed(compensating.correlation(), trigger.step().name());
+                        return compensate(trigger, instanceLease, compensating.correlation(), null, null);
                     }
                     case Resume resume -> {
                         Integer next = resume(trigger, resume);
                         if (next == null) {
-                            return exhausted(trigger, resume);
+                            return exhausted(trigger, resume, instanceLease);
                         }
                         attempt = next;
                     }
@@ -76,7 +95,7 @@ final class AttemptLoop {
                         FailureClassification classification = FailureClassifier.classify(failed.cause(), policy);
                         if (classification != FailureClassification.TRANSIENT
                                 || failed.attempt() >= policy.maxAttempts()) {
-                            return failedWrite(trigger, failed, classification);
+                            return failedWrite(trigger, failed, classification, instanceLease);
                         }
                         SagaFailure transientFailure = SagaFailure.of(failed.step(), failed.cause(),
                                 settings.sources().now(), FailureClassification.TRANSIENT, failed.attempt());
@@ -84,7 +103,7 @@ final class AttemptLoop {
                         PendingRetry claim = new PendingRetry(trigger.step().name(), next, transientFailure);
                         if (!new AttemptWrite(trigger.saga(), settings, with.diagnostics())
                                 .attemptFailed(failed.correlation(), claim, failed.cause())) {
-                            return failedWrite(trigger, failed, classification);
+                            return failedWrite(trigger, failed, classification, instanceLease);
                         }
                         long wait = Backoff.waitBefore(policy, next);
                         with.diagnostics().unitOfWorkRetrying(failed.correlation(), transientFailure, next, wait);
@@ -116,22 +135,71 @@ final class AttemptLoop {
         return next;
     }
 
-    private SagaHandlingResult exhausted(Trigger trigger, Resume resume) {
+    private SagaHandlingResult exhausted(Trigger trigger, Resume resume, Lease instanceLease) {
         PendingRetry claimed = resume.retry();
         SagaFailure failure = claimed.lastFailure().classifiedAs(FailureClassification.EXHAUSTED,
                 claimed.attemptsStarted());
-        return new FailedWrite(trigger.saga(), settings, with.diagnostics())
-                .record(resume.correlation(), failure, null, trigger.started());
+        return finalOrFailed(trigger, resume.correlation(), failure, null, instanceLease);
     }
 
-    private SagaHandlingResult failedWrite(Trigger trigger, Failed failed, FailureClassification classification) {
+    private SagaHandlingResult failedWrite(Trigger trigger, Failed failed, FailureClassification classification,
+            Lease instanceLease) {
         FailureClassification recorded = classification == FailureClassification.TRANSIENT
                 ? FailureClassification.EXHAUSTED
                 : classification;
         SagaFailure failure = SagaFailure.of(failed.step(), failed.cause(), settings.sources().now(), recorded,
                 failed.attempt());
-        return new FailedWrite(trigger.saga(), settings, with.diagnostics())
-                .record(failed.correlation(), failure, failed.cause(), trigger.started());
+        return finalOrFailed(trigger, failed.correlation(), failure, failed.cause(), instanceLease);
+    }
+
+    /**
+     * A {@code FINAL} or {@code EXHAUSTED} failure starts compensation if a step committed, then runs it (006 FR-003,
+     * FR-006); an {@code UNCLASSIFIED} one, or one with nothing committed, is written {@code FAILED} (005).
+     */
+    private SagaHandlingResult finalOrFailed(Trigger trigger, Correlation about, SagaFailure failure,
+            Throwable cause, Lease instanceLease) {
+        boolean compensable = failure.classification() == FailureClassification.FINAL
+                || failure.classification() == FailureClassification.EXHAUSTED;
+        if (!compensable) {
+            return new FailedWrite(trigger.saga(), settings, with.diagnostics())
+                    .record(about, failure, cause, trigger.started());
+        }
+        java.util.Optional<SagaHandlingResult> notStarted = new CompensationStartWrite(trigger.saga(), settings,
+                with.diagnostics()).record(about, failure, cause, trigger.started());
+        if (notStarted.isPresent()) {
+            return notStarted.get();
+        }
+        return compensate(trigger, instanceLease, about.inUnitOfWork(null), null, about.unitOfWorkId());
+    }
+
+    /**
+     * Runs the remaining compensations under {@code instanceLease}, releases it, then runs {@code triggerHandoff} (the
+     * {@code AFTER_COMMIT} handoff of the unit of work that started compensation, if any) and each committed
+     * compensation's handoff, in commit order, also when the run raised.
+     */
+    private SagaHandlingResult compensate(Trigger trigger, Lease instanceLease, Correlation about,
+            Supplier<List<Throwable>> triggerHandoff, String triggerUnitOfWorkId) {
+        List<Supplier<List<Throwable>>> handoffs = new ArrayList<>();
+        if (triggerHandoff != null) {
+            handoffs.add(triggerHandoff);
+        }
+        Summary summary;
+        List<Throwable> handoffFailures = new ArrayList<>();
+        try {
+            summary = new CompensationRun(with).run(trigger.saga(), trigger.sagaId(), about, handoffs,
+                    triggerUnitOfWorkId);
+        } finally {
+            instanceLease.close();
+            handoffs.forEach(handoff -> handoffFailures.addAll(handoff.get()));
+        }
+        boolean committed = summary.outcome() != HandlingOutcome.NOT_HANDLED;
+        return new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(), summary.outcome(),
+                trigger.started(), null, null, summary.lastUnitOfWorkId(),
+                committed ? handoffFailures : List.of());
+    }
+
+    private static Correlation compensationCorrelation(Trigger trigger) {
+        return Correlation.of(trigger.event()).forSaga(trigger.saga().typeName()).instance(trigger.sagaId());
     }
 
     /** Waits {@code millis}; {@code false} if interrupted, with the interrupt flag restored. */

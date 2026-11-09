@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import java.time.Instant;
 import java.util.List;
 
@@ -15,20 +16,24 @@ import java.util.List;
  *
  * @param sagaId            the owning instance's {@link SagaInstance#sagaId()}; non-null
  * @param kind              the transition; non-null
- * @param stepName          the completed step, or for {@code ATTEMPT_FAILED} the step that failed; non-null if and
- *                          only if {@code kind} is {@code STEP_COMPLETED} or {@code ATTEMPT_FAILED}
+ * @param stepName          the completed step, for {@code ATTEMPT_FAILED} the step that failed, for
+ *                          {@code STEP_COMPENSATED} and {@code COMPENSATION_FAILED} the compensated step; non-null if
+ *                          and only if {@code kind} is one of those four
  * @param touchedAggregates the completed step's {@link StepRecord#touchedAggregates()}; non-null, with no
  *                          {@code null} elements, empty unless {@code kind == STEP_COMPLETED}; an unmodifiable
  *                          defensive copy
  * @param outcomeStep       the reached {@code @EndSaga} step ({@link SagaInstance#outcome()}); non-null if and
  *                          only if {@code kind == COMPLETED}
  * @param failure           the recorded {@link SagaInstance#failure()}, or for {@code ATTEMPT_FAILED} the failure of
- *                          the attempt; non-null if and only if {@code kind} is {@code FAILED} or
- *                          {@code ATTEMPT_FAILED}
+ *                          the attempt, or for {@code COMPENSATION_FAILED} the compensation's failure; non-null if
+ *                          and only if {@code kind} is {@code FAILED}, {@code ATTEMPT_FAILED} or
+ *                          {@code COMPENSATION_FAILED}
  * @param occurredAt        the clock instant of the transition; non-null
+ * @param trigger           the recorded {@link SagaInstance#compensationTrigger()}; non-null if and only if
+ *                          {@code kind == COMPENSATION_STARTED}
  * @throws IllegalArgumentException if {@code sagaId}, {@code kind}, {@code occurredAt}, {@code touchedAggregates}
  *                                  or one of its elements is {@code null}, or if {@code stepName},
- *                                  {@code outcomeStep}, {@code failure} or a non-empty {@code touchedAggregates} is
+ *                                  {@code outcomeStep}, {@code failure}, {@code trigger} or a non-empty {@code touchedAggregates} is
  *                                  present or absent inconsistently with {@code kind}
  */
 public record SagaLifecycleEntry(
@@ -38,7 +43,8 @@ public record SagaLifecycleEntry(
     List<AggregateReference> touchedAggregates,
     String outcomeStep,
     SagaFailure failure,
-    Instant occurredAt
+    Instant occurredAt,
+    CompensationTrigger trigger
 ) {
     public SagaLifecycleEntry {
         if (sagaId == null) {
@@ -59,15 +65,30 @@ public record SagaLifecycleEntry(
             }
         }
         requirePresentIff("stepName", stepName, kind == SagaLifecycleEventKind.STEP_COMPLETED
-            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED, "STEP_COMPLETED or ATTEMPT_FAILED", kind);
+            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED || kind == SagaLifecycleEventKind.STEP_COMPENSATED
+            || kind == SagaLifecycleEventKind.COMPENSATION_FAILED,
+            "STEP_COMPLETED, ATTEMPT_FAILED, STEP_COMPENSATED or COMPENSATION_FAILED", kind);
         requirePresentIff("outcomeStep", outcomeStep, kind == SagaLifecycleEventKind.COMPLETED, "COMPLETED", kind);
         requirePresentIff("failure", failure, kind == SagaLifecycleEventKind.FAILED
-            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED, "FAILED or ATTEMPT_FAILED", kind);
+            || kind == SagaLifecycleEventKind.ATTEMPT_FAILED || kind == SagaLifecycleEventKind.COMPENSATION_FAILED,
+            "FAILED, ATTEMPT_FAILED or COMPENSATION_FAILED", kind);
+        requirePresentIff("trigger", trigger, kind == SagaLifecycleEventKind.COMPENSATION_STARTED,
+            "COMPENSATION_STARTED", kind);
         if (kind != SagaLifecycleEventKind.STEP_COMPLETED && !touchedAggregates.isEmpty()) {
             throw new IllegalArgumentException(
                 "touchedAggregates must be empty unless kind is STEP_COMPLETED, but kind is " + kind);
         }
         touchedAggregates = List.copyOf(touchedAggregates);
+    }
+
+    /**
+     * An entry without a compensation trigger.
+     *
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public SagaLifecycleEntry(String sagaId, SagaLifecycleEventKind kind, String stepName,
+            List<AggregateReference> touchedAggregates, String outcomeStep, SagaFailure failure, Instant occurredAt) {
+        this(sagaId, kind, stepName, touchedAggregates, outcomeStep, failure, occurredAt, null);
     }
 
     private static void requirePresentIff(String name, Object value, boolean required, String requiringKinds,

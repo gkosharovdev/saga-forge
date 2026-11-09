@@ -14,11 +14,13 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
  */
 final class LifecycleEntryRows {
 
-    /** The eleven history columns, in bind order. */
+    /** The fourteen history columns, in bind order. */
     static final String INSERT_HISTORY = "INSERT INTO saga_lifecycle_history (saga_id, sequence_number, "
             + "kind, step_name, touched_aggregates, outcome_step, failure_step_name, failure_cause_type, "
-            + "failure_message, failure_failed_at, failure_classification, failure_attempts, occurred_at) "
-            + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "failure_message, failure_failed_at, failure_classification, failure_attempts, occurred_at, "
+            + "compensation_trigger) "
+            + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";
+    private static final String TRIGGER_FIELD = "saga_lifecycle_history.compensation_trigger";
 
     private static final String TOUCHED_AGGREGATES_FIELD = "saga_lifecycle_history.touched_aggregates";
 
@@ -83,5 +85,6 @@ final class LifecycleEntryRows {
         insert.setString(6, entry.outcomeStep());
         SagaInstanceRows.bindFailure(insert, 7, entry.failure());
         SagaInstanceRows.setInstant(insert, 13, entry.occurredAt());
+        insert.setString(14, SagaInstanceRows.encodeTrigger(TRIGGER_FIELD, entry.trigger()));
     }
 }

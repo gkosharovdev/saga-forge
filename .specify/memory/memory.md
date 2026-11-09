@@ -222,7 +222,11 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   - the US1 to US3 suites against the post-T025 `save`.
 - **Origin**: `specs/003-postgres-saga-persistence/tasks.md` T020, T021, T025, T032; user decision at T032 to
   give up on Testcontainers testing.
-- **Status**: open. Closing it needs a run of the container-backed classes on `postgres:16-alpine` (or an
+- **Status**: closed 2026-11-09: `mvn -B -pl saga-forge-storage-postgres -am clean verify -Pcontainer-tests` ran
+  every container-backed class, including `ConcurrencyControlTest` and the 004/005/006 additions, green against
+  Postgres (186 tests), during `specs/006-saga-compensation`. The text below is kept as the record of what was
+  unverified until then.
+- **Previous status**: open. Closing it needs a run of the container-backed classes on `postgres:16-alpine` (or an
   equivalent real Postgres) with all of them passing. Added or changed by 004 and not yet run: T023 (tags and the
   write-contract update of `SchemaTest`, `PostgresStorageProviderTest` with `$RoundTrip` and `$Atomicity`,
   `PostgresSagaContextStoreTest`, `LifecycleHistoryTest`, `ConcurrencyControlTest`), T063
@@ -688,6 +692,69 @@ Noted only; nothing is bumped until the starter feature decides.
   whose effect cannot be undone cannot force "requires intervention".
 - **Origin**: `specs/006-saga-compensation/spec.md` FR-007, Assumptions.
 - **Status**: open (possible later extension).
+
+### G-006-05: A compensating instance without a further event never resumes
+- **Description**: Compensation runs in the handling call that triggered it. A crash midway leaves the instance
+  `COMPENSATING`; the next event routed to it resumes the remaining compensations, but nothing resumes an instance
+  that receives no further event (no sweeper; compare G-ENG-05).
+- **Origin**: `specs/006-saga-compensation/research.md` §10, spec Assumptions.
+- **Status**: open (deferred).
+
+### G-006-06: A compensation sees the trigger's event type, not the event
+- **Description**: `CompensationTrigger` carries the triggering event's class name, not the event, because events are
+  not persisted and a resumed compensation must behave the same. Data a compensation needs from the event must be
+  copied into `SagaContext` by the `@StartCompensation` step.
+- **Origin**: `specs/006-saga-compensation/research.md` §4.
+- **Status**: open (by design; revisit if authors need the event).
+
+### G-006-07: Upgraded instances may get an approximate completion order
+- **Description**: `schema-upgrade-006.sql` backfills `StepRecord.completionSequence` from `STEP_COMPLETED` history
+  rows. Completed steps without a history row get sequences after those, ordered by step name, which may not be the
+  true completion order.
+- **Origin**: `specs/006-saga-compensation/research.md` §12.
+- **Status**: open (accepted).
+
+### G-006-08: Compensation blocks the caller and holds the instance
+- **Description**: The whole compensation sequence runs on the thread that handled the triggering event and holds
+  the in-process instance lock until it ends, like a waiting retry (G-005-02).
+- **Origin**: `specs/006-saga-compensation/research.md` §7.
+- **Status**: open (deferred).
+
+### G-006-09: A failed compensation is never retried
+- **Description**: A compensation that fails, even for a transient cause, ends the saga `REQUIRES_INTERVENTION` at
+  once (FR-016); there is no retry policy for compensations.
+- **Origin**: `specs/006-saga-compensation/spec.md` FR-016, FR-021; research §9.
+- **Status**: open (deferred).
+
+### Compensation (006), implementation notes
+- **2026-11-09**: `specs/006-saga-compensation/tasks.md` implemented. Deviations from plan.md and data-model.md:
+  - `SagaInstance` does not check that completed steps have distinct `completionSequence` values: the compatibility
+    constructors default every completed step to 1, and existing callers (the Postgres decoder of 005 rows, test
+    doubles) would break. The engine assigns distinct values; `ForwardTransition` keeps them unchanged.
+  - A failed compensation with a transient cause is recorded `EXHAUSTED` after its single attempt (data-model.md
+    said `FINAL` or `UNCLASSIFIED` only), so the cause stays visible; it is still never retried.
+  - `SagaHandlingResult` allows handoff failures for `COMPENSATED` and `REQUIRES_INTERVENTION` too: the unit of work
+    that started compensation committed and handed events off.
+  - The canonical example's business failure is a stock shortage (`StockUnavailableEvent` recorded by `Order`), not
+    a delivery rejection (FR-019 wording): the example's whole forward flow runs in one unit of work, so an outside
+    rejection could never arrive after the payment committed. The engine fixture `DeliverySaga` covers the delivery
+    rejection with a wait point.
+  - R20's "missing @SagaStep" message reuses the R4 wording ("Method {m} in {c} is annotated with
+    @StartCompensation but missing @SagaStep").
+  - Postgres rejects a `COMPLETED` step without `sequence` (pre-006 JSON) with an `IllegalStateException` naming
+    `schema-upgrade-006.sql`, instead of guessing an order.
+  - SC-003 "zero duplicate compensations" holds for *committed* compensations: a compensation whose own unit of work a
+    crash rolled back is invoked again on resume, with the same command identities (spec Assumptions: compensations
+    must be idempotent at the business level). The fault-injection tests count `STEP_COMPENSATED` entries.
+- **Changed test expectations** (behaviour change of FR-006): `RetryResumeTest.crashWhileWaiting` and
+  `.interruptedWait` now expect `COMPENSATED` with a `RETRIES_EXHAUSTED` trigger instead of `FAILED EXHAUSTED` (the
+  start step had committed). `FailureClassificationTest` is unchanged (its failing step runs in the start step's unit
+  of work, so nothing committed). Message assertions in `RetryVocabularyTest`, column-count assertions in
+  `LifecycleEntryRowsTest`, the step and attempt counts in the example tests, and `ForwardTransitionPropertyTest`'s
+  model (new terminal statuses, trigger immutability) were updated. No existing `@SagaCompensation` fixture violated
+  R21/R22.
+- **Gap status**: G-006-01 closed by 005; G-006-02 to G-006-09 open as recorded above; G-003-23 closed (all Postgres
+  container suites green).
 
 ## Repository hygiene
 

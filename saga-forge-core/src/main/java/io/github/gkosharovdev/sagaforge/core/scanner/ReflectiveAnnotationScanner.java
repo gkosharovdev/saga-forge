@@ -28,6 +28,8 @@ import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
+import io.github.gkosharovdev.sagaforge.core.annotation.StartCompensation;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
@@ -52,6 +54,9 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  *   <li>{@code validateNoCommandHandlers} — a @Saga class declares no @CommandHandler method</li>
  *   <li>{@code validateLifecycle} — R3: @StartSaga/@EndSaga cardinality and co-occurrence (task 4.3)</li>
  *   <li>{@code validateCompensation} — R6: @SagaCompensation.forStep validity (task 4.4)</li>
+ *   <li>{@code validateStartCompensation} — R20: @StartCompensation placement (006)</li>
+ *   <li>{@code validateCompensationShape} — R21: compensation method shape (006)</li>
+ *   <li>{@code validateCompensationTargets} — R22: one compensation per step, none for a trigger step (006)</li>
  *   <li>{@code validateRetryPolicies} — R19: every @SagaStep.retry policy is valid (specs/005-step-retry,
  *       Property 29)</li>
  * </ul>
@@ -98,6 +103,9 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateLifecycle(sagaClass, errors);
         validateCompensation(sagaClass, stepMethods, errors);
         validateRetryPolicies(sagaClass, stepMethods, errors);
+        validateStartCompensation(sagaClass, errors);
+        validateCompensationShape(sagaClass, errors);
+        validateCompensationTargets(sagaClass, stepMethods, errors);
 
         return new SagaValidationResult(sagaClass, errors);
     }
@@ -713,6 +721,98 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
             }
         }
         return violations;
+    }
+
+    /**
+     * R20 ({@code specs/006-saga-compensation} FR-001a): every {@code @StartCompensation} method also carries
+     * {@code @SagaStep} and carries neither {@code @StartSaga} nor {@code @EndSaga}. Methods are visited in name
+     * order.
+     */
+    private void validateStartCompensation(Class<?> sagaClass, List<String> errors) {
+        String className = sagaClass.getSimpleName();
+        for (Method method : sortedByName(sagaClass.getDeclaredMethods())) {
+            if (!method.isAnnotationPresent(StartCompensation.class)) {
+                continue;
+            }
+            if (!method.isAnnotationPresent(SagaStep.class)) {
+                errors.add("Method " + method.getName() + " in " + className
+                        + " is annotated with @StartCompensation but missing @SagaStep");
+            }
+            if (method.isAnnotationPresent(StartSaga.class)) {
+                errors.add("@StartCompensation method " + method.getName() + " in " + className
+                        + " cannot also be annotated with @StartSaga");
+            }
+            if (method.isAnnotationPresent(EndSaga.class)) {
+                errors.add("@StartCompensation method " + method.getName() + " in " + className
+                        + " cannot also be annotated with @EndSaga");
+            }
+        }
+    }
+
+    /**
+     * R21 ({@code specs/006-saga-compensation} FR-009, FR-010): every {@code @SagaCompensation} method returns
+     * {@code void}, declares no parameter or exactly one {@link CompensationTrigger} parameter, and is not a
+     * {@code @SagaStep}. Methods are visited in name order.
+     */
+    private void validateCompensationShape(Class<?> sagaClass, List<String> errors) {
+        String className = sagaClass.getSimpleName();
+        for (Method method : sortedByName(sagaClass.getDeclaredMethods())) {
+            if (!method.isAnnotationPresent(SagaCompensation.class)) {
+                continue;
+            }
+            String prefix = "@SagaCompensation method " + method.getName() + " in " + className;
+            if (method.getReturnType() != void.class) {
+                errors.add(prefix + " must return void");
+            }
+            Class<?>[] parameters = method.getParameterTypes();
+            boolean wellFormed = parameters.length == 0
+                    || (parameters.length == 1 && parameters[0] == CompensationTrigger.class);
+            if (!wellFormed) {
+                errors.add(prefix + " must declare no parameter or one CompensationTrigger parameter");
+            }
+            if (method.isAnnotationPresent(SagaStep.class)) {
+                errors.add(prefix + " cannot also be annotated with @SagaStep");
+            }
+        }
+    }
+
+    /**
+     * R22 ({@code specs/006-saga-compensation} FR-008): at most one {@code @SagaCompensation} targets a step, and none
+     * targets a {@code @StartCompensation} step. A {@code forStep} that names no {@code @SagaStep} is R6's error and is
+     * skipped here. Steps are visited in name order; duplicate method names are listed in ascending order.
+     */
+    private void validateCompensationTargets(Class<?> sagaClass, Map<String, Method> stepMethods,
+            List<String> errors) {
+        String className = sagaClass.getSimpleName();
+        java.util.SortedMap<String, List<String>> byStep = new java.util.TreeMap<>();
+        for (Method method : sortedByName(sagaClass.getDeclaredMethods())) {
+            if (!method.isAnnotationPresent(SagaCompensation.class)) {
+                continue;
+            }
+            String forStep = method.getAnnotation(SagaCompensation.class).forStep();
+            if (stepMethods.containsKey(forStep)) {
+                byStep.computeIfAbsent(forStep, step -> new ArrayList<>()).add(method.getName());
+            }
+        }
+        byStep.forEach((step, compensations) -> {
+            if (compensations.size() > 1) {
+                errors.add("@SagaCompensation methods " + String.join(", ", compensations) + " in " + className
+                        + " both compensate step " + step);
+            }
+            if (stepMethods.get(step).isAnnotationPresent(StartCompensation.class)) {
+                for (String compensation : compensations) {
+                    errors.add("@SagaCompensation method " + compensation + " in " + className
+                            + " compensates step " + step + ", which is a @StartCompensation step");
+                }
+            }
+        });
+    }
+
+    private static List<Method> sortedByName(Method[] methods) {
+        return java.util.Arrays.stream(methods)
+                .filter(method -> !method.isSynthetic() && !method.isBridge())
+                .sorted(java.util.Comparator.comparing(Method::getName))
+                .toList();
     }
 
     /**

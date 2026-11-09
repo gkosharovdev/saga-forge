@@ -1,6 +1,8 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
@@ -134,6 +136,45 @@ public final class Diagnostics {
     void retryInterrupted(Correlation about, int claimedAttempt) {
         logger.log(Level.WARNING, Line.of("saga.uow.retryInterrupted").event(about).saga(about).instance(about)
                 .with("claimedAttempt", claimedAttempt).toString());
+    }
+
+    /** {@code saga.compensation.started}: the instance entered {@code COMPENSATING} (006 FR-018). */
+    void compensationStarted(Correlation about, CompensationTrigger trigger) {
+        logger.log(Level.INFO, Line.of("saga.compensation.started").saga(about).instance(about).unitOfWork(about)
+                .with("trigger", trigger.kind()).with("step", trigger.stepName())
+                .with("eventType", trigger.eventType())
+                .with("cause", trigger.failure() == null ? null : describe(trigger.failure())).toString());
+    }
+
+    /** {@code saga.compensation.resumed}: an event found the instance {@code COMPENSATING} (006 research §10). */
+    void compensationResumed(Correlation about, String step) {
+        logger.log(Level.INFO, Line.of("saga.compensation.resumed").event(about).saga(about).instance(about)
+                .with("step", step).toString());
+    }
+
+    /** {@code saga.compensation.step}: one step's compensation committed, or it had nothing to compensate. */
+    void compensationStep(Correlation about, String step, CompensationStatus status) {
+        logger.log(Level.INFO, Line.of("saga.compensation.step").saga(about).instance(about).unitOfWork(about)
+                .with("step", step).with("status", status).toString());
+    }
+
+    /** {@code saga.compensation.failed}: a compensation failed; the instance requires intervention (FR-016). */
+    void compensationFailed(Correlation about, SagaFailure failure) {
+        logger.log(Level.ERROR, Line.of("saga.compensation.failed").saga(about).instance(about).unitOfWork(about)
+                .with("step", failure.stepName()).with("classification", failure.classification())
+                .with("cause", describe(failure)).toString());
+    }
+
+    /** {@code saga.compensation.ended}: every applicable compensation committed (FR-015). */
+    void compensationEnded(Correlation about) {
+        logger.log(Level.INFO, Line.of("saga.compensation.ended").saga(about).instance(about).unitOfWork(about)
+                .toString());
+    }
+
+    /** {@code saga.compensation.notRecorded}: a compensation outcome could not be written; it propagates. */
+    void compensationNotRecorded(Correlation about, Throwable cause) {
+        logger.log(Level.ERROR, Line.of("saga.compensation.notRecorded").saga(about).instance(about).cause(cause)
+                .toString(), cause);
     }
 
     void instanceFailedNotRecorded(Correlation about, Throwable cause) {

@@ -45,8 +45,9 @@ class RetryPersistenceTest {
     @Test
     @DisplayName("steps JSON written before 005 loads with attempts 1 (0 if not run) and no commands")
     void stepsBefore005() {
+        // Since 006 a completed step needs the "sequence" that schema-upgrade-006.sql backfills.
         String json = "{\"processPayment\": {\"status\": \"COMPLETED\", \"touchedAggregates\": "
-                + "[{\"aggregateType\": \"com.example.Order\", \"aggregateId\": \"order-1\"}]},"
+                + "[{\"aggregateType\": \"com.example.Order\", \"aggregateId\": \"order-1\"}], \"sequence\": 1},"
                 + " \"completeOrder\": {\"status\": \"NOT_RUN\", \"touchedAggregates\": []}}";
 
         Map<String, StepRecord> decoded = SagaInstanceRows.decodeSteps(json);

@@ -23,6 +23,7 @@ import io.github.gkosharovdev.sagaforge.engine.fixtures.fanout.AuditSaga;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.fanout.Case;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.fanout.NoteService;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.fanout.ReviewSaga;
+import io.github.gkosharovdev.sagaforge.engine.fixtures.startup.InvalidCompensationSaga;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.startup.RejectingDispatcher;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.startup.SagaWithoutNoArgConstructor;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.startup.ServiceWithExtraParameter;
@@ -236,6 +237,16 @@ class StartupValidationTest {
 
             assertThat(report.allErrors()).containsExactly(
                     "@Saga class ThreeStepSaga is not supported by the registered SagaObjectProvider");
+        }
+
+        @Test
+        @DisplayName("a saga violating R20, R21 and R22 is refused with all three errors in one report (006 T021)")
+        void invalidCompensationDeclarations() {
+            StartupReport report = refusal(engine(Plugins.none(), InvalidCompensationSaga.class));
+
+            assertThat(report.allErrors()).contains(InvalidCompensationSaga.R20, InvalidCompensationSaga.R21,
+                    InvalidCompensationSaga.R22);
+            assertThat(report.engineErrors()).isEmpty();
         }
 
         @Test

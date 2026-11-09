@@ -3,10 +3,12 @@ package io.github.gkosharovdev.sagaforge.engine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -63,9 +65,13 @@ class RetryResumeTest {
         RecordingPause afterPause = new RecordingPause();
         SagaHandlingResult result = RetryFixture.charged(fixture.engine(afterPause), BOOKING);
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(result.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
-        assertThat(result.failure().attempts()).isEqualTo(3);
+        // Since 006 the exhausted retry starts compensation: the start step had committed (tasks.md T034).
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATED);
+        SagaFailure exhausted = fixture.committed(sagaId).compensationTrigger().failure();
+        assertThat(fixture.committed(sagaId).compensationTrigger().kind())
+                .isEqualTo(CompensationTriggerKind.RETRIES_EXHAUSTED);
+        assertThat(exhausted.classification()).isEqualTo(FailureClassification.EXHAUSTED);
+        assertThat(exhausted.attempts()).isEqualTo(3);
         assertThat(fixture.script().calls()).isEqualTo(2);
         assertThat(afterPause.waits()).isEmpty();
     }
@@ -103,10 +109,12 @@ class RetryResumeTest {
 
         SagaHandlingResult redelivered = RetryFixture.charged(fixture.engine(new RecordingPause()), BOOKING);
 
-        assertThat(redelivered.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(redelivered.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
-        assertThat(redelivered.failure().attempts()).isEqualTo(3);
-        assertThat(redelivered.failure().causeType()).isEqualTo(CourierTimeout.class.getName());
+        // Since 006 the exhausted retry starts compensation: the start step had committed (tasks.md T034).
+        assertThat(redelivered.outcome()).isEqualTo(HandlingOutcome.COMPENSATED);
+        SagaFailure exhausted = fixture.committed(sagaId).compensationTrigger().failure();
+        assertThat(exhausted.classification()).isEqualTo(FailureClassification.EXHAUSTED);
+        assertThat(exhausted.attempts()).isEqualTo(3);
+        assertThat(exhausted.causeType()).isEqualTo(CourierTimeout.class.getName());
         assertThat(fixture.script().calls()).isEqualTo(2);
     }
 }

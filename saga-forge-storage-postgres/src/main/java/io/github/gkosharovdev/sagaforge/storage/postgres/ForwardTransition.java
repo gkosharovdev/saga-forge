@@ -4,7 +4,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.StepCompensation;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 
@@ -25,7 +27,11 @@ final class ForwardTransition {
      * Rejects an {@code incoming} snapshot that is not a forward transition from {@code previous}
      * (contracts/concurrency-control.md "Forward transition"): every step {@code COMPLETED} in {@code previous}
      * must be {@code COMPLETED} in {@code incoming} with an equal {@code touchedAggregates} list, and a terminal
-     * ({@code COMPLETED}/{@code FAILED}) previous status must be unchanged. A previously completed step missing
+     * ({@code COMPLETED}, {@code FAILED}, {@code COMPENSATED}, {@code REQUIRES_INTERVENTION}) previous status must be
+     * unchanged. Since 006: a completed step keeps its {@code completionSequence}; its compensation only moves
+     * {@code null -> NOT_ATTEMPTED | NOTHING_TO_COMPENSATE} and {@code NOT_ATTEMPTED -> COMPENSATED | FAILED}; a
+     * recorded compensation trigger never changes; {@code COMPENSATING} only moves to {@code COMPENSATED} or
+     * {@code REQUIRES_INTERVENTION} (specs/006-saga-compensation contracts/storage-delta.md). A previously completed step missing
      * from {@code incoming} is a violation; a previously {@code NOT_RUN} step may be missing, and anything else
      * may differ ({@code .specify/memory/memory.md} G-003-15).
      *
@@ -65,12 +71,48 @@ final class ForwardTransition {
                         + " recorded handledCommands " + before.handledCommands()
                         + " but the incoming snapshot has " + now.handledCommands());
             }
+            if (now.completionSequence() != before.completionSequence()) {
+                throw new ConcurrentSagaUpdateException(sagaId, "completed step " + step.getKey()
+                        + " recorded completionSequence " + before.completionSequence()
+                        + " but the incoming snapshot has " + now.completionSequence());
+            }
+            if (!compensationMovesForward(before.compensation(), now.compensation())) {
+                throw new ConcurrentSagaUpdateException(sagaId, "completed step " + step.getKey()
+                        + " recorded compensation " + describe(before.compensation())
+                        + " but the incoming snapshot has " + describe(now.compensation()));
+            }
+        }
+        if (previous.compensationTrigger() != null
+                && !previous.compensationTrigger().equals(incoming.compensationTrigger())) {
+            throw new ConcurrentSagaUpdateException(sagaId, "compensation trigger " + previous.compensationTrigger()
+                    + " is recorded but the incoming snapshot has " + incoming.compensationTrigger());
         }
         SagaStatus previousStatus = previous.status();
-        boolean terminal = previousStatus == SagaStatus.COMPLETED || previousStatus == SagaStatus.FAILED;
+        boolean terminal = previousStatus == SagaStatus.COMPLETED || previousStatus == SagaStatus.FAILED
+                || previousStatus == SagaStatus.COMPENSATED || previousStatus == SagaStatus.REQUIRES_INTERVENTION;
         if (terminal && incoming.status() != previousStatus) {
             throw new ConcurrentSagaUpdateException(sagaId, "status is terminal " + previousStatus
                     + " but the incoming snapshot has " + incoming.status());
         }
+        if (previousStatus == SagaStatus.COMPENSATING && !SagaInstance.isCompensation(incoming.status())) {
+            throw new ConcurrentSagaUpdateException(sagaId, "status is COMPENSATING but the incoming snapshot has "
+                    + incoming.status());
+        }
+    }
+
+    private static boolean compensationMovesForward(StepCompensation before, StepCompensation now) {
+        if (before == null) {
+            return now == null || now.status() == CompensationStatus.NOT_ATTEMPTED
+                    || now.status() == CompensationStatus.NOTHING_TO_COMPENSATE;
+        }
+        if (before.status() == CompensationStatus.NOT_ATTEMPTED) {
+            return now != null && (now.status() == CompensationStatus.NOT_ATTEMPTED
+                    || now.status() == CompensationStatus.COMPENSATED || now.status() == CompensationStatus.FAILED);
+        }
+        return before.equals(now);
+    }
+
+    private static String describe(StepCompensation compensation) {
+        return compensation == null ? "none" : compensation.status().name();
     }
 }

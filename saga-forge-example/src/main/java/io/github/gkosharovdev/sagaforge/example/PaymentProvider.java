@@ -13,6 +13,8 @@ public class PaymentProvider {
 
     private final Map<String, String> paymentsByKey = new LinkedHashMap<>();
     private final Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+    private final Map<String, String> refundsByKey = new LinkedHashMap<>();
+    private final Map<String, BigDecimal> refunded = new LinkedHashMap<>();
     private int timeoutsLeft;
 
     /**
@@ -40,5 +42,19 @@ public class PaymentProvider {
     /** The amount charged per payment id. */
     public Map<String, BigDecimal> charges() {
         return Map.copyOf(amounts);
+    }
+
+    /**
+     * Refunds {@code amount} of {@code paymentId} once per {@code idempotencyKey}: refunding again with a key it has
+     * seen changes nothing.
+     */
+    public void refund(String idempotencyKey, String paymentId, BigDecimal amount) {
+        refundsByKey.putIfAbsent(idempotencyKey, paymentId);
+        refunded.putIfAbsent(paymentId, amount);
+    }
+
+    /** The amount refunded per payment id. */
+    public Map<String, BigDecimal> refunds() {
+        return Map.copyOf(refunded);
     }
 }

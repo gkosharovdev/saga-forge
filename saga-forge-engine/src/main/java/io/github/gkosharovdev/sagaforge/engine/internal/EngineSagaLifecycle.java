@@ -1,20 +1,26 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaLifecycle;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.StepCompensation;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
+import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,9 +34,13 @@ import java.util.Map;
  * entries to {@code StorageProvider.save(instance, entries)}. Entries follow data-model.md "Lifecycle entry
  * production": {@code start} → {@code CREATED} ({@code occurredAt = createdAt}), {@code recordStepCompleted} →
  * {@code STEP_COMPLETED}, {@code advance} → none, {@code complete} → {@code COMPLETED}, {@code fail} →
- * {@code FAILED}, {@link #attemptFailed} → {@code ATTEMPT_FAILED} (005); each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
+ * {@code FAILED}, {@link #attemptFailed} → {@code ATTEMPT_FAILED} (005), {@link #startCompensation} →
+ * {@code COMPENSATION_STARTED} (and {@code COMPENSATED} when nothing is left to run), {@link #recordCompensated} →
+ * {@code STEP_COMPENSATED} (and {@code COMPENSATED} after the last), {@link #recordCompensationFailed} →
+ * {@code COMPENSATION_FAILED} then {@code REQUIRES_INTERVENTION} (006); each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
  * {@code lastModifiedAt}. {@code SagaInstance.state} is always empty (G-ENG-06). A pending retry is kept across
- * transitions until {@link #clearPendingRetry} or a terminal transition drops it (005 research §9).</p>
+ * transitions until {@link #clearPendingRetry}, a terminal transition or entering compensation drops it (005 research
+ * §9). Each completed step gets the next {@code completionSequence} of its instance (006 research §5).</p>
  *
  * <p>{@code start} checks for a duplicate against storage: an active instance of the same saga type with the same
  * association value raises {@link DuplicateSagaInstanceException} (001 FR-006). Every other transition on an
@@ -130,7 +140,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
                     + "' of type " + current.sagaType());
         }
         Map<String, StepRecord> steps = new HashMap<>(current.steps());
-        steps.put(stepName, StepRecord.completed(touchedAggregates, attempts, handledCommands));
+        steps.put(stepName, StepRecord.completed(touchedAggregates, attempts, handledCommands,
+                nextCompletionSequence(current)));
         Instant now = evolve(current.status(), steps, Ending.NONE);
         pending.add(entry(SagaLifecycleEventKind.STEP_COMPLETED, now).step(stepName, touchedAggregates).build());
         return workingCopy;
@@ -206,6 +217,121 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     }
 
     /**
+     * Enters {@code COMPENSATING} with {@code trigger} (006 research §5, §6): every completed step except a
+     * {@code FAILURE_OUTCOME} trigger's own step gets {@code NOT_ATTEMPTED} if the saga declares a compensation for
+     * it, else {@code NOTHING_TO_COMPENSATE}; a pending retry is dropped; produces {@code COMPENSATION_STARTED}. If
+     * no step is {@code NOT_ATTEMPTED}, the instance also ends {@code COMPENSATED} ({@code COMPENSATED} entry).
+     *
+     * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's, it is terminal or already
+     *                                        compensating
+     */
+    SagaInstance startCompensation(String sagaId, CompensationTrigger trigger) {
+        requireNonNull(trigger, "trigger");
+        SagaInstance current = requireActive(sagaId, "startCompensation");
+        if (current.status() == SagaStatus.COMPENSATING) {
+            throw InvalidSagaTransitionException.terminal(sagaId, "startCompensation", current.status());
+        }
+        Instant now = trigger.at();
+        Map<String, StepRecord> steps = new HashMap<>(current.steps());
+        current.steps().forEach((name, step) -> {
+            boolean triggerStep = trigger.kind() == CompensationTriggerKind.FAILURE_OUTCOME
+                    && trigger.stepName().equals(name);
+            if (step.status() == StepStatus.COMPLETED && !triggerStep) {
+                steps.put(name, step.withCompensation(saga.compensationFor(name).isPresent()
+                        ? StepCompensation.notAttempted()
+                        : StepCompensation.nothingToCompensate(now)));
+            }
+        });
+        replace(SagaStatus.COMPENSATING, steps, Ending.NONE, trigger, now);
+        pending.add(entry(SagaLifecycleEventKind.COMPENSATION_STARTED, now).trigger(trigger).build());
+        endCompensatedIfDone(now);
+        return workingCopy;
+    }
+
+    /**
+     * Marks {@code stepName}'s compensation {@code COMPENSATED} ({@code STEP_COMPENSATED}); after the last
+     * {@code NOT_ATTEMPTED} step the instance ends {@code COMPENSATED} ({@code COMPENSATED} entry).
+     *
+     * @throws InvalidSagaTransitionException if the working copy is not this compensating instance
+     * @throws IllegalArgumentException       if the step's compensation is not {@code NOT_ATTEMPTED}
+     */
+    SagaInstance recordCompensated(String sagaId, String stepName) {
+        StepRecord step = requireNotAttempted(sagaId, stepName, "recordCompensated");
+        Instant now = sources.now();
+        Map<String, StepRecord> steps = new HashMap<>(workingCopy.steps());
+        steps.put(stepName, step.withCompensation(StepCompensation.compensated(now)));
+        replace(SagaStatus.COMPENSATING, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
+        pending.add(entry(SagaLifecycleEventKind.STEP_COMPENSATED, now).failedStep(stepName).build());
+        endCompensatedIfDone(now);
+        return workingCopy;
+    }
+
+    /**
+     * Marks {@code stepName}'s compensation {@code FAILED} with {@code failure} and ends the instance
+     * {@code REQUIRES_INTERVENTION}; produces {@code COMPENSATION_FAILED} then {@code REQUIRES_INTERVENTION}
+     * (006 research §9). Steps not reached stay {@code NOT_ATTEMPTED}.
+     *
+     * @throws InvalidSagaTransitionException if the working copy is not this compensating instance
+     * @throws IllegalArgumentException       if the step's compensation is not {@code NOT_ATTEMPTED}
+     */
+    SagaInstance recordCompensationFailed(String sagaId, String stepName, SagaFailure failure) {
+        requireNonNull(failure, "failure");
+        StepRecord step = requireNotAttempted(sagaId, stepName, "recordCompensationFailed");
+        Instant now = sources.now();
+        Map<String, StepRecord> steps = new HashMap<>(workingCopy.steps());
+        steps.put(stepName, step.withCompensation(StepCompensation.failed(failure)));
+        replace(SagaStatus.REQUIRES_INTERVENTION, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
+        pending.add(entry(SagaLifecycleEventKind.COMPENSATION_FAILED, now).failedStep(stepName).failure(failure)
+                .build());
+        pending.add(entry(SagaLifecycleEventKind.REQUIRES_INTERVENTION, now).build());
+        return workingCopy;
+    }
+
+    /**
+     * @return the steps of {@code instance} whose compensation is {@code NOT_ATTEMPTED}, most recently completed
+     *         first (006 research §5)
+     */
+    static List<String> remainingCompensations(SagaInstance instance) {
+        return instance.steps().entrySet().stream()
+                .filter(entry -> entry.getValue().compensation() != null
+                        && entry.getValue().compensation().status() == CompensationStatus.NOT_ATTEMPTED)
+                .sorted(Comparator.comparingInt(
+                        (Map.Entry<String, StepRecord> entry) -> entry.getValue().completionSequence()).reversed())
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    private void endCompensatedIfDone(Instant now) {
+        if (remainingCompensations(workingCopy).isEmpty()) {
+            replace(SagaStatus.COMPENSATED, workingCopy.steps(), Ending.NONE, workingCopy.compensationTrigger(), now);
+            pending.add(entry(SagaLifecycleEventKind.COMPENSATED, now).build());
+        }
+    }
+
+    private StepRecord requireNotAttempted(String sagaId, String stepName, String operation) {
+        requireNonNull(stepName, "stepName");
+        SagaInstance current = requireActive(sagaId, operation);
+        if (current.status() != SagaStatus.COMPENSATING) {
+            throw InvalidSagaTransitionException.terminal(sagaId, operation, current.status());
+        }
+        StepRecord step = current.steps().get(stepName);
+        if (step == null || step.compensation() == null
+                || step.compensation().status() != CompensationStatus.NOT_ATTEMPTED) {
+            throw new IllegalArgumentException("Step '" + stepName + "' of saga instance '" + sagaId
+                    + "' has no compensation waiting to run");
+        }
+        return step;
+    }
+
+    private static int nextCompletionSequence(SagaInstance instance) {
+        return instance.steps().values().stream()
+                .filter(step -> step.status() == StepStatus.COMPLETED)
+                .mapToInt(StepRecord::completionSequence)
+                .max()
+                .orElse(0) + 1;
+    }
+
+    /**
      * The working copy and the entries produced since the last drain, for one write; clears the entries.
      *
      * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's
@@ -218,9 +344,10 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         return write;
     }
 
-    /** {@code true} for {@code COMPLETED} and {@code FAILED}. */
+    /** {@code true} for {@code COMPLETED}, {@code FAILED}, {@code COMPENSATED} and {@code REQUIRES_INTERVENTION}. */
     static boolean isTerminal(SagaStatus status) {
-        return status == SagaStatus.COMPLETED || status == SagaStatus.FAILED;
+        return status == SagaStatus.COMPLETED || status == SagaStatus.FAILED || status == SagaStatus.COMPENSATED
+                || status == SagaStatus.REQUIRES_INTERVENTION;
     }
 
     private void rejectDuplicate(String associationProperty, String associationValue) {
@@ -234,15 +361,21 @@ final class EngineSagaLifecycle implements SagaLifecycle {
 
     /**
      * Replaces the working copy with {@code status}, {@code steps} and {@code ending}, keeping its pending retry
-     * unless the new status is terminal; returns the instant.
+     * while the new status is {@code CREATED} or {@code RUNNING} and its compensation trigger; returns the instant.
      */
     private Instant evolve(SagaStatus status, Map<String, StepRecord> steps, Ending ending) {
         Instant now = sources.now();
-        PendingRetry retry = isTerminal(status) ? null : workingCopy.pendingRetry();
+        replace(status, steps, ending, workingCopy.compensationTrigger(), now);
+        return now;
+    }
+
+    private void replace(SagaStatus status, Map<String, StepRecord> steps, Ending ending,
+            CompensationTrigger trigger, Instant now) {
+        boolean active = status == SagaStatus.CREATED || status == SagaStatus.RUNNING;
+        PendingRetry retry = active ? workingCopy.pendingRetry() : null;
         workingCopy = new SagaInstance(workingCopy.sagaId(), workingCopy.sagaType(), Map.of(),
                 workingCopy.associations(), status, workingCopy.createdAt(), now, steps, ending.outcomeStep(),
-                ending.failure(), retry);
-        return now;
+                ending.failure(), retry, trigger);
     }
 
     private Map<String, StepRecord> notRunSteps() {
@@ -293,6 +426,7 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         private List<AggregateReference> touchedAggregates = List.of();
         private String outcomeStep;
         private SagaFailure failure;
+        private CompensationTrigger trigger;
 
         private EntryBuilder(String sagaId, SagaLifecycleEventKind kind, Instant occurredAt) {
             this.sagaId = sagaId;
@@ -321,9 +455,14 @@ final class EngineSagaLifecycle implements SagaLifecycle {
             return this;
         }
 
+        EntryBuilder trigger(CompensationTrigger compensationTrigger) {
+            this.trigger = compensationTrigger;
+            return this;
+        }
+
         SagaLifecycleEntry build() {
             return new SagaLifecycleEntry(sagaId, kind, stepName, touchedAggregates, outcomeStep, failure,
-                    occurredAt);
+                    occurredAt, trigger);
         }
     }
 }

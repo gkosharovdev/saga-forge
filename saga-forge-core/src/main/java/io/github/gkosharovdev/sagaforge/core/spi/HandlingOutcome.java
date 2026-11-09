@@ -29,8 +29,8 @@ public enum HandlingOutcome {
 
     /**
      * The event triggers a step that is already {@link StepStatus#COMPLETED} for the instance, whatever the
-     * instance's status: a redelivered or repeated event ({@code specs/005-step-retry} FR-006). No unit of work ran;
-     * nothing changed.
+     * instance's status except {@link SagaStatus#COMPENSATING} (which resumes compensation instead): a redelivered or
+     * repeated event ({@code specs/005-step-retry} FR-006). No unit of work ran; nothing changed.
      */
     DUPLICATE,
 
@@ -50,5 +50,18 @@ public enum HandlingOutcome {
      * (no unit of work ran), or the engine was interrupted while waiting to retry the unit of work (the claimed
      * attempt stays recorded). Nothing changed.
      */
-    NOT_HANDLED
+    NOT_HANDLED,
+
+    /**
+     * The instance compensated: every applicable {@code @SagaCompensation} committed, each in its own unit of work,
+     * and the instance is {@link SagaStatus#COMPENSATED} ({@code specs/006-saga-compensation} FR-015). Reported by the
+     * handling call that triggered compensation, or by one that resumed it.
+     */
+    COMPENSATED,
+
+    /**
+     * A compensation failed: its unit of work rolled back, unwinding stopped, and the instance is
+     * {@link SagaStatus#REQUIRES_INTERVENTION} ({@code specs/006-saga-compensation} FR-016). Never retried.
+     */
+    REQUIRES_INTERVENTION
 }

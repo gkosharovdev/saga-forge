@@ -20,6 +20,10 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
+import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.StepCompensation;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 
 /**
@@ -44,11 +48,12 @@ final class SagaInstanceRows {
     /** The {@code saga_instance} columns, in the order {@link #bindInstance} binds them. */
     static final List<String> COLUMNS = List.of("saga_id", "saga_type", "state", "status", "created_at",
             "last_modified_at", "steps", "outcome", "failure_step_name", "failure_cause_type", "failure_message",
-            "failure_failed_at", "failure_classification", "failure_attempts", "pending_retry");
+            "failure_failed_at", "failure_classification", "failure_attempts", "pending_retry", "compensation_trigger");
 
     static final String STATE_FIELD = "saga_instance.state";
     static final String STEPS_FIELD = "saga_instance.steps";
     static final String PENDING_RETRY_FIELD = "saga_instance.pending_retry";
+    static final String TRIGGER_FIELD = "saga_instance.compensation_trigger";
 
     private static final String STATUS = "status";
     private static final String TOUCHED_AGGREGATES = "touchedAggregates";
@@ -68,6 +73,12 @@ final class SagaInstanceRows {
     private static final String MESSAGE = "message";
     private static final String FAILED_AT = "failedAt";
     private static final String CLASSIFICATION = "classification";
+    private static final String SEQUENCE = "sequence";
+    private static final String COMPENSATION = "compensation";
+    private static final String AT = "at";
+    private static final String FAILURE = "failure";
+    private static final String KIND = "kind";
+    private static final String EVENT_TYPE = "eventType";
 
     private SagaInstanceRows() {
     }
@@ -81,8 +92,9 @@ final class SagaInstanceRows {
     }
 
     /**
-     * Binds {@code instance} to parameters 1 to 15, in {@link #COLUMNS} order; {@code state} (3), {@code steps} (7)
-     * and {@code pending_retry} (15, or SQL {@code NULL}) are JSON text for {@code ?::jsonb} placeholders. Everything is encoded before the first parameter is
+     * Binds {@code instance} to parameters 1 to 16, in {@link #COLUMNS} order; {@code state} (3), {@code steps} (7),
+     * {@code pending_retry} (15) and {@code compensation_trigger} (16; both SQL {@code NULL} when absent) are JSON
+     * text for {@code ?::jsonb} placeholders. Everything is encoded before the first parameter is
      * set, so an unsupported value fails with {@link IllegalArgumentException} before any SQL runs.
      *
      * @throws IllegalArgumentException if {@code sagaId}, {@code sagaType}, {@code status}, {@code createdAt}, or
@@ -94,6 +106,7 @@ final class SagaInstanceRows {
         String state = encodeState(instance.state());
         String steps = encodeSteps(instance.steps());
         String pendingRetry = encodePendingRetry(instance.pendingRetry());
+        String trigger = encodeTrigger(TRIGGER_FIELD, instance.compensationTrigger());
 
         statement.setString(1, instance.sagaId());
         statement.setString(2, instance.sagaType());
@@ -105,6 +118,7 @@ final class SagaInstanceRows {
         statement.setString(8, instance.outcome());
         bindFailure(statement, 9, instance.failure());
         statement.setString(15, pendingRetry);
+        statement.setString(16, trigger);
     }
 
     /**
@@ -125,7 +139,8 @@ final class SagaInstanceRows {
                 decodeSteps(row.getString("steps")),
                 row.getString("outcome"),
                 failureFromRow(row),
-                decodePendingRetry(row.getString("pending_retry")));
+                decodePendingRetry(row.getString("pending_retry")),
+                decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")));
     }
 
     // --- state ----------------------------------------------------------------------------------------------
@@ -148,6 +163,10 @@ final class SagaInstanceRows {
             step.put(TOUCHED_AGGREGATES, toPlain(entry.getValue().touchedAggregates()));
             step.put(ATTEMPTS, entry.getValue().attempts());
             step.put(HANDLED_COMMANDS, commandsToPlain(entry.getValue().handledCommands()));
+            step.put(SEQUENCE, entry.getValue().completionSequence());
+            if (entry.getValue().compensation() != null) {
+                step.put(COMPENSATION, compensationToPlain(entry.getValue().compensation()));
+            }
             plain.put(entry.getKey(), step);
         }
         return JsonCodec.encodeObject(STEPS_FIELD, plain);
@@ -168,8 +187,18 @@ final class SagaInstanceRows {
             List<CommandId> commands = step.containsKey(HANDLED_COMMANDS)
                     ? commandsFromPlain(path + "." + HANDLED_COMMANDS, step.get(HANDLED_COMMANDS))
                     : List.of();
+            int sequence = step.containsKey(SEQUENCE)
+                    ? requireType(Number.class, path + "." + SEQUENCE, step.get(SEQUENCE)).intValue()
+                    : 0;
+            if (status == StepStatus.COMPLETED && sequence == 0) {
+                throw new IllegalStateException(path + " is COMPLETED but holds no " + SEQUENCE
+                        + "; apply schema-upgrade-006.sql to databases created before specs/006-saga-compensation");
+            }
+            StepCompensation compensation = step.get(COMPENSATION) == null ? null
+                    : compensationFromPlain(path + "." + COMPENSATION, step.get(COMPENSATION));
             try {
-                steps.put(entry.getKey(), new StepRecord(status, touched, attempts, commands));
+                steps.put(entry.getKey(), new StepRecord(status, touched, attempts, commands, sequence,
+                        compensation));
             } catch (IllegalArgumentException e) {
                 throw new IllegalStateException(path + " holds an invalid step record: " + e.getMessage(), e);
             }
@@ -346,6 +375,102 @@ final class SagaInstanceRows {
                     failure);
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             throw new IllegalStateException(path + " holds an invalid pending retry: " + e.getMessage(), e);
+        }
+    }
+
+    // --- compensation (006) ----------------------------------------------------------------------------------
+
+    static Map<String, Object> failureToPlain(SagaFailure failure) {
+        Map<String, Object> plain = new LinkedHashMap<>();
+        plain.put(STEP_NAME, failure.stepName());
+        plain.put(CAUSE_TYPE, failure.causeType());
+        if (failure.message() != null) {
+            plain.put(MESSAGE, failure.message());
+        }
+        plain.put(FAILED_AT, failure.failedAt().toString());
+        plain.put(CLASSIFICATION, failure.classification().name());
+        plain.put(ATTEMPTS, failure.attempts());
+        return plain;
+    }
+
+    static SagaFailure failureFromPlain(String path, Object value) {
+        Map<?, ?> plain = requireType(Map.class, path, value);
+        try {
+            return new SagaFailure(
+                    requireType(String.class, path + "." + STEP_NAME, plain.get(STEP_NAME)),
+                    requireType(String.class, path + "." + CAUSE_TYPE, plain.get(CAUSE_TYPE)),
+                    plain.get(MESSAGE) == null ? null
+                            : requireType(String.class, path + "." + MESSAGE, plain.get(MESSAGE)),
+                    Instant.parse(requireType(String.class, path + "." + FAILED_AT, plain.get(FAILED_AT))),
+                    parseEnum(FailureClassification.class, path + "." + CLASSIFICATION,
+                            requireType(String.class, path + "." + CLASSIFICATION, plain.get(CLASSIFICATION))),
+                    requireType(Number.class, path + "." + ATTEMPTS, plain.get(ATTEMPTS)).intValue());
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(path + " holds an invalid failure: " + e.getMessage(), e);
+        }
+    }
+
+    static Map<String, Object> compensationToPlain(StepCompensation compensation) {
+        Map<String, Object> plain = new LinkedHashMap<>();
+        plain.put(STATUS, compensation.status().name());
+        if (compensation.at() != null) {
+            plain.put(AT, compensation.at().toString());
+        }
+        if (compensation.failure() != null) {
+            plain.put(FAILURE, failureToPlain(compensation.failure()));
+        }
+        return plain;
+    }
+
+    static StepCompensation compensationFromPlain(String path, Object value) {
+        Map<?, ?> plain = requireType(Map.class, path, value);
+        try {
+            return new StepCompensation(
+                    parseEnum(CompensationStatus.class, path + "." + STATUS,
+                            requireType(String.class, path + "." + STATUS, plain.get(STATUS))),
+                    plain.get(AT) == null ? null
+                            : Instant.parse(requireType(String.class, path + "." + AT, plain.get(AT))),
+                    plain.get(FAILURE) == null ? null : failureFromPlain(path + "." + FAILURE, plain.get(FAILURE)));
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(path + " holds an invalid compensation: " + e.getMessage(), e);
+        }
+    }
+
+    /** @return {@code trigger} as JSON text, or {@code null} for SQL {@code NULL} */
+    static String encodeTrigger(String field, CompensationTrigger trigger) {
+        if (trigger == null) {
+            return null;
+        }
+        Map<String, Object> plain = new LinkedHashMap<>();
+        plain.put(KIND, trigger.kind().name());
+        plain.put(STEP_NAME, trigger.stepName());
+        if (trigger.eventType() != null) {
+            plain.put(EVENT_TYPE, trigger.eventType());
+        }
+        if (trigger.failure() != null) {
+            plain.put(FAILURE, failureToPlain(trigger.failure()));
+        }
+        plain.put(AT, trigger.at().toString());
+        return JsonCodec.encodeObject(field, plain);
+    }
+
+    /** @return the trigger stored as {@code json}, or {@code null} for SQL {@code NULL} */
+    static CompensationTrigger decodeTrigger(String field, String json) {
+        if (json == null) {
+            return null;
+        }
+        Map<String, Object> plain = JsonCodec.decodeObject(field, json);
+        try {
+            return new CompensationTrigger(
+                    parseEnum(CompensationTriggerKind.class, field + "." + KIND,
+                            requireType(String.class, field + "." + KIND, plain.get(KIND))),
+                    requireType(String.class, field + "." + STEP_NAME, plain.get(STEP_NAME)),
+                    plain.get(EVENT_TYPE) == null ? null
+                            : requireType(String.class, field + "." + EVENT_TYPE, plain.get(EVENT_TYPE)),
+                    plain.get(FAILURE) == null ? null : failureFromPlain(field + "." + FAILURE, plain.get(FAILURE)),
+                    Instant.parse(requireType(String.class, field + "." + AT, plain.get(AT))));
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(field + " holds an invalid compensation trigger: " + e.getMessage(), e);
         }
     }
 

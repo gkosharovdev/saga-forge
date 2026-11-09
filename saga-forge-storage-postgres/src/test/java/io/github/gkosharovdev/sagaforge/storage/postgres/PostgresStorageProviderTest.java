@@ -119,6 +119,42 @@ class PostgresStorageProviderTest {
         }
 
         @Test
+        @DisplayName("006: the trigger, completion sequences and compensation states survive a restart")
+        void compensationFieldsSurviveRestart() {
+            io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger trigger =
+                    io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger.failureOutcome(
+                            "rejectDelivery", "com.example.DeliveryRejected", MODIFIED_AT);
+            StepRecord placed = new StepRecord(io.github.gkosharovdev.sagaforge.core.spi.StepStatus.COMPLETED,
+                    List.of(), 1, List.of(), 1, null);
+            StepRecord paid = new StepRecord(io.github.gkosharovdev.sagaforge.core.spi.StepStatus.COMPLETED,
+                    List.of(), 1, List.of(), 2, null);
+            SagaInstance running = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.RUNNING, CREATED_AT, MODIFIED_AT,
+                    Map.of("handleOrderCreated", placed, "processPayment", paid), null, null, null, null);
+            provider.save(running);
+            SagaInstance compensating = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.COMPENSATING, CREATED_AT, MODIFIED_AT, Map.of(
+                            "handleOrderCreated", placed.withCompensation(
+                                    io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.nothingToCompensate(
+                                            MODIFIED_AT)),
+                            "processPayment", paid.withCompensation(
+                                    io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.notAttempted())),
+                    null, null, null, trigger);
+            provider.save(compensating);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(compensating);
+
+            SagaInstance compensated = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.COMPENSATED, CREATED_AT, MODIFIED_AT, Map.of(
+                            "handleOrderCreated", compensating.steps().get("handleOrderCreated"),
+                            "processPayment", paid.withCompensation(
+                                    io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.compensated(
+                                            MODIFIED_AT))),
+                    null, null, null, trigger);
+            provider.save(compensated);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(compensated);
+        }
+
+        @Test
         @DisplayName("scenario 2: findById for an unknown id returns Optional.empty()")
         void unknownIdIsEmpty() {
             assertThat(provider.findById("missing")).isEmpty();

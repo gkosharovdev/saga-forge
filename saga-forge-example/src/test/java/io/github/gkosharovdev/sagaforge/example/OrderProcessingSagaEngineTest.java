@@ -6,6 +6,7 @@ import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
@@ -22,6 +23,7 @@ import io.github.gkosharovdev.sagaforge.engine.support.TestTransport;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider.StoredEntry;
 import io.github.gkosharovdev.sagaforge.example.events.OrderCreatedEvent;
+import io.github.gkosharovdev.sagaforge.example.events.StockUnavailableEvent;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -85,7 +87,8 @@ class OrderProcessingSagaEngineTest {
         assertThat(result.outcomeStep()).isEqualTo("completeOrder");
         SagaInstance instance = committed(result.sagaId());
         assertThat(instance.status()).isEqualTo(SagaStatus.COMPLETED);
-        assertThat(instance.steps().values()).extracting(StepRecord::status).containsOnly(StepStatus.COMPLETED);
+        assertThat(instance.steps()).allSatisfy((step, record) -> assertThat(record.status())
+                .isEqualTo(step.equals("rejectOrder") ? StepStatus.NOT_RUN : StepStatus.COMPLETED));
         assertThat(instance.steps().get("handleOrderCreated").touchedAggregates()).singleElement()
                 .extracting(AggregateReference::aggregateType).isEqualTo(Payment.class.getName());
         assertThat(instance.steps().get("processPayment").touchedAggregates())
@@ -159,7 +162,8 @@ class OrderProcessingSagaEngineTest {
         assertThat(provider.charges().values().iterator().next()).isEqualByComparingTo(AMOUNT);
         assertThat(waits).containsExactly(java.time.Duration.ofMillis(200));
         SagaInstance instance = committed(result.sagaId());
-        assertThat(instance.steps().values()).extracting(StepRecord::attempts).containsOnly(2);
+        assertThat(instance.steps()).allSatisfy((step, record) -> assertThat(record.attempts())
+                .isEqualTo(step.equals("rejectOrder") ? 0 : 2));
         assertThat(instance.steps().get("handleOrderCreated").handledCommands()).singleElement()
                 .satisfies(id -> assertThat("payment-" + id.value()).isEqualTo(
                         provider.charges().keySet().iterator().next()));
@@ -179,5 +183,42 @@ class OrderProcessingSagaEngineTest {
         assertThat(repeated.outcome()).isEqualTo(HandlingOutcome.DUPLICATE);
         assertThat(repeated.sagaId()).isEqualTo(result.sagaId());
         assertThat(committed(result.sagaId()).status()).isEqualTo(SagaStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("006: stock unavailable after the payment refunds it once and the saga ends COMPENSATED")
+    void stockShortageRefundsThePayment() {
+        startedEngine();
+        orders.save(new Order(ORDER, false));
+
+        SagaHandlingResult result = onlyResult(transport.deliver(new OrderCreatedEvent(ORDER, AMOUNT)));
+
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATED);
+        String paymentId = provider.charges().keySet().iterator().next();
+        assertThat(provider.refunds()).containsExactly(java.util.Map.entry(paymentId, AMOUNT));
+        assertThat(orders.load(ORDER).status()).isEqualTo(Order.Status.OUT_OF_STOCK);
+        SagaInstance instance = committed(result.sagaId());
+        assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATED);
+        assertThat(instance.compensationTrigger().stepName()).isEqualTo("rejectOrder");
+        assertThat(instance.compensationTrigger().eventType()).isEqualTo(StockUnavailableEvent.class.getName());
+        assertThat(instance.steps().get("processPayment").compensation().status())
+                .isEqualTo(CompensationStatus.COMPENSATED);
+        assertThat(instance.steps().get("handleOrderCreated").compensation().status())
+                .isEqualTo(CompensationStatus.NOTHING_TO_COMPENSATE);
+        assertThat(instance.steps().get("completeOrder").status()).isEqualTo(StepStatus.NOT_RUN);
+    }
+
+    @Test
+    @DisplayName("006: a repeated StockUnavailableEvent after COMPENSATED is a DUPLICATE; no second refund")
+    void repeatedShortageIsADuplicate() {
+        startedEngine();
+        orders.save(new Order(ORDER, false));
+        SagaHandlingResult result = onlyResult(transport.deliver(new OrderCreatedEvent(ORDER, AMOUNT)));
+
+        SagaHandlingResult repeated = onlyResult(transport.deliver(new StockUnavailableEvent(ORDER)));
+
+        assertThat(repeated.outcome()).isEqualTo(HandlingOutcome.DUPLICATE);
+        assertThat(provider.refunds()).hasSize(1);
+        assertThat(committed(result.sagaId()).status()).isEqualTo(SagaStatus.COMPENSATED);
     }
 }
