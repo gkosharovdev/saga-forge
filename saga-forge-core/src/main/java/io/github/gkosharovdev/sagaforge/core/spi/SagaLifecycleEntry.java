@@ -4,22 +4,16 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * One chronological transition of a saga instance's lifecycle history. Storage-agnostic vocabulary: each
- * storage module derives entries inside its {@link StorageProvider#save(SagaInstance)} by diffing the previously
- * persisted snapshot against the incoming one, and persists them for direct data-store inspection. No SPI method
- * accepts or returns this type; there is no query API for it.
+ * One chronological transition of a saga instance's lifecycle history. Storage-agnostic vocabulary: the engine
+ * produces the entries and hands them to {@link StorageProvider#save(SagaInstance, List)} with the instance write
+ * they belong to (the creation write, a unit of work's write, or the {@code FAILED} write), in the same
+ * transaction. Storage persists them for direct data-store inspection; there is no query API for them.
  *
- * <p>Entries of one {@code sagaId} are totally ordered by {@code sequenceNumber}, ascending and unique per
- * {@code sagaId} (not globally).</p>
- *
- * <p><b>Known limitation</b>: when one {@code save()} completes more than one step, their
- * {@link SagaLifecycleEventKind#STEP_COMPLETED} entries are ordered alphabetically by {@code stepName}. That is a
- * deterministic tiebreak, not the true execution order, which {@link SagaInstance#steps()} does not carry. A step
- * already {@link StepStatus#COMPLETED} in an instance's first {@code save()} gets no entry, and
- * {@link SagaLifecycleEventKind#CREATED} is recorded whatever the first status is.</p>
+ * <p>The persisted order of one {@code sagaId}'s entries is the order in which they were handed over: storage
+ * assigns each entry its position when it inserts it, after every entry already recorded for the instance. There is
+ * no tiebreak and no first-save limitation: every completed step gets its entry in true execution order.</p>
  *
  * @param sagaId            the owning instance's {@link SagaInstance#sagaId()}; non-null
- * @param sequenceNumber    position in the instance's history; non-negative
  * @param kind              the transition; non-null
  * @param stepName          the completed step; non-null if and only if {@code kind == STEP_COMPLETED}
  * @param touchedAggregates the completed step's {@link StepRecord#touchedAggregates()}; non-null, with no
@@ -29,16 +23,14 @@ import java.util.List;
  *                          only if {@code kind == COMPLETED}
  * @param failure           the recorded {@link SagaInstance#failure()}; non-null if and only if
  *                          {@code kind == FAILED}
- * @param occurredAt        the producing snapshot's {@link SagaInstance#lastModifiedAt()} (its
- *                          {@link SagaInstance#createdAt()} for {@code CREATED}); non-null
+ * @param occurredAt        the clock instant of the transition; non-null
  * @throws IllegalArgumentException if {@code sagaId}, {@code kind}, {@code occurredAt}, {@code touchedAggregates}
- *                                  or one of its elements is {@code null}, if {@code sequenceNumber} is negative,
- *                                  or if {@code stepName}, {@code outcomeStep}, {@code failure} or a non-empty
- *                                  {@code touchedAggregates} is present or absent inconsistently with {@code kind}
+ *                                  or one of its elements is {@code null}, or if {@code stepName},
+ *                                  {@code outcomeStep}, {@code failure} or a non-empty {@code touchedAggregates} is
+ *                                  present or absent inconsistently with {@code kind}
  */
 public record SagaLifecycleEntry(
     String sagaId,
-    long sequenceNumber,
     SagaLifecycleEventKind kind,
     String stepName,
     List<AggregateReference> touchedAggregates,
@@ -49,9 +41,6 @@ public record SagaLifecycleEntry(
     public SagaLifecycleEntry {
         if (sagaId == null) {
             throw new IllegalArgumentException("sagaId must not be null");
-        }
-        if (sequenceNumber < 0) {
-            throw new IllegalArgumentException("sequenceNumber must not be negative, but is " + sequenceNumber);
         }
         if (kind == null) {
             throw new IllegalArgumentException("kind must not be null");

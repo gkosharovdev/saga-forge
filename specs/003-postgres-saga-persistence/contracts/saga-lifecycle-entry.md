@@ -48,3 +48,15 @@ returns either type; `StorageProvider`/`SagaContextStore` keep their current sig
 - **Known limitation, first save (deferred)**: a step already `COMPLETED` in an instance's first `save()`
   gets no `STEP_COMPLETED` entry, and `CREATED` is emitted even when the first `status` is `RUNNING`
   (`.specify/memory/memory.md` G-003-01).
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- **Producer**: the engine, no longer `StorageProvider.save` diffing snapshots. **Consumer**: storage, through
+  `save(instance, entries)`.
+- `sequenceNumber` is removed from the record; storage assigns the stored position in hand-over order.
+- "Known limitation (research.md §5)" and "Known limitation, first save" no longer apply to engine-driven instances
+  (G-003-04 and G-003-16 closed; G-003-01 cannot arise).
+- "No existing interface gains a method that accepts or returns either type" no longer holds:
+  `StorageProvider.save(instance, entries)` accepts entries.

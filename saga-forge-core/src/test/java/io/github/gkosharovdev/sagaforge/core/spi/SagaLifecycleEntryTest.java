@@ -26,7 +26,7 @@ class SagaLifecycleEntryTest {
     private static SagaLifecycleEntry entry(SagaLifecycleEventKind kind, String stepName,
                                             List<AggregateReference> touched, String outcomeStep,
                                             SagaFailure failure) {
-        return new SagaLifecycleEntry(SAGA_ID, 0, kind, stepName, touched, outcomeStep, failure, AT);
+        return new SagaLifecycleEntry(SAGA_ID, kind, stepName, touched, outcomeStep, failure, AT);
     }
 
     @Nested
@@ -47,10 +47,9 @@ class SagaLifecycleEntryTest {
         @Test
         @DisplayName("STEP_COMPLETED carries its step name and touched aggregates (empty allowed)")
         void stepCompleted() {
-            var completed = new SagaLifecycleEntry(SAGA_ID, 3, SagaLifecycleEventKind.STEP_COMPLETED,
+            var completed = new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.STEP_COMPLETED,
                     "processPayment", List.of(ORDER_1), null, null, AT);
 
-            assertThat(completed.sequenceNumber()).isEqualTo(3);
             assertThat(completed.stepName()).isEqualTo("processPayment");
             assertThat(completed.touchedAggregates()).containsExactly(ORDER_1);
             assertThat(entry(SagaLifecycleEventKind.STEP_COMPLETED, "processPayment", List.of(), null, null)
@@ -81,11 +80,11 @@ class SagaLifecycleEntryTest {
         @Test
         @DisplayName("null sagaId, kind, occurredAt or touchedAggregates is rejected")
         void nullsRejected() {
-            assertThatThrownBy(() -> new SagaLifecycleEntry(null, 0, SagaLifecycleEventKind.CREATED, null,
+            assertThatThrownBy(() -> new SagaLifecycleEntry(null, SagaLifecycleEventKind.CREATED, null,
                     List.of(), null, null, AT)).isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new SagaLifecycleEntry(SAGA_ID, 0, null, null, List.of(), null, null, AT))
+            assertThatThrownBy(() -> new SagaLifecycleEntry(SAGA_ID, null, null, List.of(), null, null, AT))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new SagaLifecycleEntry(SAGA_ID, 0, SagaLifecycleEventKind.CREATED, null,
+            assertThatThrownBy(() -> new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.CREATED, null,
                     List.of(), null, null, null)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> entry(SagaLifecycleEventKind.CREATED, null, null, null, null))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -98,13 +97,6 @@ class SagaLifecycleEntryTest {
 
             assertThatThrownBy(() -> entry(SagaLifecycleEventKind.STEP_COMPLETED, "processPayment", withNull,
                     null, null)).isInstanceOf(IllegalArgumentException.class);
-        }
-
-        @Test
-        @DisplayName("a negative sequenceNumber is rejected")
-        void negativeSequenceRejected() {
-            assertThatThrownBy(() -> new SagaLifecycleEntry(SAGA_ID, -1, SagaLifecycleEventKind.CREATED, null,
-                    List.of(), null, null, AT)).isInstanceOf(IllegalArgumentException.class);
         }
     }
 

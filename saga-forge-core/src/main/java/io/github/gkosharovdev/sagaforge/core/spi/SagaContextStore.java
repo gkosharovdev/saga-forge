@@ -26,6 +26,12 @@ import java.util.Optional;
  * committed or rolled back. Postgres and MySQL modules store records in their own table and write them in
  * a separate transaction; the MongoDB module uses its own collection.</p>
  *
+ * <h3>Write order</h3>
+ * <p>A record is saved only after its instance's creation write committed: the engine commits the new
+ * {@link SagaStatus#CREATED} instance in its own write before the first unit of work runs. A store therefore may
+ * rely on the instance record existing (Postgres: the {@code saga_context} foreign key). It never joins the unit of
+ * work's transaction.</p>
+ *
  * <h3>Reference and values</h3>
  * <p>{@code record.sagaId()} equals the {@link SagaInstance#sagaId()} it belongs to. A record may exist
  * for a saga whose instance record is {@link SagaStatus#FAILED}. Values are stored as given; structured

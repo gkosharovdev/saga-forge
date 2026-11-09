@@ -1,10 +1,5 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
-import org.postgresql.ds.PGSimpleDataSource;
-import org.postgresql.util.PGobject;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-
-import javax.sql.DataSource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +20,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import javax.sql.DataSource;
+
+import org.postgresql.ds.PGSimpleDataSource;
+import org.postgresql.util.PGobject;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+
 /**
  * Shared PostgreSQL test fixture: one {@code postgres:16-alpine} container per test JVM, with
  * {@code schema.sql} applied once.
@@ -32,6 +33,9 @@ import java.util.stream.Collectors;
  * <p>The container is started in a static initializer rather than through {@code @Testcontainers} /
  * {@code @Container}, because jqwik properties do not run JUnit Jupiter extensions. Every test class that
  * touches the database shares it and calls {@link #reset()} before each test.</p>
+ *
+ * <p>Every class that uses it must carry the JUnit tag {@code container} ({@link org.junit.jupiter.api.Tag}),
+ * and it runs only with {@code -Pcontainer-tests}.</p>
  */
 final class PostgresTestSupport {
 

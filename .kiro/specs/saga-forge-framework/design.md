@@ -715,6 +715,58 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/002-transactional-step-sequence` FR-014**
 
+### Property 21: Loader availability at engine start
+
+*For any* registered `@Aggregate` class with a non-static `@CommandHandler` method, `SagaEngine.start()` shall report an engine error naming that aggregate if and only if no registered class declares an `@AggregateLoader` for it and no registered `AggregateResolver` supports it.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-035** (test: `StartupChecksPropertyTest`)
+
+### Property 22: Handler parameter resolvability at engine start
+
+*For any* parameter of a registered `@CommandHandler` method or constructor other than its `@Command` parameter, `SagaEngine.start()` shall report an engine error naming the handler and the parameter (`#<position> <SimpleType>`) if and only if no registered `HandlerParameterResolver` supports it.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-019, FR-035** (test: `StartupChecksPropertyTest`)
+
+### Property 23: Saga instantiability at engine start
+
+*For any* registered `@Saga` class, `SagaEngine.start()` shall report an engine error naming it if and only if a `SagaObjectProvider` is registered and does not support it, or none is registered and the class declares no no-argument constructor.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-035** (test: `StartupChecksPropertyTest`)
+
+### Property 24: Single-pass startup
+
+*For any* registered model and plug-ins, the `StartupReport` thrown by `SagaEngine.start()` shall contain every `validateAll` error and every error of Properties 21 to 23 at once, and an engine whose report holds any error shall accept zero events, commands and publications.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-034, FR-036, SC-006** (test: `StartupChecksPropertyTest`)
+
+### Property 25: In-process duplicate start
+
+*For any* number of start events with the same saga type and association value handled concurrently by one engine while no active instance has that value, exactly one result shall have `started = true` and every other shall be `DUPLICATE_START` with no saga id.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-027, SC-012** (test: `ConcurrentDuplicateStartTest`)
+
+### Property 26: Handoff obligations
+
+*For any* committed unit of work with buffered events, the `EventHandoff` shall receive exactly those events, once, in recording order, under a `unitOfWorkId` no other unit of work has, with saga type and saga id present if and only if the unit of work is saga-scoped; *for any* rolled-back unit of work it shall receive nothing (with `IN_TRANSACTION` timing, nothing that survives the rollback).
+
+**Validates: Feature spec `specs/004-saga-engine` FR-029, FR-030, SC-005, SC-011** (test: `HandoffObligationsPropertyTest`)
+
+### Property 27: Lifecycle history order
+
+*For any* engine-driven saga instance, its persisted lifecycle entries shall be `CREATED`, then for each committed unit of work its `STEP_COMPLETED` entries in completion order followed by `COMPLETED` if that unit of work ended the saga, then `FAILED` if the saga failed; no entry of a rolled-back unit of work shall be persisted.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-033, SC-010** (test: `LifecycleHistoryPropertyTest`)
+
+### Property 28: Serialized units of work per instance
+
+*For any* two units of work of one saga instance, run by one engine or by two engines over shared stores, their step executions shall never overlap, and a write-time `SagaConcurrencyConflictException` shall never produce a `FAILED` write.
+
+**Validates: Feature spec `specs/004-saga-engine` FR-025, FR-026, SC-003** (tests: `ConcurrentUnitsOfWorkTest`, `ConcurrencyConflictTest`)
+
+### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
+
+None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule.
+
 ## Error Handling
 
 ### Scanner Validation Errors

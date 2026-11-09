@@ -12,23 +12,38 @@ import java.util.stream.Collectors;
 
 import javax.sql.DataSource;
 
+import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
+import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 
 /**
  * PostgreSQL {@link StorageProvider}: one {@code saga_instance} row per {@link SagaInstance}, one
  * {@code saga_association} row per association (schema in {@code schema.sql}, contracts/postgres-schema.md).
  *
- * <p>Every {@link #save(SagaInstance)} runs in one JDBC transaction on one {@link Connection} with
- * {@code autoCommit = false}: it locks and reads the persisted row ({@code SELECT ... FOR UPDATE}), derives
- * {@code saga_lifecycle_history} rows by diffing that snapshot against the incoming one
- * ({@link LifecycleHistoryDerivation}, data-model.md "Derivation algorithm"), rejects a snapshot that is not a
- * forward transition from it with {@link ConcurrentSagaUpdateException} (contracts/concurrency-control.md), and
- * writes the instance upsert, the association replacement, and the history rows, which commit together or not at
- * all (research.md §1, FR-008, FR-013). The history has no query API; it is inspected with SQL (FR-012). Reads
- * use one statement each, so an instance and its associations come from the same snapshot. {@link #delete(String)} relies on {@code ON DELETE CASCADE} to remove the instance's associations,
- * context, and lifecycle history.</p>
+ * <p>Every {@link #save(SagaInstance, List)} runs in one JDBC transaction on one {@link Connection} with
+ * {@code autoCommit = false}: it locks and reads the persisted row ({@code SELECT ... FOR NO KEY UPDATE}), rejects a
+ * snapshot that is not a forward transition from it with {@link ConcurrentSagaUpdateException}
+ * ({@link ForwardTransition}, contracts/concurrency-control.md), and writes the instance upsert, the association
+ * replacement, and the {@code saga_lifecycle_history} rows of the entries handed over, which commit together or
+ * not at all. The provider persists exactly the entries it is given, numbered {@code MAX + 1} onwards in list
+ * order ({@link LifecycleEntryRows}); it never derives history from snapshots. The history has no query API; it is
+ * inspected with SQL (FR-012). Reads use one statement each, so an instance and its associations come from the
+ * same snapshot. {@link #delete(String)} relies on {@code ON DELETE CASCADE} to remove the instance's
+ * associations, context, and lifecycle history.</p>
+ *
+ * <p><b>Joining</b> (FR-022, FR-023, contracts/storage-provider.md). Built with a {@link TransactionBoundary}, the
+ * provider runs {@link #save(SagaInstance, List)}, {@link #findById(String)}, {@link #findByAssociation} and
+ * {@link #delete(String)} on the active transaction's {@code resource(Connection.class)} while one is active on the
+ * calling thread: it never commits, rolls back, changes {@code autoCommit} on or closes that connection, and on a
+ * {@link SQLException} it marks the transaction rollback-only before throwing {@link UncheckedSqlException}. An
+ * active transaction without a {@code java.sql.Connection} resource is an {@link IllegalStateException}. With no
+ * active transaction, or built from a {@link DataSource} only, every operation runs on a connection of its own as in
+ * 003: {@code save} in its own transaction, reads and {@code delete} in auto-commit mode.</p>
+ *
+ * <p>{@link #findByIdAndLock(String)} locks only in a joined transaction ({@code FOR NO KEY UPDATE}); without one,
+ * or built from a {@link DataSource} only, it throws {@link IllegalStateException} before any SQL.</p>
  *
  * <p>The caller supplies the {@link DataSource} and owns its pooling. Every {@link SQLException} propagates as
  * {@link UncheckedSqlException}; a {@code state} value outside the {@link JsonCodec} value set fails with
@@ -67,66 +82,86 @@ public final class PostgresStorageProvider implements StorageProvider {
             + "WHERE a.association_property = ? AND a.association_value = ? "
             + "ORDER BY i.saga_id";
 
-    /** Locks the instance row (not its associations) until the save's transaction ends. */
-    private static final String LOCK_PREVIOUS = FIND_BY_ID + " FOR UPDATE OF i";
+    /**
+     * Locks the instance row (not its associations) until the transaction ends. {@code NO KEY}: no upsert here
+     * changes {@code saga_id}, and the context store's foreign-key check must not be blocked (G-ENG-11).
+     */
+    private static final String LOCK_BY_ID = FIND_BY_ID + " FOR NO KEY UPDATE OF i";
+
+    /** {@link #save}'s lock on the previous snapshot: the same statement as {@link #findByIdAndLock}. */
+    private static final String LOCK_PREVIOUS = LOCK_BY_ID;
 
     private static final String NEXT_SEQUENCE_NUMBER =
             "SELECT COALESCE(MAX(sequence_number) + 1, 0) FROM saga_lifecycle_history WHERE saga_id = ?";
-
-    private static final String INSERT_HISTORY = "INSERT INTO saga_lifecycle_history (saga_id, sequence_number, "
-            + "kind, step_name, touched_aggregates, outcome_step, failure_step_name, failure_cause_type, "
-            + "failure_message, failure_failed_at, occurred_at) VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)";
-
-    private static final String TOUCHED_AGGREGATES_FIELD = "saga_lifecycle_history.touched_aggregates";
 
     private static final String DELETE_INSTANCE = "DELETE FROM saga_instance WHERE saga_id = ?";
 
     private static final String ASSOCIATIONS_FIELD = "saga_association";
 
     private final DataSource dataSource;
+    private final Optional<TransactionBoundary> boundary;
 
     /**
+     * A provider that never joins: every operation runs on a connection of its own (003 behavior).
+     *
      * @param dataSource where connections come from; the caller owns its pooling
      * @throws IllegalArgumentException if {@code dataSource} is {@code null}
      */
     public PostgresStorageProvider(DataSource dataSource) {
-        if (dataSource == null) {
-            throw new IllegalArgumentException("dataSource must not be null");
-        }
-        this.dataSource = dataSource;
+        this(requireDataSource(dataSource), Optional.empty());
     }
 
     /**
-     * Upserts the instance row, replaces its association rows, and appends the lifecycle-history rows derived
-     * from the previously persisted snapshot, in one transaction. Re-saving an unchanged instance adds no
+     * A provider that joins {@code boundary}'s active transaction, and runs on a connection of its own otherwise.
+     * The host binds connections of the same {@code dataSource}.
+     *
+     * @param dataSource where connections come from when no transaction is active; the caller owns its pooling
+     * @param boundary   whose active transaction every operation joins
+     * @throws IllegalArgumentException if an argument is {@code null}
+     */
+    public PostgresStorageProvider(DataSource dataSource, TransactionBoundary boundary) {
+        this(requireDataSource(dataSource), Optional.of(requireBoundary(boundary)));
+    }
+
+    private PostgresStorageProvider(DataSource dataSource, Optional<TransactionBoundary> boundary) {
+        this.dataSource = dataSource;
+        this.boundary = boundary;
+    }
+
+    /**
+     * Upserts the instance row, replaces its association rows, and appends one lifecycle-history row per entry of
+     * {@code newEntries}, in one transaction. The rows are numbered consecutively from the instance's current
+     * {@code MAX(sequence_number) + 1}, in list order; nothing is derived, so a save with no entries adds no
      * history row.
      *
      * <p>Concurrency control (contracts/concurrency-control.md, FR-010): the persisted row is locked
-     * {@code FOR UPDATE} and {@code instance} must be a forward transition from it
-     * ({@link LifecycleHistoryDerivation#requireForwardTransition}), checked before any write. When no row exists
+     * {@code FOR NO KEY UPDATE} and {@code instance} must be a forward transition from it
+     * ({@link ForwardTransition#requireForwardTransition}), checked before any write. When no row exists
      * yet there is nothing to lock, so a first save whose upsert finds a row created meanwhile by a concurrent
      * first save is rejected, even when both snapshots are identical ({@code .specify/memory/memory.md}
      * G-003-03).</p>
      *
-     * @throws IllegalArgumentException      if {@code instance} is {@code null}, a required field of it is
-     *                                       {@code null}, or its {@code state} holds an unsupported value
+     * @throws IllegalArgumentException      if {@code instance} or {@code newEntries} is {@code null},
+     *                                       {@code newEntries} contains {@code null} or an entry of another
+     *                                       {@code sagaId}, a required field of {@code instance} is {@code null},
+     *                                       or its {@code state} holds an unsupported value; checked before any SQL
      * @throws ConcurrentSagaUpdateException if {@code instance} is not a forward transition from the persisted
-     *                                       snapshot, or lost a concurrent first save; nothing is written
-     * @throws UncheckedSqlException         if the database fails; nothing is written
+     *                                       snapshot, or lost a concurrent first save; nothing is written (joined:
+     *                                       the caller's transaction decides)
+     * @throws UncheckedSqlException         if the database fails; nothing is written (joined: the transaction is
+     *                                       marked rollback-only)
+     * @throws IllegalStateException         if joined and the active transaction has no {@code Connection}
      */
     @Override
-    public void save(SagaInstance instance) {
-        if (instance == null) {
-            throw new IllegalArgumentException("instance must not be null");
-        }
+    public void save(SagaInstance instance, List<SagaLifecycleEntry> newEntries) {
+        requireEntriesOf(instance, newEntries);
         SagaInstanceRows.requireStorable(instance);
-        inTransaction("save saga instance " + instance.sagaId(), connection -> {
+        inJoinedOrOwnTransaction("save saga instance " + instance.sagaId(), connection -> {
             SagaInstance previous = lockPrevious(connection, instance.sagaId());
             if (previous != null) {
-                LifecycleHistoryDerivation.requireForwardTransition(previous, instance);
+                ForwardTransition.requireForwardTransition(previous, instance);
             }
             long next = nextSequenceNumber(connection, instance.sagaId());
-            List<SagaLifecycleEntry> entries = LifecycleHistoryDerivation.derive(previous, instance, next);
             boolean inserted = upsertInstance(connection, instance);
             if (previous == null && !inserted) {
                 // No row to lock was read, yet the upsert hit one: a concurrent first save committed it meanwhile.
@@ -134,7 +169,8 @@ public final class PostgresStorageProvider implements StorageProvider {
                         "a concurrent first save created the instance after this save found no row");
             }
             replaceAssociations(connection, instance);
-            insertHistory(connection, entries);
+            LifecycleEntryRows.insertAll(connection, newEntries, next);
+            return null;
         });
     }
 
@@ -147,8 +183,43 @@ public final class PostgresStorageProvider implements StorageProvider {
         if (sagaId == null) {
             throw new IllegalArgumentException("sagaId must not be null");
         }
-        List<SagaInstance> found = query("find saga instance " + sagaId, FIND_BY_ID, sagaId);
-        return found.stream().findFirst();
+        return onJoinedOrOwnConnection("find saga instance " + sagaId,
+                connection -> select(connection, FIND_BY_ID, sagaId)).stream().findFirst();
+    }
+
+    /**
+     * Reads the instance and locks its row until the joined transaction ends ({@code SELECT ... FOR NO KEY UPDATE OF
+     * i} on the bound connection, contracts/storage-provider.md, FR-025). Another transaction locking the same
+     * {@code sagaId}, in this or another process, waits until then and then reads the committed state; locking it
+     * again in the same transaction returns at once (the row lock is the transaction's). A missing instance returns
+     * empty and locks nothing.
+     *
+     * <p><b>Why {@code NO KEY}.</b> While the unit of work holds this lock, {@link PostgresSagaContextStore} writes on
+     * a connection of its own, and its {@code saga_context} foreign-key check takes {@code FOR KEY SHARE} on this row.
+     * {@code FOR UPDATE} conflicts with that and would make the unit-of-work thread wait on its own lock across two
+     * connections, which Postgres's deadlock detection cannot see; {@code FOR NO KEY UPDATE} does not (G-ENG-11,
+     * research.md §3; reasoned from the lock-conflict table, not yet run against Postgres).</p>
+     *
+     * <p>The row is locked, not its {@code saga_association} rows: after a wait, the associations read may predate the
+     * winner's commit (G-003-21). Harmless under the engine, which never changes associations after creation.</p>
+     *
+     * @throws IllegalArgumentException if {@code sagaId} is {@code null}
+     * @throws IllegalStateException    if no joined transaction is active (or the provider was built without a
+     *                                  {@code TransactionBoundary}), before any SQL
+     * @throws UncheckedSqlException    if the database fails or aborts the lock wait; the transaction is marked
+     *                                  rollback-only
+     */
+    @Override
+    public Optional<SagaInstance> findByIdAndLock(String sagaId) {
+        if (sagaId == null) {
+            throw new IllegalArgumentException("sagaId must not be null");
+        }
+        LocalTransaction transaction = joinedTransaction().orElseThrow(() -> new IllegalStateException(
+                "PostgresStorageProvider cannot lock saga instance " + sagaId + ": "
+                        + (boundary.isEmpty() ? "it was built without a TransactionBoundary"
+                                : "no transaction of its TransactionBoundary is active")));
+        return onJoined(transaction, "lock saga instance " + sagaId,
+                connection -> select(connection, LOCK_BY_ID, sagaId)).stream().findFirst();
     }
 
     /**
@@ -164,8 +235,8 @@ public final class PostgresStorageProvider implements StorageProvider {
         if (associationValue == null) {
             throw new IllegalArgumentException("associationValue must not be null");
         }
-        return query("find saga instances by " + associationProperty + "=" + associationValue,
-                FIND_BY_ASSOCIATION, associationProperty, associationValue);
+        return onJoinedOrOwnConnection("find saga instances by " + associationProperty + "=" + associationValue,
+                connection -> select(connection, FIND_BY_ASSOCIATION, associationProperty, associationValue));
     }
 
     /**
@@ -180,16 +251,16 @@ public final class PostgresStorageProvider implements StorageProvider {
         if (sagaId == null) {
             throw new IllegalArgumentException("sagaId must not be null");
         }
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(DELETE_INSTANCE)) {
-            statement.setString(1, sagaId);
-            statement.executeUpdate();
-        } catch (SQLException e) {
-            throw new UncheckedSqlException("could not delete saga instance " + sagaId, e);
-        }
+        onJoinedOrOwnConnection("delete saga instance " + sagaId, connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(DELETE_INSTANCE)) {
+                statement.setString(1, sagaId);
+                statement.executeUpdate();
+            }
+            return null;
+        });
     }
 
-    /** @return the persisted snapshot, its row locked {@code FOR UPDATE}, or {@code null} if there is none */
+    /** @return the persisted snapshot, its row locked {@code FOR NO KEY UPDATE}, or {@code null} if there is none */
     private static SagaInstance lockPrevious(Connection connection, String sagaId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(LOCK_PREVIOUS)) {
             statement.setString(1, sagaId);
@@ -212,24 +283,21 @@ public final class PostgresStorageProvider implements StorageProvider {
         }
     }
 
-    private static void insertHistory(Connection connection, List<SagaLifecycleEntry> entries) throws SQLException {
-        if (entries.isEmpty()) {
-            return;
+    private static void requireEntriesOf(SagaInstance instance, List<SagaLifecycleEntry> newEntries) {
+        if (instance == null) {
+            throw new IllegalArgumentException("instance must not be null");
         }
-        try (PreparedStatement insert = connection.prepareStatement(INSERT_HISTORY)) {
-            for (SagaLifecycleEntry entry : entries) {
-                insert.setString(1, entry.sagaId());
-                insert.setLong(2, entry.sequenceNumber());
-                insert.setString(3, entry.kind().name());
-                insert.setString(4, entry.stepName());
-                insert.setString(5, SagaInstanceRows.encodeTouchedAggregates(TOUCHED_AGGREGATES_FIELD,
-                        entry.touchedAggregates()));
-                insert.setString(6, entry.outcomeStep());
-                SagaInstanceRows.bindFailure(insert, 7, entry.failure());
-                SagaInstanceRows.setInstant(insert, 11, entry.occurredAt());
-                insert.addBatch();
+        if (newEntries == null) {
+            throw new IllegalArgumentException("newEntries must not be null");
+        }
+        for (SagaLifecycleEntry entry : newEntries) {
+            if (entry == null) {
+                throw new IllegalArgumentException("newEntries must not contain null elements");
             }
-            insert.executeBatch();
+            if (!entry.sagaId().equals(instance.sagaId())) {
+                throw new IllegalArgumentException("lifecycle entry of saga " + entry.sagaId()
+                        + " cannot be saved with saga instance " + instance.sagaId());
+            }
         }
     }
 
@@ -263,9 +331,9 @@ public final class PostgresStorageProvider implements StorageProvider {
         }
     }
 
-    private List<SagaInstance> query(String action, String sql, String... params) {
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+    private static List<SagaInstance> select(Connection connection, String sql, String... params)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             for (int i = 0; i < params.length; i++) {
                 statement.setString(i + 1, params[i]);
             }
@@ -276,8 +344,6 @@ public final class PostgresStorageProvider implements StorageProvider {
                 }
             }
             return List.copyOf(instances);
-        } catch (SQLException e) {
-            throw new UncheckedSqlException("could not " + action, e);
         }
     }
 
@@ -293,19 +359,61 @@ public final class PostgresStorageProvider implements StorageProvider {
         return associations;
     }
 
+    /** Runs {@code work} on the joined connection, else in a transaction of its own. */
+    private <T> T inJoinedOrOwnTransaction(String action, SqlWork<T> work) {
+        Optional<LocalTransaction> joined = joinedTransaction();
+        return joined.isPresent() ? onJoined(joined.get(), action, work) : inOwnTransaction(action, work);
+    }
+
+    /** Runs {@code work} on the joined connection, else on a connection of its own in auto-commit mode. */
+    private <T> T onJoinedOrOwnConnection(String action, SqlWork<T> work) {
+        Optional<LocalTransaction> joined = joinedTransaction();
+        return joined.isPresent() ? onJoined(joined.get(), action, work) : onOwnConnection(action, work);
+    }
+
+    private Optional<LocalTransaction> joinedTransaction() {
+        return boundary.flatMap(TransactionBoundary::current);
+    }
+
+    /**
+     * Runs {@code work} on {@code transaction}'s connection, leaving the connection's lifecycle to the transaction;
+     * a {@link SQLException} marks the transaction rollback-only and is wrapped in {@link UncheckedSqlException}.
+     */
+    private static <T> T onJoined(LocalTransaction transaction, String action, SqlWork<T> work) {
+        Connection connection = transaction.resource(Connection.class).orElseThrow(() -> new IllegalStateException(
+                "The active transaction has no java.sql.Connection resource; PostgresStorageProvider cannot join it"
+                        + " to " + action));
+        try {
+            return work.run(connection);
+        } catch (SQLException e) {
+            transaction.setRollbackOnly();
+            throw new UncheckedSqlException("could not " + action, e);
+        }
+    }
+
+    /** Runs {@code work} on a connection of its own, in the connection's default (auto-commit) mode. */
+    private <T> T onOwnConnection(String action, SqlWork<T> work) {
+        try (Connection connection = dataSource.getConnection()) {
+            return work.run(connection);
+        } catch (SQLException e) {
+            throw new UncheckedSqlException("could not " + action, e);
+        }
+    }
+
     /**
      * Runs {@code work} on one connection with {@code autoCommit = false} and commits; on any failure rolls back
      * and rethrows, wrapping only {@link SQLException} in {@link UncheckedSqlException}; a
      * {@link RuntimeException} (such as {@link ConcurrentSagaUpdateException}) propagates unwrapped. Restores the
      * connection's {@code autoCommit} before closing it, for pooled connections.
      */
-    private void inTransaction(String action, SqlWork work) {
+    private <T> T inOwnTransaction(String action, SqlWork<T> work) {
         try (Connection connection = dataSource.getConnection()) {
             boolean autoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
-                work.run(connection);
+                T result = work.run(connection);
                 connection.commit();
+                return result;
             } catch (SQLException | RuntimeException | Error e) {
                 rollback(connection, e);
                 throw e;
@@ -333,8 +441,22 @@ public final class PostgresStorageProvider implements StorageProvider {
         }
     }
 
+    private static DataSource requireDataSource(DataSource dataSource) {
+        if (dataSource == null) {
+            throw new IllegalArgumentException("dataSource must not be null");
+        }
+        return dataSource;
+    }
+
+    private static TransactionBoundary requireBoundary(TransactionBoundary boundary) {
+        if (boundary == null) {
+            throw new IllegalArgumentException("boundary must not be null");
+        }
+        return boundary;
+    }
+
     @FunctionalInterface
-    private interface SqlWork {
-        void run(Connection connection) throws SQLException;
+    private interface SqlWork<T> {
+        T run(Connection connection) throws SQLException;
     }
 }

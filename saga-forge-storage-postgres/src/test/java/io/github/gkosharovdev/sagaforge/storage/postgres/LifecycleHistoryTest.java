@@ -1,14 +1,5 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
-import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
@@ -16,12 +7,26 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 
 /**
- * {@code saga_lifecycle_history} as written by {@link PostgresStorageProvider#save}, read only through direct SQL
- * (spec US3, quickstart scenarios 7 to 9 and 14; FR-007 to FR-009, FR-012, SC-003). Every {@link Instant} is
- * truncated to microseconds, the {@code timestamptz} precision ({@code .specify/memory/memory.md} G-003-05).
+ * {@code saga_lifecycle_history} as written by {@link PostgresStorageProvider#save(SagaInstance, List)} from the
+ * entries handed over, read only through direct SQL (003 spec US3, quickstart scenarios 7 to 9 and 14; FR-007 to
+ * FR-009, FR-012, SC-003; 004 FR-023, FR-033, SC-010). Every {@link Instant} is truncated to microseconds, the
+ * {@code timestamptz} precision ({@code .specify/memory/memory.md} G-003-05).
  */
+@Tag("container")
 class LifecycleHistoryTest {
 
     private static final String SAGA_ID = "s-1";
@@ -56,6 +61,24 @@ class LifecycleHistoryTest {
                 modifiedAt, steps, outcome, failure);
     }
 
+    private static SagaLifecycleEntry created() {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.CREATED, null, List.of(), null, null,
+                CREATED_AT);
+    }
+
+    private static SagaLifecycleEntry stepCompleted(String step, List<AggregateReference> touched, Instant at) {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.STEP_COMPLETED, step, touched, null, null, at);
+    }
+
+    private static SagaLifecycleEntry completed(String outcomeStep, Instant at) {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPLETED, null, List.of(), outcomeStep, null,
+                at);
+    }
+
+    private static SagaLifecycleEntry failed(SagaFailure failure, Instant at) {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.FAILED, null, List.of(), null, failure, at);
+    }
+
     private static List<Map<String, Object>> history(String sagaId) {
         return PostgresTestSupport.queryRows(
                 "SELECT * FROM saga_lifecycle_history WHERE saga_id = ? ORDER BY sequence_number", sagaId);
@@ -71,11 +94,13 @@ class LifecycleHistoryTest {
         StepRecord aDone = StepRecord.completed(List.of(ORDER_42));
         StepRecord bDone = StepRecord.completed(List.of(PAYMENT_7));
         provider.save(instance(SagaStatus.CREATED, CREATED_AT,
-                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null));
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
         provider.save(instance(SagaStatus.RUNNING, T1, steps(aDone, StepRecord.notRun(), StepRecord.notRun()),
-                null, null));
-        provider.save(instance(SagaStatus.RUNNING, T2, steps(aDone, bDone, StepRecord.notRun()), null, null));
-        provider.save(instance(SagaStatus.COMPLETED, T3, steps(aDone, bDone, StepRecord.notRun()), "B", null));
+                null, null), List.of(stepCompleted("A", List.of(ORDER_42), T1)));
+        provider.save(instance(SagaStatus.RUNNING, T2, steps(aDone, bDone, StepRecord.notRun()), null, null),
+                List.of(stepCompleted("B", List.of(PAYMENT_7), T2)));
+        provider.save(instance(SagaStatus.COMPLETED, T3, steps(aDone, bDone, StepRecord.notRun()), "B", null),
+                List.of(completed("B", T3)));
 
         List<Map<String, Object>> rows = history(SAGA_ID);
 
@@ -94,10 +119,11 @@ class LifecycleHistoryTest {
     @Test
     @DisplayName("scenario 8: a save that leaves step C NOT_RUN gives no row for C (FR-009)")
     void notRunStepHasNoRow() {
-        provider.save(instance(SagaStatus.RUNNING, T1,
-                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null));
+        provider.save(instance(SagaStatus.CREATED, CREATED_AT,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
         provider.save(instance(SagaStatus.RUNNING, T2,
-                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, null));
+                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, null),
+                List.of(stepCompleted("A", List.of(), T2)));
 
         assertThat(history(SAGA_ID)).extracting(row -> row.get("step_name")).containsExactly(null, "A");
         assertThat(PostgresTestSupport.queryRows(
@@ -108,10 +134,11 @@ class LifecycleHistoryTest {
     @DisplayName("scenario 9: the FAILED row's failure_* columns equal findById(sagaId).failure()")
     void failedRowMatchesInstanceFailure() {
         SagaFailure failure = new SagaFailure("B", "java.lang.IllegalStateException", "declined", T2);
-        provider.save(instance(SagaStatus.RUNNING, T1,
-                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, null));
-        provider.save(instance(SagaStatus.FAILED, T2,
-                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, failure));
+        provider.save(instance(SagaStatus.CREATED, CREATED_AT,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
+        SagaInstance failedInstance = instance(SagaStatus.FAILED, T2,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, failure);
+        provider.save(failedInstance, List.of(failed(failedInstance.failure(), T2)));
 
         List<Map<String, Object>> rows = history(SAGA_ID);
         Map<String, Object> failed = rows.get(rows.size() - 1);
@@ -126,45 +153,58 @@ class LifecycleHistoryTest {
     }
 
     @Test
-    @DisplayName("re-saving an unchanged instance adds no row (FR-009)")
-    void unchangedResaveAddsNothing() {
-        SagaInstance snapshot = instance(SagaStatus.RUNNING, T1,
-                steps(StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun(), StepRecord.notRun()), null, null);
-        provider.save(instance(SagaStatus.RUNNING, CREATED_AT,
-                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null));
-        provider.save(snapshot);
-        provider.save(snapshot);
+    @DisplayName("a save without entries adds no row, even when steps completed (no derivation, FR-023)")
+    void saveWithoutEntriesAddsNoRow() {
+        provider.save(instance(SagaStatus.CREATED, CREATED_AT,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
+        provider.save(instance(SagaStatus.RUNNING, T1,
+                steps(StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun(), StepRecord.notRun()), null, null));
 
-        assertThat(history(SAGA_ID)).extracting(row -> row.get("kind"))
-                .containsExactly("CREATED", "STEP_COMPLETED");
+        assertThat(history(SAGA_ID)).extracting(row -> row.get("kind")).containsExactly("CREATED");
     }
 
     @Test
-    @DisplayName("limitation G-003-04: completing zeta and alpha in one save records alpha first (a name "
-            + "tiebreak, not true execution order)")
-    void sameSaveStepsUseAlphabeticalTiebreakNotTrueOrder() {
+    @DisplayName("zeta then alpha handed over in one save are stored zeta, alpha (hand-over order, SC-010)")
+    void oneSaveKeepsHandOverOrder() {
         Map<String, StepRecord> before = new LinkedHashMap<>();
         before.put("zeta", StepRecord.notRun());
         before.put("alpha", StepRecord.notRun());
-        // zeta "ran" first in the process, but SagaInstance.steps carries no ordering signal.
         Map<String, StepRecord> after = new LinkedHashMap<>();
         after.put("zeta", StepRecord.completed(List.of()));
         after.put("alpha", StepRecord.completed(List.of()));
-        provider.save(new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of(), SagaStatus.RUNNING, CREATED_AT, T1,
-                before, null, null));
+        provider.save(new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of(), SagaStatus.CREATED, CREATED_AT,
+                CREATED_AT, before, null, null), List.of(created()));
         provider.save(new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of(), SagaStatus.RUNNING, CREATED_AT, T2,
-                after, null, null));
+                after, null, null),
+                List.of(stepCompleted("zeta", List.of(), T2), stepCompleted("alpha", List.of(), T2)));
 
-        assertThat(history(SAGA_ID)).extracting(row -> row.get("step_name")).containsExactly(null, "alpha", "zeta");
+        assertThat(history(SAGA_ID)).extracting(row -> row.get("step_name")).containsExactly(null, "zeta", "alpha");
+    }
+
+    @Test
+    @DisplayName("a second save's entries are numbered after the first save's")
+    void entriesAppendAfterExistingHistory() {
+        StepRecord aDone = StepRecord.completed(List.of(ORDER_42));
+        provider.save(instance(SagaStatus.CREATED, CREATED_AT,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
+        provider.save(instance(SagaStatus.COMPLETED, T1, steps(aDone, StepRecord.notRun(), StepRecord.notRun()),
+                "A", null), List.of(stepCompleted("A", List.of(ORDER_42), T1), completed("A", T1)));
+
+        List<Map<String, Object>> rows = history(SAGA_ID);
+
+        assertThat(rows).extracting(row -> row.get("sequence_number")).containsExactly(0L, 1L, 2L);
+        assertThat(rows).extracting(row -> row.get("kind"))
+                .containsExactly("CREATED", "STEP_COMPLETED", "COMPLETED");
     }
 
     @Test
     @DisplayName("scenario 14 (history part): delete(sagaId) removes the history rows")
     void deleteRemovesHistory() {
-        provider.save(instance(SagaStatus.RUNNING, T1,
-                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null));
+        provider.save(instance(SagaStatus.CREATED, CREATED_AT,
+                steps(StepRecord.notRun(), StepRecord.notRun(), StepRecord.notRun()), null, null), List.of(created()));
         provider.save(instance(SagaStatus.RUNNING, T2,
-                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, null));
+                steps(StepRecord.completed(List.of()), StepRecord.notRun(), StepRecord.notRun()), null, null),
+                List.of(stepCompleted("A", List.of(), T2)));
         assertThat(history(SAGA_ID)).hasSize(2);
 
         provider.delete(SAGA_ID);

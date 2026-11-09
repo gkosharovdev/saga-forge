@@ -15,3 +15,10 @@
   saga whose instance record is `FAILED`.
 - **Values**: stored as given; structured values are nested `Map<String, Object>` (feature 001 semantics).
   Serialization of value types is the storage module's concern, as for `SagaInstance.state`.
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- New rule: a `SagaContextRecord` is saved only after its instance's creation write committed (G-ENG-01).
+- Unchanged: the store never joins the unit of work's transaction.

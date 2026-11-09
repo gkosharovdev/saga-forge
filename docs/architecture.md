@@ -11,13 +11,14 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
 | `AnnotationScanner` / `ReflectiveAnnotationScanner` / `SagaValidationResult` / `validateAll` → `ValidationReport` | Implemented, tested |
 | `DomainEvents.record` / `DomainEventScope` (thread-bound event recording) | Implemented, tested |
-| `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined and tested via test doubles; no implementation |
-| `CommandGateway`, `EventPublisher` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
-| SPI `AggregateResolver`, `HandlerInstanceProvider`, `SagaContextStore` / `SagaContextRecord` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
-| `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; no engine |
-| SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)); no `EventDispatcher` implementation |
-| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; derived and persisted by Postgres storage on `save()`; no query API |
-| Saga engine runtime | Not implemented |
+| `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined; implemented by the engine (`saga-forge-engine`, [004](../specs/004-saga-engine/spec.md)), tested |
+| `CommandGateway`, `EventPublisher` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
+| SPI `AggregateResolver`, `HandlerInstanceProvider`, `SagaContextStore` / `SagaContextRecord` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
+| `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
+| SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)) and joins the engine's transaction (004); no `EventDispatcher` implementation |
+| SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `EventHandoff`/`HandedOffEvents`, `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the engine, tested; `JdbcTransactionBoundary` in the Postgres module |
+| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the engine, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
+| Saga engine runtime (`saga-forge-engine`: event routing, saga-scoped unit of work, one unit of work per instance, outbox-ready handoff, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Transports (in-memory, Kafka) | Not implemented |
 | Spring Boot autoconfiguration | Not implemented |
@@ -29,15 +30,21 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   no implementation), `DomainEvents.record`, and the SPI contracts. Zero runtime dependencies, including no
   Spring dependency. This is deliberate: the annotation model and validation rules must be usable from a
   future non-Spring runtime without forcing a Spring dependency on every consumer.
+- **`saga-forge-engine`** — the saga runtime over the core SPI, depending on `saga-forge-core` and the JDK only.
+  `SagaEngine` is the `EventReceiver` transports deliver to: it routes each event to saga types and instances by
+  association, runs each saga-scoped unit of work in the host's local transaction through `TransactionBoundary`,
+  allows one unit of work per instance at a time, hands committed events to an `EventHandoff`, and validates the
+  registered model and plug-ins at `start()`. Host integrations assemble it through its builder; application
+  developers using the starter never do.
 - **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring. Detects, via
   `@ConditionalOnClass`, which storage and transport dependencies are on the classpath, and assembles the
   engine accordingly. There is no `SagaEngineConfig` for a user to hand-build; if autoconfiguration can't
   resolve an unambiguous choice (e.g. two storage providers on the classpath), it should fail fast with a
   clear error rather than guess.
 - **`saga-forge-storage-{postgres,mysql,mongodb}`** — each implements `StorageProvider` and
-  `SagaContextStore` for one backend, and records each instance's lifecycle history
-  (`SagaLifecycleEntry`: creation, step completions, terminal outcome) by diffing snapshots inside `save()`,
-  for direct data-store inspection only. Only Postgres exists so far.
+  `SagaContextStore` for one backend, and persists the lifecycle entries the engine hands over
+  (`SagaLifecycleEntry`: creation, step completions, terminal outcome), numbered in hand-over order, for direct
+  data-store inspection only. Only Postgres exists so far.
   Exactly one should be on the classpath per application. These are the only three storage backends in
   scope; adding a fourth is a scope decision, not an implementation detail.
 - **`saga-forge-transport-{inmemory,kafka}`** — each implements `EventDispatcher`. In-memory wraps Spring's
@@ -83,7 +90,8 @@ unit of work** (specified in
 At the transport level this is choreography: no central dispatcher decides what happens next. But every
 `@Saga` instance keeps durable process state — its `SagaInstance` record (status, per-step `StepRecord`s,
 `outcome`, `failure`) through a `StorageProvider`, and its named business state through `SagaContext`,
-persisted as a `SagaContextRecord` via `SagaContextStore`. None of these has a runtime implementation yet. With
+persisted as a `SagaContextRecord` via `SagaContextStore`. The engine (`saga-forge-engine`) drives these, and
+Postgres implements the storage and the context store. With
 that state you can ask "where is this saga, and what has it already done" without replaying every event it
 reacted to. That queryable, durable process state is what makes this orchestration rather than pure
 choreography — it is layered on top of an event-driven delivery mechanism, not a replacement for one.
@@ -205,10 +213,16 @@ rolls back as a whole on any failure. A later unit of work sees only what earlie
 (plus `SagaContext` values, which are written outside the transaction). At most one unit of work runs per
 saga instance at a time.
 
-What remains open is engine work: the transaction SPI through which the engine opens, commits and rolls back
-the host's local transaction, and cross-process enforcement of one unit of work per instance (for example an
-optimistic version on `SagaInstance`). Both belong to the engine feature, so that storage and transport
-implementations do not each decide them inconsistently.
+This is now **implemented** by the engine ([004](../specs/004-saga-engine/spec.md)): the engine opens, commits and
+rolls back the host's local transaction through `TransactionBoundary`/`LocalTransaction`; storage joins it through
+`LocalTransaction.resource(Class)` (Postgres: the bound `java.sql.Connection`); a failed unit of work is recorded
+`FAILED` in a separate write after the rollback; and one unit of work per instance is enforced in-process by a
+per-instance lock and across processes by `StorageProvider.findByIdAndLock` (a pessimistic lock at the start of the
+unit of work, no version field). Known limitations: a crash between the creation write and the first unit of work
+strands a `CREATED` instance (G-ENG-05); the default after-commit handoff is at most once (G-ENG-07); duplicate
+starts are detected across processes only after the other creation write committed (G-ENG-08); the `FAILED` write
+can mark an instance another process moved on (G-ENG-10); whether `begin()` suspends or rejects a host
+transaction already active on the thread depends on the `TransactionBoundary` (G-ENG-12).
 
 ### Failure categorization and automatic compensation dispatch
 

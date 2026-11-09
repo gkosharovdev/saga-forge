@@ -97,3 +97,12 @@ column lists, and in `ON CONFLICT (saga_id) DO UPDATE SET values = EXCLUDED.valu
   `lastModifiedAt`, fails with `IllegalArgumentException` before any SQL runs (G-003-12).
 - A `state`/`values` string or key containing U+0000 is not rejected by `JsonCodec`; `jsonb` refuses it and the
   call fails as `UncheckedSqlException` (G-003-09).
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- DDL unchanged.
+- `saga_lifecycle_history.sequence_number` is assigned by `save` from the hand-over order (`MAX + 1` onwards).
+- New failure mode: in joined mode (a `PostgresStorageProvider` built with a `TransactionBoundary`, transaction
+  active) a `SQLException` marks the transaction rollback-only before it is rethrown as `UncheckedSqlException`.

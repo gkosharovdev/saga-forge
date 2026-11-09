@@ -46,14 +46,15 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
  *
  * <h3>Relationship to other contracts</h3>
  * <ul>
- *   <li>{@code EventDispatcher} resolves which instance an incoming event correlates to; the engine,
- *       having resolved a target, calls into {@code SagaLifecycle} to perform the transition.
- *       {@code EventDispatcher} itself never calls {@code SagaLifecycle}.</li>
+ *   <li>The engine resolves which instance an incoming event correlates to, through
+ *       {@code StorageProvider.findByAssociation} behind {@code EventReceiver}; having resolved a target,
+ *       it calls into {@code SagaLifecycle} to perform the transition. {@code EventDispatcher} is outbound
+ *       only and never calls {@code SagaLifecycle}.</li>
  *   <li>{@code StorageProvider} is not called by this contract's methods as specified here: the
  *       contract only defines the transition semantics and the returned {@link SagaInstance} snapshot.
- *       The engine persists that snapshot via {@code StorageProvider.save(...)}; engine-side
- *       implementations may call {@code StorageProvider} as part of fulfilling these operations
- *       durably.</li>
+ *       The engine persists the returned snapshots with its three writes through
+ *       {@code StorageProvider.save(instance, entries)}: the creation write, the unit of work's write and
+ *       the {@code FAILED} write.</li>
  * </ul>
  *
  * <h3>Null-safety contracts</h3>

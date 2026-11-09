@@ -44,3 +44,36 @@ later unit of work) see them.
 - A step is never recorded `COMPLETED` unless its unit of work committed (FR-004).
 - A resumed unit of work needs only `StorageProvider` and `SagaContextStore` contents, not memory from an
   earlier unit of work (FR-020, SC-003).
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+**Saga-scoped unit of work, made concrete by the engine:**
+
+1. **Begin.** `EventReceiver.receive` resolves the step and the instance. A start step first runs the *creation write*
+   in its own transaction (instance `CREATED`, lifecycle entry `CREATED`); this replaces "`SagaLifecycle.start(...)`
+   creates the instance" inside the unit of work. Then: the in-process instance lock, `TransactionBoundary.begin()`,
+   `StorageProvider.findByIdAndLock(sagaId)`, a re-check (terminal → `UNEXPECTED`, still `CREATED` for a non-start
+   step → `NOT_HANDLED`), loading the `SagaContextRecord`, creating the saga object (`SagaObjectProvider` or the
+   no-argument constructor), injecting the `@SagaId`, `SagaContext` and `CommandGateway` fields, and binding the unit
+   of work as the thread's `DomainEventRecorder`.
+2. **Run steps.** Unchanged. Each `recordStepCompleted` adds a `STEP_COMPLETED` entry to the unit of work.
+3. **Commit.** `complete` adds a `COMPLETED` entry. Then `save(instance, entries)`, the `IN_TRANSACTION` handoff if
+   configured, `commit()`, release of the in-process lock, then the `AFTER_COMMIT` handoff (not
+   `EventDispatcher.dispatch` directly; the default handoff calls it).
+4. **Roll back.** Also on a failing instance write, commit or `IN_TRANSACTION` handoff, and on a rollback-only mark.
+   The `FAILED` write runs in its own transaction, locks the instance and records the `FAILED` entry; it always
+   updates the committed creation record and never creates one. A write-time `SagaConcurrencyConflictException` is
+   not a failure: rollback, no `FAILED` write, result `NOT_HANDLED`.
+
+**Invariants:**
+
+- "Cross-process enforcement ... is deferred" no longer holds: it is enforced by `findByIdAndLock` as the first
+  statement of the transaction, plus the in-process lock.
+- New: a unit of work that waits for another one of the same instance has run no step and written no context.
+- New: at most one active instance per saga type and association value within one engine (FR-027); across processes
+  only after the other creation write committed (G-ENG-08).
+
+**`SagaContext` writes:** unchanged (write-through after each call, own transaction). New: every context write
+follows the committed creation write (G-ENG-01).

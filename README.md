@@ -146,11 +146,14 @@ Saga Forge is an independent, zero-dependency implementation designed for JDK 21
 ## Status
 
 This is an early-stage framework. The annotation model, SPI contracts, and module layout exist and
-are tested (`saga-forge-core`). The `SagaContext`/`SagaLifecycle` interfaces are contracts only,
-tested via test doubles, with no implementation. The step, command-handler, and unit-of-work contracts
-(`CommandGateway`, `DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined and proven by a test-only
-harness (feature 002). Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003).
-The runtime engine, MySQL and MongoDB storage, transports, and autoconfiguration are not implemented yet. See
+are tested (`saga-forge-core`). The step, command-handler, and unit-of-work contracts (`CommandGateway`,
+`DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined, first proven by a test-only harness (feature 002).
+The saga engine runtime exists in `saga-forge-engine` (feature 004): event routing by association, the
+saga-scoped unit of work in the host's local transaction (`TransactionBoundary`), one unit of work per instance at
+a time, an outbox-ready after-commit handoff, and fail-fast startup validation. It is verified by unit tests over
+in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
+`StorageProvider` joins the engine's transaction (feature 004). Not implemented yet: the Spring Boot starter, the
+transports, MySQL and MongoDB storage, compensation, step retry, and idempotent step execution. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as
@@ -161,11 +164,12 @@ historical planning artifacts, superseded by the docs above where they conflict.
 | Module | Role | Depends on |
 |---|---|---|
 | `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
+| `saga-forge-engine` | Saga runtime over the core SPI: `SagaEngine` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
 | `saga-forge-spring-boot-starter` | Autoconfiguration: detects datastore + transport, wires the engine | `saga-forge-core` |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | `EventDispatcher` over Spring `ApplicationEventPublisher` | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
-| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core` |
+| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-engine` (test scope) |
 
 ## Getting started (target shape)
 

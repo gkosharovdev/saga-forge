@@ -50,3 +50,18 @@ application code (through dependency injection).
 `send` called with no active unit of work (for example from a request handler) opens a unit of work for the
 handler's own changes. It is not saga-scoped: events raised in it follow the "outside any saga unit of work"
 rule and are dispatched through the transport after it commits.
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- Rule 1, "the harness supports only the single-parameter form": the engine supplies the `@Command` argument and
+  resolves every other parameter through `HandlerParameterResolver`s, checked at startup
+  (`specs/004-saga-engine/contracts/host-plugins.md`).
+- Rule 6, "checked when the engine starts": implemented as Property 21 (`specs/004-saga-engine/contracts/engine-startup.md`).
+- Several `AggregateResolver`s may be registered: the first that `supports` the type is used for both load and save.
+- "Outside a unit of work": the non-saga unit of work runs in one `LocalTransaction`; its recorded events go to the
+  handoff with `sagaType`/`sagaId` `null` (after commit, or before it with `IN_TRANSACTION` timing); a failure rolls
+  back and propagates from `send` unchanged.
+- `send` on a thread with no engine unit of work, including a thread a handler started, is "outside a unit of work".
+- Loader and saver host instances come from `HandlerInstanceProvider`, on each use.

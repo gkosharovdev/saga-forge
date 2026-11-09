@@ -14,7 +14,6 @@ import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 import net.jqwik.api.Tuple;
 import net.jqwik.api.Tuple.Tuple2;
-import net.jqwik.api.constraints.LongRange;
 import net.jqwik.api.statistics.Statistics;
 
 import java.time.Instant;
@@ -28,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Properties of {@link LifecycleHistoryDerivation#requireForwardTransition} (contracts/concurrency-control.md
+ * Properties of {@link ForwardTransition#requireForwardTransition} (contracts/concurrency-control.md
  * "Forward transition") and of idempotent re-save. Pure: no database, so it does not touch
  * {@link PostgresTestSupport}.
  *
@@ -66,26 +65,24 @@ class ForwardTransitionPropertyTest {
         Statistics.collect(expected ? "forward" : "violation");
 
         if (expected) {
-            assertThatCode(() -> LifecycleHistoryDerivation.requireForwardTransition(previous, incoming))
+            assertThatCode(() -> ForwardTransition.requireForwardTransition(previous, incoming))
                     .doesNotThrowAnyException();
         } else {
-            assertThatThrownBy(() -> LifecycleHistoryDerivation.requireForwardTransition(previous, incoming))
+            assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(previous, incoming))
                     .isInstanceOf(ConcurrentSagaUpdateException.class)
                     .satisfies(e -> assertThat(((ConcurrentSagaUpdateException) e).sagaId()).isEqualTo(SAGA_ID));
         }
     }
 
     /**
-     * Idempotent re-save: any instance is a forward transition from itself and derives no history entry.
+     * Idempotent re-save: any instance is a forward transition from itself.
      *
      * <p><b>Validates: FR-009, FR-010</b></p>
      */
     @Property(tries = 500)
-    void reSavingTheSameSnapshotIsAcceptedAndDerivesNothing(@ForAll("instances") SagaInstance instance,
-                                                           @ForAll @LongRange(min = 0, max = 10_000) long next) {
-        assertThatCode(() -> LifecycleHistoryDerivation.requireForwardTransition(instance, instance))
+    void reSavingTheSameSnapshotIsAccepted(@ForAll("instances") SagaInstance instance) {
+        assertThatCode(() -> ForwardTransition.requireForwardTransition(instance, instance))
                 .doesNotThrowAnyException();
-        assertThat(LifecycleHistoryDerivation.derive(instance, instance, next)).isEmpty();
     }
 
     /** The oracle: contracts/concurrency-control.md "Forward transition", restated independently. */

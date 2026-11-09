@@ -39,3 +39,16 @@ Called when a unit of work commits at a wait point. `CREATED` or `RUNNING` → `
 ## Terminal statuses
 
 `COMPLETED` and `FAILED`, as in 001. `COMPENSATING` is never entered by this contract.
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- "Relationship to other SPI contracts": `EventDispatcher` no longer resolves instances and is outbound only. The
+  engine resolves them behind `EventReceiver`, through `StorageProvider.findByAssociation`; `registerSagaType` is
+  called once per saga type at `start()`, before the first event is accepted (FR-036).
+- The production implementation (`EngineSagaLifecycle`) applies transitions to the unit of work's working copy and
+  persists them with three writes (creation, unit of work, `FAILED`); every transition except `advance` yields one
+  lifecycle entry. `start` performs the duplicate check against storage and does not persist; the engine's creation
+  write does.
+- The engine only ever passes an `@EndSaga` step to `complete` (FR-015).

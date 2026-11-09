@@ -47,3 +47,13 @@ afterwards, also when `work` throws. Implemented with a `ThreadLocal`.
 
 For every event recorded while a step runs, the engine adds `(aggregate type, @AggregateIdentifier value)` to
 that step's touched aggregates (FR-004).
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- Delivery rules table: "`EventDispatcher.dispatch` after commit" now reads "the after-commit handoff
+  (`specs/004-saga-engine/contracts/event-handoff.md`); by default `EventDispatcher.dispatch` after commit". With
+  `IN_TRANSACTION` timing the events are handed off inside the unit of work's transaction instead.
+- `EventPublisher.publish` outside any unit of work is unchanged: an immediate `dispatch`, not looped back into the
+  engine.

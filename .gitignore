@@ -10,4 +10,10 @@ target/
 .vscode/
 .DS_Store
 
+# Eclipse / JDT language server project files
+.project
+.classpath
+.settings/
+.factorypath
+
 .claude/settings.local.json
