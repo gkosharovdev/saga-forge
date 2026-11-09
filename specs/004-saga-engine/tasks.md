@@ -691,7 +691,7 @@ scenarios 6, 7, 8; SC-004).
 
 ### Tests for User Story 3 (`saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/`)
 
-- [ ] T065 [P] [US3] Create the fan-out fixture in `fixtures/fanout/`: `@Aggregate Case` (`@AggregateIdentifier
+- [x] T065 [P] [US3] Create the fan-out fixture in `fixtures/fanout/`: `@Aggregate Case` (`@AggregateIdentifier
   caseId`); events `CaseOpened`, `CaseNoted`, `CaseEscalated`, `CaseClosed` (each `@DomainEvent(aggregate =
   Case.class)` with `caseId`); `@Command AddNote(caseId, Mode mode)` with `enum Mode { NOTE, CLOSE_THEN_ESCALATE }`;
   service `NoteService` (`@CommandHandler handle(AddNote)`: `NOTE` records `CaseNoted`; `CLOSE_THEN_ESCALATE` records
@@ -700,7 +700,7 @@ scenarios 6, 7, 8; SC-004).
   onCaseNoted`; `@EndSaga onCaseClosed`, which throws when `ReviewSaga.failOnClose` is set). All steps
   `associationProperty = "caseId"`. US5 reuses it (events queued at `@EndSaga`, events triggering another saga
   type's start step).
-- [ ] T066 [P] [US3] Create `ResumeAcrossEnginesTest.java`: engine A, first unit of work of `CreateBookingSaga` →
+- [x] T066 [P] [US3] Create `ResumeAcrossEnginesTest.java`: engine A, first unit of work of `CreateBookingSaga` →
   `RUNNING`, `onBookingRequested` and `onAvailabilityClaimed` `COMPLETED`, others `NOT_RUN` (US3-1); engine B (fresh
   `SagaEngine`, same stores and repositories only) receives `PaymentConfirmedEvent` → `onPaymentConfirmed` and
   `onBookingConfirmed` in one new unit of work, `COMPLETED` with outcome `onBookingConfirmed`, `onPaymentDeclined`
@@ -708,21 +708,21 @@ scenarios 6, 7, 8; SC-004).
   the first unit of work, outcome `onPaymentDeclined` (US3-3); a second unit of work failing on B keeps the first's
   effects committed and ends `FAILED` (US3-4, quickstart 8); in every case the end state equals an uninterrupted run
   on one engine (SC-004, quickstart 7).
-- [ ] T067 [P] [US3] Create `CreateBookingSagaDifferentialTest.java` with `support/DifferentialRun`: both outcomes
+- [x] T067 [P] [US3] Create `CreateBookingSagaDifferentialTest.java` with `support/DifferentialRun`: both outcomes
   of `CreateBookingSaga` (the 002 User Story 2 and 3 scenarios, including resume from persisted state) give equal
   status, step records, outcome, aggregate state, context values and dispatched events on harness and engine (SC-001,
   SC-009).
-- [ ] T068 [US3] Create `RoutingOutcomesTest.java`: a non-start event with no correlated instance → `UNMATCHED`, no
+- [x] T068 [US3] Create `RoutingOutcomesTest.java`: a non-start event with no correlated instance → `UNMATCHED`, no
   effect, no exception (US3-5); an event correlated only to `COMPLETED` instances → one `UNEXPECTED` result for the
   most recently returned instance; an event for a non-start step reaching an instance still `CREATED` (seeded directly
   in the storage double) → `NOT_HANDLED`, nothing run (research.md §6, G-ENG-05); an event no saga reacts to →
   `ignored()` (FR-004, quickstart 6); `receive(null)`, a non-`@DomainEvent` object and an event with an empty
   association value → `IllegalArgumentException`, nothing ran (FR-006, quickstart 20).
-- [ ] T069 [US3] Create `FanOutTest.java` over the fan-out fixture: `CaseClosed` for a case with an active
+- [x] T069 [US3] Create `FanOutTest.java` over the fan-out fixture: `CaseClosed` for a case with an active
   `AuditSaga` and an active `ReviewSaga` instance runs one unit of work per saga type, each committed independently;
   with `ReviewSaga.failOnClose` set, `ReviewSaga` ends `FAILED` while `AuditSaga` ends `COMPLETED` (spec Edge Cases
   "Event reacted to by several saga types"); results are in saga registration order.
-- [ ] T070 [US3] Checkpoint (US3). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
+- [x] T070 [US3] Checkpoint (US3). Run `/opt/homebrew/bin/mvn -B -pl saga-forge-engine -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures, and the container guard.
 
 **Checkpoint**: waiting sagas resume across engine instances.

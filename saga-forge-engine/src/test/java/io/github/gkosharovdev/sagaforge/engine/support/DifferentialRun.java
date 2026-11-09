@@ -34,6 +34,10 @@ import java.util.function.Supplier;
  * {@code deliverAll}, the engine through {@code receive}. An exception from {@code receive} is kept in
  * {@link Side#failures()} and does not stop the sequence.</p>
  *
+ * <p>{@link #restart()} models a process restart between events: the harness is rebuilt from its
+ * {@code persistedState()} and the engine is rebuilt over the same stores; both keep the same client objects (the
+ * client's database survives) and nothing else.</p>
+ *
  * <p><strong>Test-only scaffolding.</strong> Not thread-safe; one run per test.</p>
  */
 public final class DifferentialRun {
@@ -98,8 +102,9 @@ public final class DifferentialRun {
     private final Class<?> sagaType;
     private final Fixtures harnessFixtures;
     private final Fixtures engineFixtures;
-    private final SagaTestHarness harness;
-    private final SagaEngine engine;
+    private final List<Object> harnessDispatchedBeforeRestart = new ArrayList<>();
+    private SagaTestHarness harness;
+    private SagaEngine engine;
     private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final InMemorySagaContextStore contextStore = new InMemorySagaContextStore();
@@ -110,9 +115,12 @@ public final class DifferentialRun {
         this.sagaType = sagaType;
         this.harnessFixtures = fixtures.get();
         this.engineFixtures = fixtures.get();
-        this.harness = buildHarness();
+        clientObjects(engineFixtures).stream()
+                .filter(Snapshottable.class::isInstance)
+                .map(Snapshottable.class::cast)
+                .forEach(boundary::participant);
+        this.harness = buildHarness(SagaTestHarness.builder());
         this.engine = buildEngine();
-        engine.start();
     }
 
     /**
@@ -138,13 +146,25 @@ public final class DifferentialRun {
         return this;
     }
 
+    /**
+     * Restarts both sides: a new harness from the current harness's persisted state, and a new started engine over
+     * the same stores and dispatcher. Each side keeps its client objects; each gets a fresh saga-id sequence.
+     */
+    public DifferentialRun restart() {
+        harnessDispatchedBeforeRestart.addAll(harness.dispatcher().dispatched());
+        harness = buildHarness(SagaTestHarness.fromPersistedState(harness.persistedState()));
+        engine = buildEngine();
+        return this;
+    }
+
     /** What the harness ended with. */
     public Side harness() {
         List<SagaInstance> instances = harness.instances(sagaType);
         Map<String, Map<String, Object>> contexts = new LinkedHashMap<>();
         instances.forEach(instance -> contexts.put(instance.sagaId(), Map.copyOf(harness.context(instance.sagaId()))));
-        return new Side(views(instances), contexts, harness.dispatcher().dispatched(), harnessFixtures.state(),
-                List.of());
+        List<Object> dispatched = new ArrayList<>(harnessDispatchedBeforeRestart);
+        dispatched.addAll(harness.dispatcher().dispatched());
+        return new Side(views(instances), contexts, List.copyOf(dispatched), harnessFixtures.state(), List.of());
     }
 
     /** What the engine ended with (committed state only). */
@@ -184,9 +204,8 @@ public final class DifferentialRun {
         return harnessFixtures;
     }
 
-    private SagaTestHarness buildHarness() {
-        SagaTestHarness.Builder builder = SagaTestHarness.builder()
-                .saga(sagaType)
+    private SagaTestHarness buildHarness(SagaTestHarness.Builder builder) {
+        builder.saga(sagaType)
                 .clock(CLOCK)
                 .sagaIds(sagaIdSequence());
         harnessFixtures.handlers().forEach(builder::handler);
@@ -197,14 +216,8 @@ public final class DifferentialRun {
 
     private SagaEngine buildEngine() {
         MapHandlerInstanceProvider instances = new MapHandlerInstanceProvider();
-        Set<Object> clientObjects = new LinkedHashSet<>();
-        clientObjects.addAll(engineFixtures.handlers());
-        clientObjects.addAll(engineFixtures.repositories());
+        Set<Object> clientObjects = clientObjects(engineFixtures);
         clientObjects.forEach(instances::register);
-        clientObjects.stream()
-                .filter(Snapshottable.class::isInstance)
-                .map(Snapshottable.class::cast)
-                .forEach(boundary::participant);
         SagaEngine.Builder builder = SagaEngine.builder()
                 .register(sagaType)
                 .storage(storage)
@@ -216,7 +229,15 @@ public final class DifferentialRun {
                 .sagaIds(sagaIdSequence());
         clientObjects.forEach(object -> builder.register(object.getClass()));
         engineFixtures.aggregates().forEach(builder::register);
-        return builder.build();
+        SagaEngine built = builder.build();
+        built.start();
+        return built;
+    }
+
+    private static Set<Object> clientObjects(Fixtures fixtures) {
+        Set<Object> clientObjects = new LinkedHashSet<>(fixtures.handlers());
+        clientObjects.addAll(fixtures.repositories());
+        return clientObjects;
     }
 
     private static List<InstanceView> views(List<SagaInstance> instances) {
