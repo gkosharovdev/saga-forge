@@ -6,6 +6,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code saga_context.saga_id} references {@code saga_instance} (research.md §8). Every {@link Instant} is
  * truncated to microseconds, the {@code timestamptz} precision ({@code .specify/memory/memory.md} G-003-05).
  */
+@Tag("container")
 class PostgresSagaContextStoreTest {
 
     private static final String SAGA_TYPE = "com.example.OrderProcessingSaga";

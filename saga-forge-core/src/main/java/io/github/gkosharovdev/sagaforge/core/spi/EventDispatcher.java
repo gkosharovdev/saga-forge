@@ -1,7 +1,8 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 /**
- * SPI for pub/sub event delivery to saga instances.
+ * SPI for outbound pub/sub event delivery: the engine hands an event to the transport, which delivers it to the
+ * {@link EventReceiver}s that consume it.
  *
  * <p>This interface is <strong>transport-agnostic</strong>. It makes no assumptions about
  * whether the event publisher and the target saga instance reside in the same JVM process.
@@ -17,18 +18,23 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * modules that depend only on {@code saga-forge-core} and the respective transport client
  * library.</p>
  *
+ * <h3>Outbound only</h3>
+ * <p>The dispatcher routes nothing to saga instances. Routing and correlation belong to the engine: a transport
+ * delivers every event to {@link EventReceiver#receive(Object)}, and the engine resolves the saga types and
+ * instances it triggers.</p>
+ *
  * <h3>Relationship to the saga-scoped unit of work</h3>
- * <p>This SPI is also the after-commit delivery path for domain events recorded inside a
- * saga-scoped unit of work. An event recorded with
+ * <p>An event recorded with
  * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} (or published
  * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher}, which inside a unit
  * of work is equivalent) that does not trigger a step of the saga instance owning the unit of work
- * is buffered and handed to {@link #dispatch(Object)} only after that unit of work commits; the
- * buffer is discarded on rollback. The same applies to events recorded in the non-saga unit of
- * work that {@code CommandGateway.send} opens when called outside any unit of work. Events that
- * do trigger a step of the owning instance (same event type, same {@code associationProperty}
- * value) are delivered in-process within the same unit of work and never reach this SPI. Only an
- * event published through {@code EventPublisher} outside any unit of work is handed to
+ * is buffered and handed on only after that unit of work commits, through the after-commit handoff
+ * ({@link EventHandoff}), whose default calls {@link #dispatch(Object)}; the buffer is discarded on
+ * rollback. The same applies to events recorded in the non-saga unit of work that
+ * {@code CommandGateway.send} opens when called outside any unit of work. Events that do trigger a
+ * step of the owning instance (same event type, same {@code associationProperty} value) are
+ * delivered in-process within the same unit of work and never reach this SPI. Only an event
+ * published through {@code EventPublisher} outside any unit of work is handed to
  * {@link #dispatch(Object)} immediately.</p>
  *
  * <p>Implementations therefore never observe an event whose unit of work rolled back.</p>
@@ -37,9 +43,9 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * <ul>
  *   <li><strong>Serialization</strong>: Distributed implementations must handle serialization
  *       and deserialization of domain event objects for cross-instance transport.</li>
- *   <li><strong>Event routing</strong>: Implementations must route events to the correct saga
- *       instance based on association property correlation, regardless of which application
- *       instance hosts that saga.</li>
+ *   <li><strong>Subscriptions</strong>: {@link #registerSagaType(Class)} tells the transport which
+ *       saga types, and so which event types, the engine consumes, for example to subscribe to
+ *       the right topics.</li>
  *   <li><strong>Delivery semantics</strong>: Implementations should document their delivery
  *       guarantees (at-least-once, exactly-once). The SPI does not prescribe a specific
  *       delivery semantic — this is a transport-level concern.</li>
@@ -56,13 +62,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 public interface EventDispatcher {
 
     /**
-     * Dispatches a domain event to all saga instances whose association property value
-     * matches the corresponding field value in the event.
-     *
-     * <p>The implementation is responsible for resolving which saga instances (if any)
-     * should receive this event based on {@code @SagaStep} association property
-     * correlation. If the event matches a {@code @StartSaga} step and no existing
-     * instance correlates, a new saga instance may be created.</p>
+     * Hands a domain event to the transport for delivery to the {@link EventReceiver}s that consume it.
      *
      * @param domainEvent the domain event to dispatch; must not be {@code null}
      * @throws IllegalArgumentException if {@code domainEvent} is {@code null}
@@ -70,12 +70,11 @@ public interface EventDispatcher {
     void dispatch(Object domainEvent);
 
     /**
-     * Registers a saga type so the dispatcher can route events to instances of that saga.
+     * Tells the transport that the engine consumes events of the given saga type.
      *
-     * <p>Implementations use the registered saga class to discover {@code @SagaStep}
-     * methods and their association properties, enabling correct event-to-saga routing.
-     * This method is typically called at startup by the saga engine during annotation
-     * scanning.</p>
+     * <p>The engine calls it once per registered saga type when it starts, before it accepts the first event.
+     * Implementations may use the saga class's {@code @SagaStep} methods to learn which event types to subscribe
+     * to. A thrown exception refuses the engine's start.</p>
      *
      * @param sagaClass the {@code @Saga}-annotated class to register; must not be {@code null}
      * @throws IllegalArgumentException if {@code sagaClass} is {@code null}

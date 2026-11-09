@@ -12,8 +12,8 @@ import java.util.Map;
  *
  * @param sagaId           unique identifier
  * @param sagaType         fully qualified class name of the @Saga class
- * @param state            serialized fields of the saga class itself (not {@code SagaContext} values,
- *                         which live in {@link SagaContextRecord}); an unmodifiable defensive copy
+ * @param state            reserved; not populated by the engine. Values that must survive between steps belong
+ *                         in {@code SagaContext} (a {@link SagaContextRecord}); an unmodifiable defensive copy
  * @param associations     association property -> value mappings; an unmodifiable defensive copy
  * @param status           current lifecycle status
  * @param createdAt        creation timestamp

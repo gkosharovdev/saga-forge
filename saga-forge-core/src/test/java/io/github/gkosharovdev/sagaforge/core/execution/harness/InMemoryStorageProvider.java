@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 
 /**
@@ -20,24 +21,38 @@ import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
  * record, copying the map is a full snapshot.</p>
  *
  * <p>Instances are kept in insertion order, so {@link #findByAssociation(String, String)} and {@link #all()}
- * return a deterministic order. Not thread-safe.</p>
+ * return a deterministic order. Lifecycle entries handed to {@link #save(SagaInstance, List)} are appended to a
+ * per-{@code sagaId} {@link #history(String)}, which snapshots, restores and copies include. Not thread-safe.</p>
  */
 public final class InMemoryStorageProvider implements StorageProvider {
 
     private final Map<String, SagaInstance> instances = new LinkedHashMap<>();
+    private final Map<String, List<SagaLifecycleEntry>> histories = new LinkedHashMap<>();
 
     @Override
-    public void save(SagaInstance instance) {
-        if (instance == null) {
-            throw new IllegalArgumentException("instance must not be null");
-        }
+    public void save(SagaInstance instance, List<SagaLifecycleEntry> newEntries) {
+        requireWritable(instance, newEntries);
         instances.put(instance.sagaId(), instance);
+        histories.computeIfAbsent(instance.sagaId(), sagaId -> new ArrayList<>()).addAll(newEntries);
     }
 
     @Override
     public Optional<SagaInstance> findById(String sagaId) {
         requireSagaId(sagaId);
         return Optional.ofNullable(instances.get(sagaId));
+    }
+
+    /**
+     * Returns {@link #findById(String)}. The harness is single-threaded and has no transactions, so this neither
+     * locks nor requires an active transaction. The engine never uses this class.
+     *
+     * @param sagaId the saga instance identifier; must not be {@code null}
+     * @return an {@link Optional} containing the saga instance, or empty if not found
+     * @throws IllegalArgumentException if {@code sagaId} is {@code null}
+     */
+    @Override
+    public Optional<SagaInstance> findByIdAndLock(String sagaId) {
+        return findById(sagaId);
     }
 
     @Override
@@ -73,7 +88,20 @@ public final class InMemoryStorageProvider implements StorageProvider {
     }
 
     /**
-     * Returns a new, independent provider holding the same instances in the same order. {@link SagaInstance}
+     * Returns the lifecycle entries recorded for an instance, in the order they were handed over.
+     *
+     * @param sagaId the saga instance identifier; must not be {@code null}
+     * @return an unmodifiable list of entries; empty if none were recorded; never {@code null}
+     * @throws IllegalArgumentException if {@code sagaId} is {@code null}
+     */
+    public List<SagaLifecycleEntry> history(String sagaId) {
+        requireSagaId(sagaId);
+        return List.copyOf(histories.getOrDefault(sagaId, List.of()));
+    }
+
+    /**
+     * Returns a new, independent provider holding the same instances in the same order, and the same lifecycle
+     * histories. {@link SagaInstance}
      * is an immutable record, so sharing the instances shares no mutable memory: later writes to either
      * provider are invisible to the other.
      *
@@ -82,6 +110,7 @@ public final class InMemoryStorageProvider implements StorageProvider {
     public InMemoryStorageProvider copy() {
         InMemoryStorageProvider copy = new InMemoryStorageProvider();
         copy.instances.putAll(instances);
+        copy.histories.putAll(copyHistories(histories));
         return copy;
     }
 
@@ -91,7 +120,7 @@ public final class InMemoryStorageProvider implements StorageProvider {
      * @return an opaque snapshot, accepted only by {@link #restore(Object)} of this class
      */
     public Object snapshot() {
-        return new Snapshot(new LinkedHashMap<>(instances));
+        return new Snapshot(new LinkedHashMap<>(instances), copyHistories(histories));
     }
 
     /**
@@ -107,6 +136,32 @@ public final class InMemoryStorageProvider implements StorageProvider {
         }
         instances.clear();
         instances.putAll(s.instances());
+        histories.clear();
+        histories.putAll(copyHistories(s.histories()));
+    }
+
+    private static Map<String, List<SagaLifecycleEntry>> copyHistories(Map<String, List<SagaLifecycleEntry>> source) {
+        Map<String, List<SagaLifecycleEntry>> copy = new LinkedHashMap<>();
+        source.forEach((sagaId, entries) -> copy.put(sagaId, new ArrayList<>(entries)));
+        return copy;
+    }
+
+    private static void requireWritable(SagaInstance instance, List<SagaLifecycleEntry> newEntries) {
+        if (instance == null) {
+            throw new IllegalArgumentException("instance must not be null");
+        }
+        if (newEntries == null) {
+            throw new IllegalArgumentException("newEntries must not be null");
+        }
+        for (SagaLifecycleEntry entry : newEntries) {
+            if (entry == null) {
+                throw new IllegalArgumentException("newEntries must not contain null elements");
+            }
+            if (!entry.sagaId().equals(instance.sagaId())) {
+                throw new IllegalArgumentException("entry sagaId " + entry.sagaId()
+                    + " differs from instance sagaId " + instance.sagaId());
+            }
+        }
     }
 
     private static void requireSagaId(String sagaId) {
@@ -115,6 +170,6 @@ public final class InMemoryStorageProvider implements StorageProvider {
         }
     }
 
-    private record Snapshot(Map<String, SagaInstance> instances) {
+    private record Snapshot(Map<String, SagaInstance> instances, Map<String, List<SagaLifecycleEntry>> histories) {
     }
 }

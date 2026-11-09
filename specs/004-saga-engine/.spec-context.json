@@ -1,0 +1,722 @@
+{
+  "workflow": "speckit",
+  "specName": "Saga Engine Runtime",
+  "branch": "004-saga-engine",
+  "currentStep": "implement",
+  "status": "implementing",
+  "history": [
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-06T08:14:51.000Z"
+    },
+    {
+      "step": "specify",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-06T09:27:16.965Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-06T09:28:49.552Z"
+    },
+    {
+      "step": "plan",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-06T09:50:10.108Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-06T09:56:00.156Z"
+    },
+    {
+      "step": "tasks",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-06T10:49:50.526Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-06T12:59:46.237Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T001",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:02:04.344Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T002",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:02:04.494Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T003",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:03:27.462Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T004",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:05:04.688Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T005",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:05:04.817Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T006",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T13:05:04.965Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T007",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:34:02.913Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T009",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:34:19.584Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T008",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:34:20.137Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T010",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:34:20.793Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T011",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:34:22.023Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T012",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:39:50.147Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T013",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:39:51.486Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T014",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:39:53.852Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T015",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:39:55.588Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T016",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:48:00.558Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T017",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:48:01.502Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T018",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T14:48:02.817Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T019",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T15:48:47.560Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T020",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T15:48:48.921Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T021",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T15:48:49.939Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T022",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T15:48:52.162Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T023",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:28:28.852Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T024",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:38:44.202Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T025",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:38:46.269Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T026",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:38:48.191Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T027",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:40:36.780Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T028",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-06T16:42:46.310Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T029",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:27:43.163Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T030",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:30:24.220Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T031",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:30:25.786Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T032",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:30:28.559Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T033",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:30:30.597Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T034",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:32:25.125Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T035",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:33:44.983Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T036",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:33:52.245Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T037",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:35:55.228Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T038",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:36:03.080Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T039",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:36:09.954Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T040",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:37:15.085Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T041",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:37:17.005Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T042",
+      "kind": "complete",
+      "by": "ai",
+      "at": "2026-11-09T09:38:49.416Z"
+    }
+  ],
+  "currentTask": "T042",
+  "task_summaries": {
+    "T001": {
+      "status": "DONE",
+      "did": "Postgres pom: surefire 3.2.5 excludedGroups=${saga.excludedTestGroups} (default container) and container-tests profile",
+      "files": [
+        "saga-forge-storage-postgres/pom.xml"
+      ]
+    },
+    "T002": {
+      "status": "DONE",
+      "did": "@Tag(\"container\") on the five container classes; PostgresTestSupport Javadoc requires the tag",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/SchemaTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresSagaContextStoreTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/ConcurrencyControlTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresTestSupport.java"
+      ]
+    },
+    "T003": {
+      "status": "DONE",
+      "did": "Checkpoint P1: tag on exactly 5 classes, pom has excludedGroups+profile; postgres -am clean verify with -Dtest fence BUILD SUCCESS (core 363, postgres 33), container guard clean"
+    },
+    "T004": {
+      "status": "DONE",
+      "did": "Root pom: saga-forge-engine module after saga-forge-core",
+      "files": [
+        "pom.xml"
+      ]
+    },
+    "T005": {
+      "status": "DONE",
+      "did": "saga-forge-engine module: pom (core only + test deps + core test-jar, jar-plugin 3.4.1 test-jar goal), engine and engine.internal package-info",
+      "files": [
+        "saga-forge-engine/pom.xml",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/package-info.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/package-info.java"
+      ]
+    },
+    "T006": {
+      "status": "DONE",
+      "did": "Core pom: maven-jar-plugin 3.4.1 test-jar goal (harness/fixtures as saga-forge-core:test-jar)",
+      "files": [
+        "saga-forge-core/pom.xml"
+      ]
+    },
+    "T007": {
+      "status": "DONE",
+      "did": "core.spi TransactionBoundary (begin/current/isActive) and LocalTransaction (commit/rollback/setRollbackOnly/isRollbackOnly/resource) with never-joins, ended-transaction, rollback-only, JTA/Spring mapping table and joining rules",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/TransactionBoundary.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/LocalTransaction.java"
+      ]
+    },
+    "T009": {
+      "status": "DONE",
+      "did": "core.spi EventHandoff (Timing AFTER_COMMIT/IN_TRANSACTION, default AFTER_COMMIT, handOff) and HandedOffEvents record with identity/events rules and List.copyOf",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventHandoff.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/HandedOffEvents.java"
+      ]
+    },
+    "T008": {
+      "status": "DONE",
+      "did": "core.spi EventReceiver, HandlingOutcome (7 values), SagaHandlingResult record with present-iff and handoffFailures rules, HandlingReport (ignored iff no results), EventHandlingException (report, first cause, rest suppressed)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventReceiver.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/HandlingOutcome.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaHandlingResult.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/HandlingReport.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventHandlingException.java"
+      ]
+    },
+    "T010": {
+      "status": "DONE",
+      "did": "core.spi SagaConcurrencyConflictException (public, non-final, unchecked, sagaId())",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaConcurrencyConflictException.java"
+      ]
+    },
+    "T011": {
+      "status": "DONE",
+      "did": "core.spi HandlerParameterResolver (supports/resolve over Executable+Parameter) and SagaObjectProvider (supports/newInstance), host-only Javadoc",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/HandlerParameterResolver.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaObjectProvider.java"
+      ]
+    },
+    "T012": {
+      "status": "DONE",
+      "did": "StorageProvider: abstract save(instance, newEntries), default save(instance)=save(instance, List.of()), abstract findByIdAndLock; class Javadoc rewritten (three engine writes, joining, no derivation, extended null-safety list)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/StorageProvider.java"
+      ]
+    },
+    "T013": {
+      "status": "DONE",
+      "did": "SagaLifecycleEntry loses sequenceNumber (7 components, rules unchanged); Javadoc of entry and SagaLifecycleEventKind rewritten (engine-produced, hand-over order, storage-assigned position, no RUNNING kind)",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEntry.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEventKind.java"
+      ]
+    },
+    "T014": {
+      "status": "DONE",
+      "did": "Javadoc only: EventDispatcher outbound only (dispatch to transport/EventReceivers, registerSagaType once at start, after-commit via EventHandoff); SagaLifecycle: engine resolves via findByAssociation behind EventReceiver, persists snapshots with the three writes",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/EventDispatcher.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/lifecycle/SagaLifecycle.java"
+      ]
+    },
+    "T015": {
+      "status": "DONE",
+      "did": "Javadoc only: SagaInstance.state reserved; SagaContextStore write order after creation write, never joins; DomainEventRecorder/EventPublisher/CommandGateway after-commit via EventHandoff (default dispatch); HandlerInstanceProvider covers loader/saver hosts, looked up on first use",
+      "files": [
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaInstance.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/SagaContextStore.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/DomainEventRecorder.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/event/EventPublisher.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/command/CommandGateway.java",
+        "saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/spi/HandlerInstanceProvider.java"
+      ]
+    },
+    "T016": {
+      "status": "DONE",
+      "did": "HandlingReportTest (SagaHandlingResult rules, handoffFailures copy, ignored iff no results, EventHandlingException report/cause/suppressed) and HandedOffEventsTest (saga-scoped/non-saga, rejections, defensive copy)",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/spi/HandlingReportTest.java",
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/spi/HandedOffEventsTest.java"
+      ]
+    },
+    "T017": {
+      "status": "DONE",
+      "did": "SagaLifecycleEntryTest: sequenceNumber argument dropped, negativeSequenceRejected and sequenceNumber() assertion removed",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/spi/SagaLifecycleEntryTest.java"
+      ]
+    },
+    "T018": {
+      "status": "DONE",
+      "did": "Harness InMemoryStorageProvider: save(instance, entries) with T012 validation and per-sagaId history(sagaId) in snapshot/restore/copy, findByIdAndLock = findById; HarnessStoresTest nested StorageHistoryTests",
+      "files": [
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/execution/harness/InMemoryStorageProvider.java",
+        "saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/execution/harness/HarnessStoresTest.java"
+      ]
+    },
+    "T019": {
+      "status": "DONE",
+      "did": "git mv LifecycleHistoryDerivation -> ForwardTransition (requireForwardTransition only, derive and its helpers deleted, Javadoc: defense in depth, never derives); ForwardTransitionPropertyTest renamed refs, reSavingTheSameSnapshotIsAccepted without derive/next; LifecycleHistoryDerivationTest deleted (git rm)",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/ForwardTransition.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/ForwardTransitionPropertyTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryDerivationTest.java"
+      ]
+    },
+    "T020": {
+      "status": "DONE",
+      "did": "LifecycleEntryRows (package-private): INSERT_HISTORY moved here, pure number(entries, first) -> Numbered, insertAll batch binding the eleven columns; LifecycleEntryRowsTest (pure)",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleEntryRows.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleEntryRowsTest.java"
+      ]
+    },
+    "T021": {
+      "status": "DONE",
+      "did": "ConcurrentSagaUpdateException extends core SagaConcurrencyConflictException (sagaId via super, own field/accessor removed, message format and serialVersionUID kept)",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/ConcurrentSagaUpdateException.java"
+      ]
+    },
+    "T022": {
+      "status": "DONE",
+      "did": "PostgresStorageProvider own-transaction mode: save(instance, entries) with arg checks before SQL, ForwardTransition check, MAX+1 numbering via LifecycleEntryRows.insertAll; save(instance) override and insertHistory removed; findByIdAndLock IAE for null else IllegalStateException (no boundary); Javadoc rewritten; LOCK_PREVIOUS still FOR UPDATE OF i",
+      "files": [
+        "saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java"
+      ]
+    },
+    "T023": {
+      "status": "DONE",
+      "did": "Container classes to the explicit-entries write contract, edited and compiled only (never run): LifecycleHistoryTest (entries per save, saveWithoutEntriesAddsNoRow, oneSaveKeepsHandOverOrder, entriesAppendAfterExistingHistory), PostgresStorageProviderTest (nullRules for entries; Atomicity hands entries), ConcurrencyControlTest (Write pairs with explicit entries; identicalConcurrentSaves hands none)",
+      "files": [
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/LifecycleHistoryTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderTest.java",
+        "saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/ConcurrencyControlTest.java"
+      ]
+    },
+    "T024": {
+      "status": "DONE",
+      "did": "engine support InMemoryTransactionBoundary: thread-bound LocalTransactions, begin rejects a second on the thread, ended/rollback-only rules, per-transaction Scope (onCommit/onRollback/onEnd) via resource(Scope.class), Snapshottable participants snapshot/restore, begin/commit/rollback counts and per-thread history, failNextCommit",
+      "files": [
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/InMemoryTransactionBoundary.java"
+      ]
+    },
+    "T025": {
+      "status": "DONE",
+      "did": "engine support TransactionalInMemoryStorageProvider: writes buffered per transaction Scope (applied on commit, dropped on rollback, own writes visible), immediate outside; store-numbered StoredEntry history; findByIdAndLock with fair per-sagaId lock owned by the transaction, released onEnd; fault injection (failNextSave, conflictOnNextSave, failNextFindByIdAndLock); committed() view; saveCalls()",
+      "files": [
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/TransactionalInMemoryStorageProvider.java"
+      ]
+    },
+    "T026": {
+      "status": "DONE",
+      "did": "engine support CapturingEventHandoff (afterCommit/inTransaction factories, received/committed, failNext, optional delegate), RecordingLogger (System.Logger, event+key=value parsing, records/byEvent), TestTransport (EventDispatcher only, connect/deliver/loopBack, reports/dispatched/registeredSagaTypes), ConcurrentSagaContextStore",
+      "files": [
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/CapturingEventHandoff.java",
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/RecordingLogger.java",
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/TestTransport.java",
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/ConcurrentSagaContextStore.java"
+      ]
+    },
+    "T027": {
+      "status": "DONE",
+      "did": "engine support TestDoublesTest: boundary begin/commit/rollback/rollback-only/second-begin/ended rules, participants, commit-failure injection; storage double visibility, rollback discard, numbering, lock without tx, blocking second lock with timeout, conflict/save/lock injection; CapturingEventHandoff IN_TRANSACTION and AFTER_COMMIT; RecordingLogger parsing",
+      "files": [
+        "saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/support/TestDoublesTest.java"
+      ]
+    },
+    "T028": {
+      "status": "DONE",
+      "did": "Checkpoint P2: core,engine,postgres -am clean verify BUILD SUCCESS; Tests run core 384, engine 19, postgres 25, 0 failures; container classes compiled not run; guard clean; podman shows no postgres/testcontainers/ryuk"
+    },
+    "T029": {
+      "status": "DONE",
+      "did": "Reflection: property readers, @AggregateIdentifier (ClassValue cache), @SagaId/typed fields, no-arg ctor, annotated members, invoke/construct unwrapping ITE",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/Reflection.java"
+      ]
+    },
+    "T030": {
+      "status": "DONE",
+      "did": "SagaModel: Step record keyed by exact event class, start step, sorted step names, precomputed association readers, injection of @SagaId/SagaContext/CommandGateway, no-arg instantiation",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/SagaModel.java"
+      ]
+    },
+    "T031": {
+      "status": "DONE",
+      "did": "Diagnostics over System.Logger: one method per diagnostics.md row (14 event names), key=value lines omitting unknown keys, lazy suppliers below INFO, throwables attached",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/Diagnostics.java"
+      ]
+    },
+    "T032": {
+      "status": "DONE",
+      "did": "EngineSagaContext: write-through SagaContext per sagaId over any SagaContextStore, 001/002 value semantics ported from HarnessSagaContext",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineSagaContext.java"
+      ]
+    },
+    "T033": {
+      "status": "DONE",
+      "did": "EngineSagaLifecycle: per-write working copy, duplicate check via findByAssociation, transitions yield CREATED/STEP_COMPLETED/COMPLETED/FAILED entries, load + drain; TimeAndIdentity value for clock and id suppliers",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineSagaLifecycle.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/TimeAndIdentity.java"
+      ]
+    },
+    "T034": {
+      "status": "DONE",
+      "did": "AggregateAccess: client loader/saver discovered on registered classes, hosts from HandlerInstanceProvider per use, ordered AggregateResolvers (first supporting wins for load and save)",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/AggregateAccess.java"
+      ]
+    },
+    "T035": {
+      "status": "DONE",
+      "did": "EngineCommandGateway: routing table (service, aggregate instance, creation), @Command arg by engine + HandlerParameterResolvers chosen at start, rollback-only + failed() report before rethrow, non-saga unit of work outside; UnitOfWork interface, LocalTransactions, EngineSettings",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineCommandGateway.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/UnitOfWork.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/LocalTransactions.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineSettings.java"
+      ]
+    },
+    "T036": {
+      "status": "DONE",
+      "did": "NonSagaUnitOfWork: one LocalTransaction around the handler, binds itself via DomainEventScope.runWith, commit then one HandedOffEvents(uow,null,null,events); failure/rollback-only rolls back, discards, rethrows first reported failure",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/NonSagaUnitOfWork.java"
+      ]
+    },
+    "T037": {
+      "status": "DONE",
+      "did": "EngineEventPublisher: validates, DomainEvents.record when a recorder is bound, else immediate EventDispatcher.dispatch without loop-back",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineEventPublisher.java"
+      ]
+    },
+    "T038": {
+      "status": "DONE",
+      "did": "SagaUnitOfWork: begin, findByIdAndLock re-check (UNMATCHED/UNEXPECTED/NOT_HANDLED), context + fresh saga object + injection, steps in recording order with queue/buffer, save(instance, entries), commit, after-commit handoff; transitional rollback+rethrow on failure",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/SagaUnitOfWork.java"
+      ]
+    },
+    "T039": {
+      "status": "DONE",
+      "did": "EventRouter: validate-first, ignored report, per saga type start (duplicate check, own-transaction creation write, first unit of work) or fan-out over findByAssociation (UNMATCHED/UNEXPECTED)",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EventRouter.java"
+      ]
+    },
+    "T040": {
+      "status": "DONE",
+      "did": "DispatchingEventHandoff: AFTER_COMMIT, dispatch each event in order, attempts all, throws first failure with the rest suppressed; at-most-once Javadoc (G-ENG-07)",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/DispatchingEventHandoff.java"
+      ]
+    },
+    "T041": {
+      "status": "DONE",
+      "did": "StartupReport record (copies, no nulls, isValid, allErrors) and SagaEngineStartupException (report(), header line then one error per line)",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/StartupReport.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/SagaEngineStartupException.java"
+      ]
+    },
+    "T042": {
+      "status": "DONE",
+      "did": "SagaEngine (EventReceiver) + Builder per engine-startup.md: BUILT/STARTED/REFUSED, validateAll then EngineRuntime assembly, registerSagaType in order, guarded commandGateway/eventPublisher; EngineRuntime composition root in internal",
+      "files": [
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/SagaEngine.java",
+        "saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/EngineRuntime.java"
+      ]
+    }
+  }
+}

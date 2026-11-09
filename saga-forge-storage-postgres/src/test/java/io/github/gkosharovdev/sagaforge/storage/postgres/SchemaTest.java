@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
@@ -19,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code CHECK} constraints back {@code SagaInstance}'s invariants (FR-011, defense in depth), and deleting an
  * instance row cascades to every dependent table.
  */
+@Tag("container")
 class SchemaTest {
 
     private static final String CHECK_VIOLATION = "23514";

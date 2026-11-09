@@ -3,12 +3,15 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -37,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * committed; both see the same snapshot. Every {@link Instant} is truncated to microseconds
  * ({@code .specify/memory/memory.md} G-003-05).</p>
  */
+@Tag("container")
 class ConcurrencyControlTest {
 
     private static final String SAGA_ID = "s-1";
@@ -75,11 +79,25 @@ class ConcurrencyControlTest {
         return instance(SagaStatus.RUNNING, modifiedAt, a, b, null, null);
     }
 
+    private static SagaLifecycleEntry createdEntry() {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.CREATED, null, List.of(), null, null,
+                CREATED_AT);
+    }
+
+    private static SagaLifecycleEntry stepCompleted(String step, AggregateReference touched) {
+        return new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.STEP_COMPLETED, step, List.of(touched), null,
+                null, T1);
+    }
+
+    /** One {@code save(snapshot, entries)} call of a concurrent pair. */
+    private record Write(SagaInstance snapshot, List<SagaLifecycleEntry> entries) {
+    }
+
     /** The shared {@code previous} both writers read: created, nothing completed. */
     private SagaInstance savedInitial() {
         SagaInstance initial = instance(SagaStatus.CREATED, CREATED_AT, StepRecord.notRun(), StepRecord.notRun(),
                 null, null);
-        provider.save(initial);
+        provider.save(initial, List.of(createdEntry()));
         return initial;
     }
 
@@ -88,15 +106,15 @@ class ConcurrencyControlTest {
                 "SELECT * FROM saga_lifecycle_history WHERE saga_id = ? ORDER BY sequence_number", SAGA_ID);
     }
 
-    /** Saves {@code first} and {@code second} from two threads released together; one result per snapshot. */
-    private List<Throwable> saveConcurrently(SagaInstance first, SagaInstance second) throws Exception {
+    /** Runs {@code first} and {@code second} from two threads released together; one result per write. */
+    private List<Throwable> saveConcurrently(Write first, Write second) throws Exception {
         CyclicBarrier barrier = new CyclicBarrier(2);
         List<Future<?>> futures = new ArrayList<>();
-        for (SagaInstance snapshot : List.of(first, second)) {
+        for (Write write : List.of(first, second)) {
             PostgresStorageProvider own = new PostgresStorageProvider(PostgresTestSupport.newDataSource());
             futures.add(executor.submit(() -> {
                 barrier.await(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                own.save(snapshot);
+                own.save(write.snapshot(), write.entries());
                 return null;
             }));
         }
@@ -119,9 +137,9 @@ class ConcurrencyControlTest {
         SagaInstance aCompleted = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
         SagaInstance staleBCompleted = running(T2, StepRecord.notRun(), StepRecord.completed(List.of(PAYMENT_7)));
 
-        provider.save(aCompleted);
+        provider.save(aCompleted, List.of(stepCompleted("A", ORDER_42)));
 
-        assertThatThrownBy(() -> provider.save(staleBCompleted))
+        assertThatThrownBy(() -> provider.save(staleBCompleted, List.of(stepCompleted("B", PAYMENT_7))))
                 .isInstanceOf(ConcurrentSagaUpdateException.class)
                 .hasMessageContaining("A")
                 .satisfies(e -> assertThat(((ConcurrentSagaUpdateException) e).sagaId()).isEqualTo(SAGA_ID));
@@ -137,7 +155,8 @@ class ConcurrencyControlTest {
         SagaInstance aCompleted = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
         SagaInstance bCompleted = running(T1, StepRecord.notRun(), StepRecord.completed(List.of(PAYMENT_7)));
 
-        List<Throwable> outcomes = saveConcurrently(aCompleted, bCompleted);
+        List<Throwable> outcomes = saveConcurrently(new Write(aCompleted, List.of(stepCompleted("A", ORDER_42))),
+                new Write(bCompleted, List.of(stepCompleted("B", PAYMENT_7))));
 
         assertThat(outcomes).filteredOn(outcome -> outcome == null).hasSize(1);
         assertThat(outcomes).filteredOn(outcome -> outcome != null).singleElement()
@@ -150,16 +169,16 @@ class ConcurrencyControlTest {
     }
 
     @RepeatedTest(20)
-    @DisplayName("scenario 12: two identical concurrent saves both succeed and add one STEP_COMPLETED row")
+    @DisplayName("scenario 12: two identical concurrent saves without entries both succeed and add no history row")
     void identicalConcurrentSaves() throws Exception {
         savedInitial();
         SagaInstance aCompleted = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
 
-        List<Throwable> outcomes = saveConcurrently(aCompleted, aCompleted);
+        List<Throwable> outcomes = saveConcurrently(new Write(aCompleted, List.of()), new Write(aCompleted, List.of()));
 
         assertThat(outcomes).containsExactly(null, null);
         assertThat(provider.findById(SAGA_ID)).get().isEqualTo(aCompleted);
-        assertThat(history()).extracting(row -> row.get("kind")).containsExactly("CREATED", "STEP_COMPLETED");
+        assertThat(history()).extracting(row -> row.get("kind")).containsExactly("CREATED");
     }
 
     @Test
@@ -207,7 +226,8 @@ class ConcurrencyControlTest {
         SagaInstance aCompleted = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
         SagaInstance bCompleted = running(T1, StepRecord.notRun(), StepRecord.completed(List.of(PAYMENT_7)));
 
-        List<Throwable> outcomes = saveConcurrently(aCompleted, bCompleted);
+        List<Throwable> outcomes = saveConcurrently(new Write(aCompleted, List.of(createdEntry())),
+                new Write(bCompleted, List.of(createdEntry())));
 
         assertThat(outcomes).filteredOn(outcome -> outcome == null).hasSize(1);
         assertThat(outcomes).filteredOn(outcome -> outcome != null).singleElement()

@@ -1,11 +1,8 @@
 package io.github.gkosharovdev.sagaforge.core.execution.harness;
 
-import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
-import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -14,6 +11,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 
 class HarnessStoresTest {
 
@@ -105,6 +108,79 @@ class HarnessStoresTest {
         void foreignSnapshot() {
             Object foreign = new InMemoryAggregateStore().snapshot();
             assertThatThrownBy(() -> storage.restore(foreign)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("InMemoryStorageProvider lifecycle history")
+    class StorageHistoryTests {
+
+        private final InMemoryStorageProvider storage = new InMemoryStorageProvider();
+
+        private SagaLifecycleEntry created(String sagaId) {
+            return new SagaLifecycleEntry(sagaId, SagaLifecycleEventKind.CREATED, null, List.of(), null, null, NOW);
+        }
+
+        private SagaLifecycleEntry stepCompleted(String sagaId, String step) {
+            return new SagaLifecycleEntry(sagaId, SagaLifecycleEventKind.STEP_COMPLETED, step, List.of(), null, null,
+                    NOW);
+        }
+
+        @Test
+        @DisplayName("entries are appended in hand-over order across saves")
+        void appendedInOrder() {
+            SagaLifecycleEntry zeta = stepCompleted("s1", "zeta");
+            SagaLifecycleEntry alpha = stepCompleted("s1", "alpha");
+
+            storage.save(instance("s1", Map.of(), SagaStatus.CREATED), List.of(created("s1")));
+            storage.save(instance("s1", Map.of(), SagaStatus.RUNNING), List.of(zeta, alpha));
+
+            assertThat(storage.history("s1")).containsExactly(created("s1"), zeta, alpha);
+        }
+
+        @Test
+        @DisplayName("save(instance) records no history")
+        void saveWithoutEntriesAddsNone() {
+            storage.save(instance("s1", Map.of(), SagaStatus.CREATED));
+
+            assertThat(storage.findById("s1")).isPresent();
+            assertThat(storage.history("s1")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a null list, a null element or an entry of another sagaId is rejected, nothing written")
+        void invalidEntriesRejected() {
+            SagaInstance s1 = instance("s1", Map.of(), SagaStatus.CREATED);
+
+            assertThatThrownBy(() -> storage.save(s1, null)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> storage.save(s1, Arrays.asList(created("s1"), null)))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> storage.save(s1, List.of(created("s2"))))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(storage.findById("s1")).isEmpty();
+            assertThat(storage.history("s1")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("findByIdAndLock returns what findById returns, without a transaction")
+        void findByIdAndLockEqualsFindById() {
+            storage.save(instance("s1", Map.of(), SagaStatus.RUNNING));
+
+            assertThat(storage.findByIdAndLock("s1")).isEqualTo(storage.findById("s1"));
+            assertThat(storage.findByIdAndLock("missing")).isEmpty();
+            assertThatThrownBy(() -> storage.findByIdAndLock(null)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("restore brings back the history captured with the snapshot")
+        void historyRestoredWithSnapshot() {
+            storage.save(instance("s1", Map.of(), SagaStatus.CREATED), List.of(created("s1")));
+            Object snapshot = storage.snapshot();
+
+            storage.save(instance("s1", Map.of(), SagaStatus.RUNNING), List.of(stepCompleted("s1", "alpha")));
+            storage.restore(snapshot);
+
+            assertThat(storage.history("s1")).containsExactly(created("s1"));
         }
     }
 

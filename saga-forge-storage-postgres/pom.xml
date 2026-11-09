@@ -17,6 +17,7 @@
     <properties>
         <jackson.version>3.1.7</jackson.version>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <saga.excludedTestGroups>container</saga.excludedTestGroups>
     </properties>
 
     <dependencies>
@@ -71,4 +72,25 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <excludedGroups>${saga.excludedTestGroups}</excludedGroups>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+    <profiles>
+        <!-- Runs the Testcontainers-backed classes tagged "container" (needs a container runtime) -->
+        <profile>
+            <id>container-tests</id>
+            <properties>
+                <saga.excludedTestGroups></saga.excludedTestGroups>
+            </properties>
+        </profile>
+    </profiles>
 </project>

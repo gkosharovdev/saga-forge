@@ -10,7 +10,8 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * then delegates to the bound recorder.
  *
  * <p>What the recorder does with an event (in-process delivery to the owning saga instance, or buffering for
- * {@link EventDispatcher#dispatch(Object)} after commit) is an engine concern; see
+ * delivery through the after-commit handoff ({@link EventHandoff}; by default
+ * {@link EventDispatcher#dispatch(Object)})) is an engine concern; see
  * {@code contracts/event-publisher.md}.
  */
 public interface DomainEventRecorder {

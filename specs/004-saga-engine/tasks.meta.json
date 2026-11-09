@@ -1,0 +1,24 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "T029 [P] [US1] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/Reflection.java`": [
+      {
+        "executionId": "ce18b729-0c38-4773-b1eb-4214cde4138c",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1794216000965
+      },
+      {
+        "executionId": "ce18b729-0c38-4773-b1eb-4214cde4138c",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1794217214677
+      }
+    ],
+    "T043 [P] [US1] Create `internal/EngineSagaContextTest.java` (names, `null` rejection, type-safe reads and": [
+      {
+        "executionId": "ce18b729-0c38-4773-b1eb-4214cde4138c",
+        "chatSessionId": "sess_0e85139a-880f-44ca-827a-e566deed8628",
+        "timestamp": 1794217224696
+      }
+    ]
+  }
+}

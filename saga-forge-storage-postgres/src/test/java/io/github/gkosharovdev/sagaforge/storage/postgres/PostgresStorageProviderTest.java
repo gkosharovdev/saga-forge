@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -10,11 +11,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 
@@ -23,6 +27,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
  * FR-001 to FR-004, FR-011, SC-001). Every {@link Instant} is truncated to microseconds, the {@code timestamptz}
  * precision ({@code .specify/memory/memory.md} G-003-05).
  */
+@Tag("container")
 class PostgresStorageProviderTest {
 
     private static final String SAGA_TYPE = "com.example.OrderProcessingSaga";
@@ -48,6 +53,11 @@ class PostgresStorageProviderTest {
 
     private static SagaInstance withAssociations(String sagaId, Map<String, String> associations) {
         return running(sagaId, Map.of(), associations);
+    }
+
+    private static SagaLifecycleEntry createdEntry(String sagaId) {
+        return new SagaLifecycleEntry(sagaId, SagaLifecycleEventKind.CREATED, null, List.of(), null, null,
+                CREATED_AT);
     }
 
     /** A new provider on a new {@code DataSource}: a simulated restart. */
@@ -181,6 +191,15 @@ class PostgresStorageProviderTest {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> provider.delete(null)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> new PostgresStorageProvider(null)).isInstanceOf(IllegalArgumentException.class);
+
+            SagaInstance instance = withAssociations("s-1", Map.of("orderId", "o-1"));
+            List<SagaLifecycleEntry> withNull = Arrays.asList(createdEntry("s-1"), null);
+            assertThatThrownBy(() -> provider.save(instance, null)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> provider.save(instance, withNull)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> provider.save(instance, List.of(createdEntry("s-other"))))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(PostgresTestSupport.queryRows("SELECT * FROM saga_instance")).isEmpty();
+            assertThat(PostgresTestSupport.queryRows("SELECT * FROM saga_lifecycle_history")).isEmpty();
         }
 
         @Test
@@ -223,15 +242,18 @@ class PostgresStorageProviderTest {
         @DisplayName("scenario 10: a failed history insert leaves the pre-call snapshot and adds no history row")
         void failedHistoryInsertKeepsPreCallSnapshot() {
             SagaInstance before = created("s-1");
-            provider.save(before);
+            provider.save(before, List.of(createdEntry("s-1")));
             SagaInstance stepCompleted = new SagaInstance("s-1", SAGA_TYPE, Map.of("attempt", 2),
                     Map.of("orderId", "o-1", "paymentId", "p-7"), SagaStatus.RUNNING, CREATED_AT, MODIFIED_AT,
                     Map.of("handleOrderCreated", StepRecord.completed(List.of(new AggregateReference(ORDER, "42"))),
                             "processPayment", StepRecord.notRun()),
                     null, null);
+            List<SagaLifecycleEntry> entries = List.of(new SagaLifecycleEntry("s-1",
+                    SagaLifecycleEventKind.STEP_COMPLETED, "handleOrderCreated",
+                    List.of(new AggregateReference(ORDER, "42")), null, null, MODIFIED_AT));
             PostgresTestSupport.failOn("saga_lifecycle_history", "INSERT");
 
-            assertThatThrownBy(() -> provider.save(stepCompleted)).isInstanceOf(UncheckedSqlException.class);
+            assertThatThrownBy(() -> provider.save(stepCompleted, entries)).isInstanceOf(UncheckedSqlException.class);
 
             assertThat(restarted().findById("s-1")).get().isEqualTo(before);
             assertThat(provider.findByAssociation("paymentId", "p-7")).isEmpty();
@@ -243,7 +265,8 @@ class PostgresStorageProviderTest {
         void failedFirstSaveLeavesNothing() {
             PostgresTestSupport.failOn("saga_lifecycle_history", "INSERT");
 
-            assertThatThrownBy(() -> provider.save(created("s-new"))).isInstanceOf(UncheckedSqlException.class);
+            assertThatThrownBy(() -> provider.save(created("s-new"), List.of(createdEntry("s-new"))))
+                    .isInstanceOf(UncheckedSqlException.class);
 
             assertThat(provider.findById("s-new")).isEmpty();
             assertThat(PostgresTestSupport.queryRows("SELECT * FROM saga_instance WHERE saga_id = ?", "s-new"))
