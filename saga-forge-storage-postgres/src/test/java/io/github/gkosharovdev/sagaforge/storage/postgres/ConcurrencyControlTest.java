@@ -1,6 +1,8 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
@@ -19,20 +21,26 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
+
+import javax.sql.DataSource;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Concurrency control of {@link PostgresStorageProvider#save} against a real PostgreSQL: the {@code FOR UPDATE}
+ * Concurrency control of {@link PostgresStorageProvider} against a real PostgreSQL: the {@code FOR NO KEY UPDATE}
  * row lock plus the forward-transition check, and the first-save race check (spec US4-2, quickstart scenarios 11
- * and 12; FR-010, SC-004; contracts/concurrency-control.md).
+ * and 12; FR-010, SC-004; contracts/concurrency-control.md); and {@code findByIdAndLock} in joined
+ * {@link JdbcTransactionBoundary} transactions (specs/004-saga-engine T081; FR-025, FR-033, G-ENG-11, G-003-21).
  *
  * <p>The concurrent tests release two threads together with a {@link CyclicBarrier}, each with its own provider
  * on its own {@code DataSource}. They are deterministic whichever thread reaches the lock first: the second
@@ -235,5 +243,112 @@ class ConcurrencyControlTest {
         SagaInstance winner = outcomes.get(0) == null ? aCompleted : bCompleted;
         assertThat(provider.findById(SAGA_ID)).get().isEqualTo(winner);
         assertThat(history()).extracting(row -> row.get("kind")).containsExactly("CREATED");
+    }
+
+    // ---- findByIdAndLock in joined transactions (004 T081). Each wait is bounded by a timeout.
+
+    /** A boundary and a joining provider over a {@code DataSource} of their own: one "process". */
+    private record Joined(JdbcTransactionBoundary boundary, PostgresStorageProvider provider) {
+
+        static Joined open() {
+            DataSource dataSource = PostgresTestSupport.newDataSource();
+            JdbcTransactionBoundary boundary = new JdbcTransactionBoundary(dataSource);
+            return new Joined(boundary, new PostgresStorageProvider(dataSource, boundary));
+        }
+
+        /** Locks the instance in a new transaction, runs {@code work}, then commits. */
+        Optional<SagaInstance> lockAndCommit(Consumer<Optional<SagaInstance>> work) {
+            LocalTransaction transaction = boundary.begin();
+            try {
+                Optional<SagaInstance> locked = provider.findByIdAndLock(SAGA_ID);
+                work.accept(locked);
+                transaction.commit();
+                return locked;
+            } catch (RuntimeException e) {
+                if (boundary.isActive()) {
+                    transaction.rollback();
+                }
+                throw e;
+            }
+        }
+    }
+
+    private static final long BLOCKED_MILLIS = 500;
+
+    @Test
+    @DisplayName("findByIdAndLock blocks a second transaction on the same instance until the first commits")
+    void findByIdAndLockBlocksSecondTransactionUntilCommit() throws Exception {
+        savedInitial();
+        Joined first = Joined.open();
+        Joined second = Joined.open();
+        LocalTransaction holding = first.boundary().begin();
+        first.provider().findByIdAndLock(SAGA_ID);
+
+        Future<Optional<SagaInstance>> waiting = executor.submit(() -> second.lockAndCommit(locked -> { }));
+
+        assertThatThrownBy(() -> waiting.get(BLOCKED_MILLIS, TimeUnit.MILLISECONDS))
+                .isInstanceOf(TimeoutException.class);
+        holding.commit();
+        assertThat(waiting.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isPresent();
+    }
+
+    @Test
+    @DisplayName("after the wait, findByIdAndLock reads the winner's committed status and steps")
+    void findByIdAndLockAfterWaitReadsWinnersCommit() throws Exception {
+        savedInitial();
+        Joined first = Joined.open();
+        Joined second = Joined.open();
+        SagaInstance winner = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
+        LocalTransaction holding = first.boundary().begin();
+        first.provider().findByIdAndLock(SAGA_ID);
+        first.provider().save(winner, List.of(stepCompleted("A", ORDER_42)));
+
+        Future<Optional<SagaInstance>> waiting = executor.submit(() -> second.lockAndCommit(locked -> { }));
+        assertThatThrownBy(() -> waiting.get(BLOCKED_MILLIS, TimeUnit.MILLISECONDS))
+                .isInstanceOf(TimeoutException.class);
+        holding.commit();
+
+        SagaInstance read = waiting.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).orElseThrow();
+        assertThat(read.status()).isEqualTo(winner.status());
+        assertThat(read.steps()).isEqualTo(winner.steps());
+        // G-003-21: the association rows are not locked, so after a wait they could predate the winner's commit. The
+        // winner did not change them (the engine never does after creation), so whatever snapshot is read equals it.
+        assertThat(read.associations()).isEqualTo(winner.associations());
+    }
+
+    @Test
+    @DisplayName("findByIdAndLock does not block a context-store write for the same instance on its own connection")
+    void findByIdAndLockDoesNotBlockContextStoreWrite() throws Exception {
+        savedInitial();
+        Joined unitOfWork = Joined.open();
+        PostgresSagaContextStore contextStore = new PostgresSagaContextStore(PostgresTestSupport.newDataSource());
+        LocalTransaction holding = unitOfWork.boundary().begin();
+        unitOfWork.provider().findByIdAndLock(SAGA_ID);
+
+        Future<?> contextWrite = executor.submit(() ->
+                contextStore.save(new SagaContextRecord(SAGA_ID, Map.of("paymentId", "p-7"), T1)));
+
+        contextWrite.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        holding.rollback();
+        assertThat(contextStore.find(SAGA_ID)).isPresent();
+    }
+
+    @Test
+    @DisplayName("two serialized joined writes number their history entries consecutively")
+    void historyNumbersContinueUnderLock() {
+        savedInitial();
+        Joined process = Joined.open();
+        SagaInstance aCompleted = running(T1, StepRecord.completed(List.of(ORDER_42)), StepRecord.notRun());
+        SagaInstance bothCompleted = running(T2, StepRecord.completed(List.of(ORDER_42)),
+                StepRecord.completed(List.of(PAYMENT_7)));
+
+        process.lockAndCommit(locked -> process.provider().save(aCompleted, List.of(stepCompleted("A", ORDER_42))));
+        process.lockAndCommit(locked -> process.provider().save(bothCompleted,
+                List.of(stepCompleted("B", PAYMENT_7))));
+
+        assertThat(history()).extracting(row -> ((Number) row.get("sequence_number")).longValue())
+                .containsExactly(0L, 1L, 2L);
+        assertThat(history()).extracting(row -> row.get("kind"))
+                .containsExactly("CREATED", "STEP_COMPLETED", "STEP_COMPLETED");
     }
 }

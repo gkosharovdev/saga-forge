@@ -23,7 +23,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * {@code saga_association} row per association (schema in {@code schema.sql}, contracts/postgres-schema.md).
  *
  * <p>Every {@link #save(SagaInstance, List)} runs in one JDBC transaction on one {@link Connection} with
- * {@code autoCommit = false}: it locks and reads the persisted row ({@code SELECT ... FOR UPDATE}), rejects a
+ * {@code autoCommit = false}: it locks and reads the persisted row ({@code SELECT ... FOR NO KEY UPDATE}), rejects a
  * snapshot that is not a forward transition from it with {@link ConcurrentSagaUpdateException}
  * ({@link ForwardTransition}, contracts/concurrency-control.md), and writes the instance upsert, the association
  * replacement, and the {@code saga_lifecycle_history} rows of the entries handed over, which commit together or
@@ -42,8 +42,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * active transaction, or built from a {@link DataSource} only, every operation runs on a connection of its own as in
  * 003: {@code save} in its own transaction, reads and {@code delete} in auto-commit mode.</p>
  *
- * <p>{@link #findByIdAndLock(String)} does not lock yet and always throws {@link IllegalStateException}
- * (specs/004-saga-engine T074 adds it).</p>
+ * <p>{@link #findByIdAndLock(String)} locks only in a joined transaction ({@code FOR NO KEY UPDATE}); without one,
+ * or built from a {@link DataSource} only, it throws {@link IllegalStateException} before any SQL.</p>
  *
  * <p>The caller supplies the {@link DataSource} and owns its pooling. Every {@link SQLException} propagates as
  * {@link UncheckedSqlException}; a {@code state} value outside the {@link JsonCodec} value set fails with
@@ -82,8 +82,14 @@ public final class PostgresStorageProvider implements StorageProvider {
             + "WHERE a.association_property = ? AND a.association_value = ? "
             + "ORDER BY i.saga_id";
 
-    /** Locks the instance row (not its associations) until the save's transaction ends. */
-    private static final String LOCK_PREVIOUS = FIND_BY_ID + " FOR UPDATE OF i";
+    /**
+     * Locks the instance row (not its associations) until the transaction ends. {@code NO KEY}: no upsert here
+     * changes {@code saga_id}, and the context store's foreign-key check must not be blocked (G-ENG-11).
+     */
+    private static final String LOCK_BY_ID = FIND_BY_ID + " FOR NO KEY UPDATE OF i";
+
+    /** {@link #save}'s lock on the previous snapshot: the same statement as {@link #findByIdAndLock}. */
+    private static final String LOCK_PREVIOUS = LOCK_BY_ID;
 
     private static final String NEXT_SEQUENCE_NUMBER =
             "SELECT COALESCE(MAX(sequence_number) + 1, 0) FROM saga_lifecycle_history WHERE saga_id = ?";
@@ -129,7 +135,7 @@ public final class PostgresStorageProvider implements StorageProvider {
      * history row.
      *
      * <p>Concurrency control (contracts/concurrency-control.md, FR-010): the persisted row is locked
-     * {@code FOR UPDATE} and {@code instance} must be a forward transition from it
+     * {@code FOR NO KEY UPDATE} and {@code instance} must be a forward transition from it
      * ({@link ForwardTransition#requireForwardTransition}), checked before any write. When no row exists
      * yet there is nothing to lock, so a first save whose upsert finds a row created meanwhile by a concurrent
      * first save is rejected, even when both snapshots are identical ({@code .specify/memory/memory.md}
@@ -182,20 +188,38 @@ public final class PostgresStorageProvider implements StorageProvider {
     }
 
     /**
-     * Always fails: built without a {@code TransactionBoundary} there is no joined transaction to hold a lock in
-     * (contracts/storage-provider.md); with one, locking arrives with specs/004-saga-engine T074.
+     * Reads the instance and locks its row until the joined transaction ends ({@code SELECT ... FOR NO KEY UPDATE OF
+     * i} on the bound connection, contracts/storage-provider.md, FR-025). Another transaction locking the same
+     * {@code sagaId}, in this or another process, waits until then and then reads the committed state; locking it
+     * again in the same transaction returns at once (the row lock is the transaction's). A missing instance returns
+     * empty and locks nothing.
+     *
+     * <p><b>Why {@code NO KEY}.</b> While the unit of work holds this lock, {@link PostgresSagaContextStore} writes on
+     * a connection of its own, and its {@code saga_context} foreign-key check takes {@code FOR KEY SHARE} on this row.
+     * {@code FOR UPDATE} conflicts with that and would make the unit-of-work thread wait on its own lock across two
+     * connections, which Postgres's deadlock detection cannot see; {@code FOR NO KEY UPDATE} does not (G-ENG-11,
+     * research.md §3; reasoned from the lock-conflict table, not yet run against Postgres).</p>
+     *
+     * <p>The row is locked, not its {@code saga_association} rows: after a wait, the associations read may predate the
+     * winner's commit (G-003-21). Harmless under the engine, which never changes associations after creation.</p>
      *
      * @throws IllegalArgumentException if {@code sagaId} is {@code null}
-     * @throws IllegalStateException    otherwise, before any SQL runs
+     * @throws IllegalStateException    if no joined transaction is active (or the provider was built without a
+     *                                  {@code TransactionBoundary}), before any SQL
+     * @throws UncheckedSqlException    if the database fails or aborts the lock wait; the transaction is marked
+     *                                  rollback-only
      */
     @Override
     public Optional<SagaInstance> findByIdAndLock(String sagaId) {
         if (sagaId == null) {
             throw new IllegalArgumentException("sagaId must not be null");
         }
-        String reason = boundary.isEmpty() ? "it was built without a TransactionBoundary"
-                : "locking is not supported yet";
-        throw new IllegalStateException("PostgresStorageProvider cannot lock saga instance " + sagaId + ": " + reason);
+        LocalTransaction transaction = joinedTransaction().orElseThrow(() -> new IllegalStateException(
+                "PostgresStorageProvider cannot lock saga instance " + sagaId + ": "
+                        + (boundary.isEmpty() ? "it was built without a TransactionBoundary"
+                                : "no transaction of its TransactionBoundary is active")));
+        return onJoined(transaction, "lock saga instance " + sagaId,
+                connection -> select(connection, LOCK_BY_ID, sagaId)).stream().findFirst();
     }
 
     /**
@@ -236,7 +260,7 @@ public final class PostgresStorageProvider implements StorageProvider {
         });
     }
 
-    /** @return the persisted snapshot, its row locked {@code FOR UPDATE}, or {@code null} if there is none */
+    /** @return the persisted snapshot, its row locked {@code FOR NO KEY UPDATE}, or {@code null} if there is none */
     private static SagaInstance lockPrevious(Connection connection, String sagaId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(LOCK_PREVIOUS)) {
             statement.setString(1, sagaId);

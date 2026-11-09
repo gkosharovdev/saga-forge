@@ -10,6 +10,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.engine.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.engine.internal.EngineSagaLifecycle.PendingWrite;
+import io.github.gkosharovdev.sagaforge.engine.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaModel.Step;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Collaborators;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaUnitOfWork.Trigger;
@@ -46,7 +47,15 @@ import java.util.function.Supplier;
  * it logs {@code saga.event.notHandled} and throws {@link EventHandlingException} carrying the results that were
  * recorded and every cause. A failed creation write creates nothing and has no result of its own.</p>
  *
- * <p>T072 adds the duplicate-start and instance locks, T086 the reentrancy check.</p>
+ * <h2>Locks (FR-025, FR-027, FR-028, data-model.md "Locks")</h2>
+ * <p>Always taken in the order duplicate-start → instance → storage. A start step holds the duplicate-start lock of
+ * (saga type, association property, value) around the duplicate check and the creation write, and the new instance's
+ * lock from before the creation write until its first unit of work releases it. A non-start step takes each
+ * correlated active instance's lock in turn, one at a time, so the router never holds two instance locks and cannot
+ * deadlock itself. Different instances never wait for each other. Both locks are in-process; the storage lock
+ * ({@code findByIdAndLock}) serializes across processes.</p>
+ *
+ * <p>T086 adds the reentrancy check.</p>
  *
  * <p>Immutable; thread-safe if the host plug-ins are. Each call runs on the calling thread.</p>
  */
@@ -60,9 +69,15 @@ final class EventRouter {
         }
     }
 
+    /** The duplicate-start lock's key: one saga type's start on one association value. */
+    private record StartKey(String sagaType, String associationProperty, String associationValue) {
+    }
+
     private final List<SagaModel> sagas;
     private final Collaborators with;
     private final EngineSettings settings;
+    private final InstanceLocks startLocks = new InstanceLocks();
+    private final InstanceLocks instanceLocks = new InstanceLocks();
 
     /**
      * @param sagas the registered saga types, in registration order
@@ -108,18 +123,40 @@ final class EventRouter {
         }
     }
 
+    /**
+     * Under the duplicate-start lock: the duplicate check, then the new instance's lock, then the creation write; the
+     * duplicate-start lock is released before the first unit of work runs (FR-027, data-model.md "Locks").
+     */
     private SagaHandlingResult start(Reaction reaction) {
-        EngineSagaLifecycle lifecycle = new EngineSagaLifecycle(reaction.saga(), settings.storage(),
-                settings.sources());
-        SagaInstance created;
-        try {
-            created = lifecycle.start(reaction.saga().type(), reaction.step().associationProperty(),
-                    reaction.associationValue());
-        } catch (DuplicateSagaInstanceException duplicate) {
-            return duplicateStart(reaction);
+        Lease instanceLease;
+        String sagaId;
+        try (Lease startLease = startLocks.acquire(startKeyOf(reaction))) {
+            EngineSagaLifecycle lifecycle = new EngineSagaLifecycle(reaction.saga(), settings.storage(),
+                    settings.sources());
+            try {
+                sagaId = lifecycle.start(reaction.saga().type(), reaction.step().associationProperty(),
+                        reaction.associationValue()).sagaId();
+            } catch (DuplicateSagaInstanceException duplicate) {
+                return duplicateStart(reaction);
+            }
+            instanceLease = instanceLocks.acquire(sagaId);
+            commitCreationOrRelease(lifecycle.drain(sagaId), instanceLease);
         }
-        commitCreation(lifecycle.drain(created.sagaId()));
-        return runUnitOfWork(reaction, created.sagaId(), true);
+        return runUnitOfWork(reaction, sagaId, true, instanceLease);
+    }
+
+    private void commitCreationOrRelease(PendingWrite creation, Lease instanceLease) {
+        try {
+            commitCreation(creation);
+        } catch (RuntimeException | Error failure) {
+            instanceLease.close();
+            throw failure;
+        }
+    }
+
+    private static StartKey startKeyOf(Reaction reaction) {
+        return new StartKey(reaction.saga().typeName(), reaction.step().associationProperty(),
+                reaction.associationValue());
     }
 
     private void commitCreation(PendingWrite creation) {
@@ -147,7 +184,8 @@ final class EventRouter {
                 .filter(instance -> !EngineSagaLifecycle.isTerminal(instance.status()))
                 .toList();
         if (!active.isEmpty()) {
-            active.forEach(instance -> attempts.attempt(() -> runUnitOfWork(reaction, instance.sagaId(), false))
+            active.forEach(instance -> attempts.attempt(() -> runUnitOfWork(reaction, instance.sagaId(), false,
+                            instanceLocks.acquire(instance.sagaId())))
                     .ifPresent(attempts.results::add));
         } else if (!correlated.isEmpty()) {
             attempts.results.add(unexpected(reaction, correlated.get(correlated.size() - 1).sagaId()));
@@ -156,9 +194,15 @@ final class EventRouter {
         }
     }
 
-    private SagaHandlingResult runUnitOfWork(Reaction reaction, String sagaId, boolean started) {
-        Trigger trigger = new Trigger(reaction.saga(), reaction.step(), reaction.event(), sagaId, started);
-        return new SagaUnitOfWork(trigger, with).run();
+    /**
+     * Runs one unit of work holding {@code instanceLease}. The unit of work releases the lease at the point
+     * data-model.md row 8 or 9 names; closing it here again is a no-op that only guards the paths that raise.
+     */
+    private SagaHandlingResult runUnitOfWork(Reaction reaction, String sagaId, boolean started, Lease instanceLease) {
+        try (instanceLease) {
+            Trigger trigger = new Trigger(reaction.saga(), reaction.step(), reaction.event(), sagaId, started);
+            return new SagaUnitOfWork(trigger, with, instanceLease).run();
+        }
     }
 
     private SagaHandlingResult duplicateStart(Reaction reaction) {

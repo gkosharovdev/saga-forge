@@ -37,7 +37,7 @@ class PostgresStorageProviderJoinTest {
     private static final String SAGA_ID = "saga-1";
     private static final String SAGA_TYPE = "com.example.OrderSaga";
 
-    private static final String LOCK_PREVIOUS = "FOR UPDATE OF i";
+    private static final String LOCK_PREVIOUS = "FOR NO KEY UPDATE OF i";
     private static final String NEXT_SEQUENCE = "MAX(sequence_number)";
     private static final String UPSERT = "INSERT INTO saga_instance";
     private static final String INSERT_HISTORY = "INSERT INTO saga_lifecycle_history";

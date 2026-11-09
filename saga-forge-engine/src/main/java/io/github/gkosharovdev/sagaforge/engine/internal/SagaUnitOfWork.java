@@ -7,12 +7,14 @@ import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.engine.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.engine.internal.EngineSagaLifecycle.PendingWrite;
+import io.github.gkosharovdev.sagaforge.engine.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaModel.Injection;
 import io.github.gkosharovdev.sagaforge.engine.internal.SagaModel.Step;
 import java.util.ArrayDeque;
@@ -57,8 +59,14 @@ import java.util.Optional;
  * {@link SagaFailure} naming the step running or last run (the {@code @EndSaga} step for a write or commit failure)
  * and the first reported cause, and the result is {@code FAILED}. A failure of the {@code FAILED} write propagates,
  * as does a failure of the locked read itself (store unavailable): no outcome was recorded (FR-005).</p>
- * <p>T073 adds the instance lock and the conflict path; T084 the {@code IN_TRANSACTION} handoff between the write
- * and the commit, and handoff-failure collection.</p>
+ * <h2>Conflict and the instance lock (FR-025, FR-026, data-model.md rows 8 to 10)</h2>
+ * <p>A {@link SagaConcurrencyConflictException} from the instance write or the commit is no saga failure: the run
+ * rolls back and discards like a failure, writes no {@code FAILED}, logs {@code saga.uow.conflict} and reports
+ * {@code NOT_HANDLED} with its {@code unitOfWorkId}. The in-process instance lock handed in by the router is released
+ * after the commit and before the handoff, after the {@code FAILED} write, or after rolling back a run that ran
+ * nothing or conflicted.</p>
+ * <p>T084 adds the {@code IN_TRANSACTION} handoff between the write and the commit, and handoff-failure
+ * collection.</p>
  *
  * <p>Not thread-safe: confined to the thread that called {@code receive}.</p>
  */
@@ -98,13 +106,21 @@ final class SagaUnitOfWork implements UnitOfWork {
     private final List<String> stepsRun = new ArrayList<>();
     private List<AggregateReference> touched = new ArrayList<>();
     private Map<String, String> associations = Map.of();
+    private final Lease instanceLease;
     private String currentStep;
     private boolean ended;
+    private boolean writing;
     private Throwable firstFailure;
 
-    SagaUnitOfWork(Trigger trigger, Collaborators with) {
+    /**
+     * @param instanceLease the in-process lock of the instance, held by the caller; this unit of work releases it
+     *                      after its commit (before the handoff), after its {@code FAILED} write, or after rolling
+     *                      back a run that ran nothing or conflicted
+     */
+    SagaUnitOfWork(Trigger trigger, Collaborators with, Lease instanceLease) {
         this.trigger = trigger;
         this.with = with;
+        this.instanceLease = instanceLease;
         this.settings = with.settings();
         this.unitOfWorkId = settings.sources().newUnitOfWorkId();
         this.correlation = Correlation.of(trigger.event()).forSaga(trigger.saga().typeName())
@@ -127,9 +143,12 @@ final class SagaUnitOfWork implements UnitOfWork {
         try {
             runSteps();
             commit(transaction);
+        } catch (SagaConcurrencyConflictException conflict) {
+            return writing ? conflicted(transaction, conflict) : failed(transaction, conflict);
         } catch (RuntimeException | Error failure) {
             return failed(transaction, failure);
         }
+        instanceLease.close();
         with.diagnostics().unitOfWorkCommitted(correlation, outcome(), stepsRun);
         handOffBuffered();
         return committedResult();
@@ -217,6 +236,7 @@ final class SagaUnitOfWork implements UnitOfWork {
                     + trigger.sagaId() + " was marked rollback-only");
         }
         PendingWrite write = lifecycle.drain(trigger.sagaId());
+        writing = true;
         settings.storage().save(write.instance(), write.entries());
         transaction.commit();
     }
@@ -229,15 +249,35 @@ final class SagaUnitOfWork implements UnitOfWork {
         Throwable cause = firstFailure != null ? firstFailure : thrown;
         abandon(transaction, cause);
         SagaFailure failure = SagaFailure.of(currentStep, cause, settings.sources().now());
-        return new FailedWrite(trigger.saga(), settings, with.diagnostics())
+        SagaHandlingResult result = new FailedWrite(trigger.saga(), settings, with.diagnostics())
                 .record(correlation, failure, cause, trigger.started());
+        instanceLease.close();
+        return result;
+    }
+
+    /**
+     * A write-time conflict (FR-026, data-model.md row 10): rolls back and discards like a failure, but writes no
+     * {@code FAILED} and reports {@code NOT_HANDLED}, so the transport can redeliver. No in-process retry: the steps'
+     * context writes and non-transactional side effects already happened.
+     */
+    private SagaHandlingResult conflicted(LocalTransaction transaction, SagaConcurrencyConflictException conflict) {
+        discard(transaction, conflict);
+        instanceLease.close();
+        with.diagnostics().unitOfWorkConflict(correlation);
+        return new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(), HandlingOutcome.NOT_HANDLED,
+                trigger.started(), null, null, unitOfWorkId, List.of());
     }
 
     private void abandon(LocalTransaction transaction, Throwable failure) {
+        discard(transaction, failure);
+        with.diagnostics().unitOfWorkRolledBack(correlation, currentStep, failure);
+    }
+
+    /** Drops the queue and buffer and rolls back if the transaction is still active; pending entries die with it. */
+    private void discard(LocalTransaction transaction, Throwable cause) {
         queue.clear();
         recorded.clear();
-        LocalTransactions.rollBackAfter(settings.transactions(), transaction, failure);
-        with.diagnostics().unitOfWorkRolledBack(correlation, currentStep, failure);
+        LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
     }
 
     private void handOffBuffered() {
@@ -296,6 +336,7 @@ final class SagaUnitOfWork implements UnitOfWork {
 
     private Optional<SagaHandlingResult> notRun(LocalTransaction transaction, SagaHandlingResult result) {
         transaction.rollback();
+        instanceLease.close();
         return Optional.of(result);
     }
 

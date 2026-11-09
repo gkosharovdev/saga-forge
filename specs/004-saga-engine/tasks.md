@@ -749,22 +749,22 @@ instance delivered concurrently 100 times never overlap, lose no step record and
 
 ### Implementation for User Story 4
 
-- [ ] T071 [P] [US4] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/InstanceLocks.java`:
+- [x] T071 [P] [US4] Create `saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/internal/InstanceLocks.java`:
   keyed fair `ReentrantLock`s in a reference-counted `ConcurrentHashMap`, an entry removed when its last holder or
   waiter leaves; `Lease acquire(Object key)` blocks until held, `Lease.close()` releases (idempotent). Used with two
   key kinds: `sagaId` (instance lock) and `(sagaType, associationProperty, associationValue)` (duplicate-start lock).
-- [ ] T072 [US4] Extend `.../engine/internal/EventRouter.java` (shared) with the lock order of data-model.md "Locks"
+- [x] T072 [US4] Extend `.../engine/internal/EventRouter.java` (shared) with the lock order of data-model.md "Locks"
   (duplicate-start → instance → storage): a start step takes the duplicate-start lease, runs the duplicate check and
   `EngineSagaLifecycle.start`, takes the new `sagaId`'s instance lease, runs the creation write, then releases the
   duplicate-start lease (also on failure) and runs the unit of work holding the instance lease (FR-027); a non-start
   step takes each correlated instance's lease in turn before its unit of work (never two at once, so no engine-level
   deadlock). The lease is passed into `SagaUnitOfWork`, which releases it (T073).
-- [ ] T073 [US4] Extend `.../engine/internal/SagaUnitOfWork.java` (shared): release the instance lease after
+- [x] T073 [US4] Extend `.../engine/internal/SagaUnitOfWork.java` (shared): release the instance lease after
   `commit()` and before the `AFTER_COMMIT` handoff, after `FailedWrite` on failure, and after rollback for
   `UNMATCHED`/`UNEXPECTED`/`NOT_HANDLED`; a `SagaConcurrencyConflictException` from `save` or `commit` rolls back,
   discards queue, buffer and entries, writes no `FAILED`, logs `saga.uow.conflict`, and returns `NOT_HANDLED` with the
   `unitOfWorkId` (FR-026, data-model.md row 10). No in-process retry.
-- [ ] T074 [US4] Extend `saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java`
+- [x] T074 [US4] Extend `saga-forge-storage-postgres/src/main/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProvider.java`
   (shared): `findByIdAndLock` for the boundary-built provider with an active transaction runs `FIND_BY_ID + " FOR NO
   KEY UPDATE OF i"` on the bound connection and maps the row as `findById` does (`IllegalArgumentException` for
   `null`; `IllegalStateException` with no active joined transaction, before any SQL); change `LOCK_PREVIOUS` from
@@ -775,36 +775,36 @@ instance delivered concurrently 100 times never overlap, lose no step record and
 
 ### Unit tests for User Story 4
 
-- [ ] T075 [P] [US4] Create the concurrency fixture in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/concurrency/`:
+- [x] T075 [P] [US4] Create the concurrency fixture in `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/fixtures/concurrency/`:
   `@Aggregate Ticket` (`@AggregateIdentifier ticketId`); events `TicketOpened`, `SignalA`, `SignalB`, `TicketClosed`;
   `SignalSaga` (`@StartSaga onTicketOpened` waits; `onSignalA` writes context `a` and reports the `b` it saw;
   `onSignalB` writes `b` and reports the `a` it saw; `@EndSaga onTicketClosed`; all `associationProperty =
   "ticketId"`, no commands); thread-safe `StepProbe` (per-`sagaId` active count and maximum overlap, entry/exit order,
   what each step saw, an optional `CountDownLatch` to hold a step, a configurable dwell time to widen the race).
-- [ ] T076 [P] [US4] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/internal/InstanceLocksTest.java`:
+- [x] T076 [P] [US4] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/internal/InstanceLocksTest.java`:
   same key serializes two threads, different keys do not wait, entries are removed when unused, `close()` is
   idempotent.
-- [ ] T077 [US4] Create `.../engine/ConcurrentUnitsOfWorkTest.java` (Property 28; Javadoc `**Validates: Requirements
+- [x] T077 [US4] Create `.../engine/ConcurrentUnitsOfWorkTest.java` (Property 28; Javadoc `**Validates: Requirements
   FR-025, FR-026, SC-003**`): `@RepeatedTest(100)` two engines over one `TransactionalInMemoryStorageProvider` and one
   `ConcurrentSagaContextStore`, `SignalA` and `SignalB` for one waiting instance released by a barrier on two threads
   → `StepProbe` max overlap 1, both steps `COMPLETED`, both `STEP_COMPLETED` entries stored, the step that ran second
   saw the first's context value, no `FAILED` (US4-1, US4-3, quickstart 9); the same with one engine and two threads;
   first unit of work completes the saga (`TicketClosed`), the second event → `UNEXPECTED` (US4-2, quickstart 10); two
   instances, one held in a step by the latch, the other commits within a timeout (US4-5, FR-028, quickstart 12).
-- [ ] T078 [US4] Create `.../engine/ConcurrencyConflictTest.java`: `conflictOnNextSave` → result `NOT_HANDLED` with a
+- [x] T078 [US4] Create `.../engine/ConcurrencyConflictTest.java`: `conflictOnNextSave` → result `NOT_HANDLED` with a
   `unitOfWorkId`, rolled back, no `FAILED` write (`saveCalls`), no entry recorded, instance as before, context values
   written by the step kept, `saga.uow.conflict` logged via `RecordingLogger`; redelivering the event then succeeds
   (US4-4, FR-026, quickstart 11).
-- [ ] T079 [US4] Create `.../engine/ConcurrentDuplicateStartTest.java` (Property 25; Javadoc `**Validates:
+- [x] T079 [US4] Create `.../engine/ConcurrentDuplicateStartTest.java` (Property 25; Javadoc `**Validates:
   Requirements FR-027, SC-012**`): `@RepeatedTest(100)`, one engine, eight threads released by a barrier each
   receiving `TicketOpened` with the same `ticketId` → exactly one result `started = true`, seven `DUPLICATE_START`
   with `sagaId` `null`, one instance stored (quickstart 13).
-- [ ] T080 [US4] Create `saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderLockTest.java`
+- [x] T080 [US4] Create `saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PostgresStorageProviderLockTest.java`
   over `JdbcFake`: joined `findByIdAndLock` issues one statement ending in `FOR NO KEY UPDATE OF i` on the bound
   connection and maps the scripted row, or returns empty; without an active transaction, and for the
   `DataSource`-only constructor, `IllegalStateException` before any SQL; `null` → `IllegalArgumentException`; the
   `save` lock statement contains `FOR NO KEY UPDATE OF i` and no plain `FOR UPDATE`.
-- [ ] T081 [US4] Add to `.../postgres/ConcurrencyControlTest.java` (container, **edit and compile only, never run**),
+- [x] T081 [US4] Add to `.../postgres/ConcurrencyControlTest.java` (container, **edit and compile only, never run**),
   each with a lock-wait timeout: `findByIdAndLockBlocksSecondTransactionUntilCommit` (FR-025, G-ENG-11),
   `findByIdAndLockAfterWaitReadsWinnersCommit` (status and steps are the winner's; asserts and documents what the
   associations read after the wait, G-003-21), `findByIdAndLockDoesNotBlockContextStoreWrite` (a
@@ -812,7 +812,7 @@ instance delivered concurrently 100 times never overlap, lose no step record and
   `historyNumbersContinueUnderLock` (two serialized joined writes number their entries consecutively, FR-033). Use
   `JdbcTransactionBoundary` and the boundary-built provider. Compile check:
   `/opt/homebrew/bin/mvn -B -pl saga-forge-storage-postgres -am -DskipTests clean verify`.
-- [ ] T082 [US4] Checkpoint (US4). Run
+- [x] T082 [US4] Checkpoint (US4). Run
   `/opt/homebrew/bin/mvn -B -pl saga-forge-engine,saga-forge-storage-postgres -am clean verify`. Requires
   `BUILD SUCCESS`, zero failures (the 100-repetition tests included), and the container guard.
 
