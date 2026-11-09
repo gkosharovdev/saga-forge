@@ -19,10 +19,12 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
+import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider.StoredEntry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -174,6 +176,16 @@ class ResumeAcrossEnginesTest {
                 .isEqualTo(StepStatus.NOT_RUN);
         assertThat(world.bookings.load(BOOKING)).isNotNull()
                 .satisfies(booking -> assertThat(booking.claimId()).isEqualTo(Inventory.claimIdFor(BOOKING)));
+        // Quickstart scenario 17: one history across both engines, in true order, numbered consecutively.
+        List<StoredEntry> history = world.storage.history(sagaId);
+        assertThat(history).extracting(StoredEntry::sequenceNumber).containsExactly(0L, 1L, 2L, 3L, 4L, 5L);
+        assertThat(history).extracting(stored -> stored.entry().kind()).containsExactly(SagaLifecycleEventKind.CREATED,
+                SagaLifecycleEventKind.STEP_COMPLETED, SagaLifecycleEventKind.STEP_COMPLETED,
+                SagaLifecycleEventKind.STEP_COMPLETED, SagaLifecycleEventKind.STEP_COMPLETED,
+                SagaLifecycleEventKind.COMPLETED);
+        assertThat(history).extracting(stored -> stored.entry().stepName()).containsExactly(null,
+                CreateBookingSaga.START_STEP, CreateBookingSaga.AVAILABILITY_CLAIMED_STEP,
+                CreateBookingSaga.PAYMENT_CONFIRMED_STEP, CreateBookingSaga.BOOKING_CONFIRMED_STEP, null);
     }
 
     @Test

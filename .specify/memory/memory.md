@@ -15,11 +15,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   history entry, and `CREATED` is emitted even when the first `status` is `RUNNING`.
 - **Origin**: `specs/003-postgres-saga-persistence/data-model.md` "Derivation algorithm" step 2;
   `contracts/saga-lifecycle-entry.md`.
-- **Status**: open (explicitly deferred by the user, 2026-11-05). Moot for engine-driven instances under
-  `specs/004-saga-engine/spec.md` (clarified 2026-11-06): the engine produces the creation entry itself and its
-  first instance write has every step not run (FR-012, FR-033), and storage no longer derives history by diffing
-  (FR-023). Open until 004 is implemented. `specs/004-saga-engine/research.md` §4, §7 confirm it: the creation write
-  hands over `[CREATED]` with every step `NOT_RUN`, and `LifecycleHistoryDerivation.derive` is deleted.
+- **Status**: moot (004, T020 to T022, T033, T038, T039): no derivation exists any more. The engine's creation
+  write hands `[CREATED]` over with every step `NOT_RUN`, and `LifecycleHistoryDerivation` is deleted.
 
 ### G-003-02: Stale writers differing only in `state`/`associations` are not detected
 - **Description**: The forward-transition check only looks at completed steps and terminal status, so two
@@ -42,12 +39,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   order, not true execution order; `SagaInstance.steps()` carries no ordering signal. SC-003 is only fully met
   for one step per save.
 - **Origin**: `specs/003-postgres-saga-persistence/research.md` §5.
-- **Status**: resolved-by-004-spec, open until implemented. `specs/004-saga-engine/spec.md` FR-033 (clarified
-  2026-11-06): the engine produces the `SagaLifecycleEntry` values in true step order and hands them to storage
-  with each instance write, in the same transaction; FR-023 adapts the Postgres provider to persist them and drop
-  the diffing derivation, so the tiebreak goes away. SC-010 checks the order. Closes when 004 delivers it.
-  Planned in `specs/004-saga-engine/research.md` §4: `StorageProvider.save(instance, entries)`, storage numbers the
-  entries in hand-over order, `SagaLifecycleEntry.sequenceNumber` removed (pending user confirmation).
+- **Status**: closed by 004 (T020 to T022, T033, T038; verified by T048 and T059, `LifecycleHistoryTest` and
+  `LifecycleHistoryPropertyTest`): the engine hands entries over in true completion order, storage numbers them in
+  hand-over order, and the tiebreak is gone. The Postgres side is checked by the JDBC fake only (G-003-23).
 
 ### G-003-05: `timestamptz` precision is microseconds
 - **Description**: `timestamptz` stores microseconds while `Instant` holds nanoseconds, so SC-001's
@@ -137,21 +131,15 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   `incoming` produces no entry; whether that is a forward-transition violation is for T024/T025.
 - **Origin**: `saga-forge-storage-postgres/.../LifecycleHistoryDerivation.java` (T018); data-model.md
   "Derivation algorithm" step 4.
-- **Status**: open (derivation half). The forward-transition half was decided at T024: a step `COMPLETED` in
-  `previous` but missing from `incoming` is a violation (`ConcurrentSagaUpdateException`); a `NOT_RUN` step
-  missing from `incoming` is accepted. contracts/concurrency-control.md does not state this yet (T033). The
-  derivation half goes away with `specs/004-saga-engine/spec.md` FR-023/FR-033 (clarified 2026-11-06), which
-  replace the diffing derivation with engine-provided entries; the forward-transition half stays. 004 plan
-  (research §4): `LifecycleHistoryDerivation` becomes `ForwardTransition` with `requireForwardTransition` only.
+- **Status**: derivation half closed by 004 (T021, T022: `LifecycleHistoryDerivation` replaced by
+  `ForwardTransition.requireForwardTransition`); the forward-transition half stays as decided at 003 T024.
 
 ### G-003-16: The step-name tiebreak is code-unit order, not locale collation
 - **Description**: The G-003-04 tiebreak sorts with `String.compareTo` (UTF-16 code units, case-sensitive, so
   `Zeta` sorts before `alpha`). research.md §5 says "alphabetical" without fixing the comparator; another storage
   module needs the same comparator to give the same order.
 - **Origin**: `saga-forge-storage-postgres/.../LifecycleHistoryDerivation.java` (T018); research.md §5.
-- **Status**: open. Goes away with G-003-04: `specs/004-saga-engine/spec.md` FR-023/FR-033 (clarified
-  2026-11-06) remove the diffing derivation and its tiebreak, so no storage module needs a comparator. Closes
-  when 004 delivers it.
+- **Status**: closed by 004 together with G-003-04: there is no comparator any more.
 
 ### G-003-17: Concurrent first saves fail with `UncheckedSqlException` until T025
 - **Description**: Two concurrent first saves of one new `sagaId` both find no row to lock and both derive
@@ -199,7 +187,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   second statement after the lock) before any check uses them, such as a fix for G-003-02. Reasoned from
   Postgres semantics, not observed.
 - **Origin**: `saga-forge-storage-postgres/.../PostgresStorageProvider.java` `LOCK_PREVIOUS` (T019, T025).
-- **Status**: open.
+- **Status**: open. Since 004 it also applies to `findByIdAndLock` (T074, Javadoc): after a wait, the associations
+  read may predate the winner's commit; harmless under the engine, which never changes associations after creation.
+  Container test `ConcurrencyControlTest.findByIdAndLockAfterWaitReadsWinnersCommit` added (T081), not yet run.
 
 ### G-003-22: First-save race detection relies on `xmax = 0`, an implementation detail
 - **Description**: T025 detects a lost concurrent first save with `RETURNING (xmax = 0) AS inserted` on the
@@ -233,10 +223,16 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Origin**: `specs/003-postgres-saga-persistence/tasks.md` T020, T021, T025, T032; user decision at T032 to
   give up on Testcontainers testing.
 - **Status**: open. Closing it needs a run of the container-backed classes on `postgres:16-alpine` (or an
-  equivalent real Postgres) with all of them passing. Grows with 004 (`specs/004-saga-engine/research.md` §15): the
-  engine adaptation (joined connection, `findByIdAndLock` with `FOR NO KEY UPDATE`, storage-assigned history numbers,
-  `JdbcTransactionBoundary`) is verified by a statement-recording JDBC fake only; statement validity, lock blocking,
-  the lock's compatibility with the `saga_context` FK check (G-ENG-11) and cross-process serialization stay unverified.
+  equivalent real Postgres) with all of them passing. Added or changed by 004 and not yet run: T023 (tags and the
+  write-contract update of `SchemaTest`, `PostgresStorageProviderTest` with `$RoundTrip` and `$Atomicity`,
+  `PostgresSagaContextStoreTest`, `LifecycleHistoryTest`, `ConcurrencyControlTest`), T063
+  (`JoinedTransactionContainerTest`: `joinedSaveCommitsWithClientWrite`, `joinedSaveRollsBackWithClientWrite`,
+  `contextStoreWriteSurvivesJoinedRollback`, `withoutTransactionKeepsOwnTransaction`) and T081
+  (`ConcurrencyControlTest`: `findByIdAndLockBlocksSecondTransactionUntilCommit`,
+  `findByIdAndLockAfterWaitReadsWinnersCommit`, `findByIdAndLockDoesNotBlockContextStoreWrite`,
+  `historyNumbersContinueUnderLock`). The engine adaptation is otherwise verified by the JDBC fake only
+  (`JdbcTransactionBoundaryTest`, `PostgresStorageProviderJoinTest`, `PostgresStorageProviderLockTest`); the
+  hand-off is in `specs/004-saga-engine/quickstart.md` "Container tests for the user to run" (T112).
 
 ### G-003-24: No query API over lifecycle history
 - **Description**: `saga_lifecycle_history` is write-only from the SPI's point of view: no `StorageProvider`
@@ -268,9 +264,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   -Dtest='!SchemaTest,!PostgresStorageProviderTest*,!PostgresSagaContextStoreTest,!LifecycleHistoryTest,!ConcurrencyControlTest'`
   (surefire 3.2.5), which must be kept in step with any new container-backed class by hand.
 - **Origin**: `saga-forge-storage-postgres/pom.xml`; `specs/003-postgres-saga-persistence/tasks.md` T032.
-- **Status**: resolved-by-004-plan, open until implemented. `specs/004-saga-engine/research.md` §14: the five
-  container classes get `@Tag("container")`; the module's surefire configuration excludes the group by default
-  (`${saga.excludedTestGroups}`), and the `container-tests` profile runs them. No dependency is added.
+- **Status**: closed by 004 (T001, T002): the container classes carry `@Tag("container")`, the module excludes the
+  group by default (`${saga.excludedTestGroups}`), and `-Pcontainer-tests` runs them.
 
 ## Engine (future feature)
 
@@ -283,11 +278,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Origin**: `specs/003-postgres-saga-persistence/research.md` §8;
   `saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/execution/harness/HarnessUnitOfWork.java`,
   `HarnessSagaContext.java`.
-- **Status**: open. Specified by `specs/004-saga-engine/spec.md` FR-012: the engine commits the `CREATED` instance
-  in its own write before the first unit of work, so every context write follows a committed instance row. Closes
-  when the engine implements it (and the `SagaContextStore` Javadoc states the rule). Planned in
-  `specs/004-saga-engine/research.md` §7 (creation write in its own transaction under the instance lock) and §12
-  (`SagaContextStore` Javadoc).
+- **Status**: closed by 004 (T014 `SagaContextStore` Javadoc; T039 creation write in its own transaction before
+  the first unit of work; verified by `SagaEngineHappyPathTest`, `FailurePositionTest`).
 
 ### G-ENG-02: Placement of `SagaLifecycleEntry` in `core.spi`
 - **Description**: `SagaLifecycleEntry`/`SagaLifecycleEventKind` live in `saga-forge-core`'s `spi` package, but no
@@ -296,16 +288,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   the pure derivation into core next to them; or let the engine produce entries and pass them to storage. The
   user chose to leave them as is until the engine feature clarifies who produces lifecycle transitions.
 - **Origin**: `specs/003-postgres-saga-persistence/research.md` §1, §2; user decision, 2026-11-05.
-- **Status**: answered (user, 2026-11-06), open until implemented. `specs/004-saga-engine/spec.md` FR-033: the
-  engine produces the entries and hands them to storage with each instance write, in the same transaction, so
-  the types stay in `core.spi` and become part of the `StorageProvider` write contract. The entry and the write
-  contract stay storage-agnostic; mapping an entry to a row or document is each storage module's concern (the
-  plan evaluates a generic mapping seam per store, not a type parameter on `StorageProvider`). The
-  `SagaLifecycleEntry`/`SagaLifecycleEventKind` Javadoc, which still describe diffing, must be corrected with it.
-  Closes G-003-04 and G-003-16 and makes G-003-01 moot once delivered. Planned in
-  `specs/004-saga-engine/research.md` §4: new `StorageProvider.save(SagaInstance, List<SagaLifecycleEntry>)`,
-  `save(SagaInstance)` a default with no entries, storage assigns positions and `SagaLifecycleEntry.sequenceNumber` is
-  removed (pending user confirmation); no generic `<R>` mapper in core, concrete per-module mappers instead (§4a).
+- **Status**: closed by 004 (T008 to T022): the entries stay in `core.spi`, are produced by the engine and handed
+  over through `StorageProvider.save(instance, entries)`; `sequenceNumber` is removed; Postgres maps entries with the
+  concrete `LifecycleEntryRows`.
 
 ### G-ENG-03: `PostgresStorageProvider.save` cannot join the host's transaction
 - **Description**: `docs/architecture.md` "Truthful state and transaction boundaries" requires aggregate changes,
@@ -317,11 +302,10 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   design (research.md §6).
 - **Origin**: `saga-forge-storage-postgres/.../PostgresStorageProvider.java` `inTransaction`;
   `specs/002-transactional-step-sequence/research.md` §9 (transaction SPI deferred to the engine).
-- **Status**: open. Specified by `specs/004-saga-engine/spec.md` FR-020 to FR-024 (transaction-boundary contract;
-  the Postgres provider joins it when active, JDBC only). Closes when implemented. Planned in
-  `specs/004-saga-engine/research.md` §2: core `TransactionBoundary`/`LocalTransaction` with
-  `resource(Class<R>)`; `PostgresStorageProvider(DataSource, TransactionBoundary)` uses
-  `resource(Connection.class)` when a transaction is active; `JdbcTransactionBoundary` in the Postgres module.
+- **Status**: closed by 004 (T007, T054, T055): `TransactionBoundary`/`LocalTransaction` in core,
+  `JdbcTransactionBoundary` and the joining `PostgresStorageProvider(DataSource, TransactionBoundary)` in the
+  Postgres module, checked with the JDBC fake (T060 to T062). Database verification stays under G-003-23
+  (`JoinedTransactionContainerTest`, not run).
 
 ### G-ENG-04: `EventDispatcher` and `SagaLifecycle` Javadoc give event routing to the transport
 - **Description**: `EventDispatcher` says implementations "must route events to the correct saga instance based on
@@ -333,8 +317,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   per-unit-of-work commit.
 - **Origin**: `saga-forge-core/.../spi/EventDispatcher.java`, `.../lifecycle/SagaLifecycle.java`,
   `.../spi/StorageProvider.java`; `specs/004-saga-engine/spec.md` FR-001, FR-003.
-- **Status**: open (to be corrected by the engine feature). The corrections are listed in
-  `specs/004-saga-engine/research.md` §12.
+- **Status**: closed by 004 (T014, T015): `EventDispatcher` is documented outbound only, and the `SagaLifecycle`
+  Javadoc gives instance resolution to the engine behind `EventReceiver`.
 
 ### G-ENG-05: A crash after the creation write strands a `CREATED` instance
 - **Description**: The engine commits a new instance as `CREATED` before its first unit of work (004 FR-012,
@@ -355,9 +339,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   G-003-07) or drop it.
 - **Origin**: `saga-forge-core/.../spi/SagaInstance.java`; `HarnessSagaLifecycle.start`;
   `specs/004-saga-engine/spec.md` Assumptions "Saga objects".
-- **Status**: open. 004 plan (`specs/004-saga-engine/research.md` §11): the engine writes `Map.of()` and the
-  `SagaInstance.state` Javadoc becomes "reserved, not populated"; the component stays. The use-or-drop decision
-  remains.
+- **Status**: open. Javadoc done in 004 (T015: `SagaInstance.state` "reserved, not populated"; the engine writes
+  `Map.of()`); the use-or-drop decision remains.
 
 ### G-ENG-07: Events are lost if the process stops between commit and handoff
 - **Description**: 004's default after-commit handoff is at-most-once: a committed unit of work's buffered
@@ -404,7 +387,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   block, hanging the unit-of-work thread on its own lock with no deadlock detection. Reasoned from the Postgres
   lock-conflict table; not run (G-003-23).
 - **Origin**: `specs/004-saga-engine/research.md` §3, §15.
-- **Status**: open.
+- **Status**: open. Implemented in 004 T074 (`FOR NO KEY UPDATE OF i` in `findByIdAndLock` and in `save`); the
+  reasoning is not verified against Postgres. Container test `ConcurrencyControlTest.findByIdAndLockDoesNotBlockContextStoreWrite`
+  added (T081), not yet run.
 
 ### G-ENG-12: Entry point called inside an active host transaction
 - **Description**: Spec FR-007 covers calls from a handoff and from a running unit of work, not a call made while the
@@ -465,7 +450,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   failure propagate from `receive`/`send` after the commit (T084, T085); has no reentrancy guard (T083, T086); and
   runs no engine startup checks (T094, T095).
 - **Origin**: 004 T036, T038, T039, T042.
-- **Status**: open until the listed tasks land.
+- **Status**: closed by 004: the failure path by T052/T053, locks and the conflict path by T072/T073, handoff
+  timings and reentrancy by T084 to T086, and the engine startup checks by T094/T095.
 
 ### G-ENG-18: Checked exceptions from client code are wrapped by the engine
 - **Description**: `Reflection.invoke`/`construct` rethrow a client `RuntimeException` or `Error` unchanged but wrap
@@ -508,6 +494,24 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   registered provider does not support (contracts/engine-startup.md); a unit of work then calls `newInstance`
   without asking again. The per-unit-of-work `supports` filter of T052 was removed. With a provider registered,
   there is no fallback to the no-argument constructor.
+
+### G-ENG-22: `identicalConcurrentSaves` no longer checks history de-duplication
+- **Description**: 003's `ConcurrencyControlTest.identicalConcurrentSaves` checked that two identical concurrent
+  saves left one set of history rows, because storage derived history from snapshots and an unchanged snapshot
+  derived nothing. Since 004 storage records exactly the entries it is handed; the test now hands none (T023), so it
+  checks the snapshot outcome only. Two identical saves that each hand the same entries would store them twice:
+  storage does not de-duplicate, it relies on the engine's lock (`findByIdAndLock`) to keep a second unit of work
+  from producing the same entries.
+- **Origin**: 004 T023.
+- **Status**: open (accepted: the engine never hands the same entries twice; a non-engine caller could).
+
+### G-ENG-23: The 002 harness's `InMemoryStorageProvider.findByIdAndLock` does not lock
+- **Description**: The harness double in `saga-forge-core` test sources implements `findByIdAndLock` as `findById`:
+  it neither requires an active transaction nor locks. The harness is single-threaded and runs no engine, so nothing
+  depends on it; the engine's concurrency tests use `TransactionalInMemoryStorageProvider`, which locks. A future test
+  that runs the engine over the harness double would silently lose serialization.
+- **Origin**: 004 T018.
+- **Status**: open (documented in its Javadoc; not used by any engine test).
 
 ## Dependency alignment with Spring Boot 4.1.2 (future starter feature)
 
@@ -576,10 +580,9 @@ Noted only; nothing is bumped until the starter feature decides.
   caused by 003; 003 changes none of their properties or Error Handling rows (T029).
 - **Origin**: `.kiro/specs/saga-forge-framework/design.md` "SagaInstance"; `.kiro/specs/saga-context-lifecycle/design.md`
   "Components and Interfaces", "Progress State Persistence Model"; noticed at 003 T029.
-- **Status**: open. AGENTS.md says to leave these specs as-is; decide whether to annotate them or correct AGENTS.md's
-  "accurate" claim. 004 (`specs/004-saga-engine/research.md` §13) appends Properties 21 to 28 to
-  `saga-forge-framework/design.md` without fixing its stale `SagaInstance` section, and finds that none of
-  `saga-context-lifecycle/design.md`'s Properties 1 to 12 applies to the engine as written.
+- **Status**: open (the user's call). 004 T103 appended Properties 21 to 28 to `saga-forge-framework/design.md`,
+  each naming its test class, with a note that none of `saga-context-lifecycle/design.md`'s Properties 1 to 12 applies
+  to the engine as written; that document and the stale `SagaInstance` section are unchanged.
 
 ## Governance
 

@@ -79,3 +79,16 @@ Known gaps, tracked in `.specify/memory/memory.md`:
 - **G-003-23**: the concurrency behavior described here is covered by `ConcurrencyControlTest` and the pure
   `ForwardTransitionPropertyTest`, but only the latter has run; the container-backed suite has not been run
   against Postgres.
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+- Mechanism step 1: `FOR UPDATE OF i` is now `FOR NO KEY UPDATE OF i`, both in `save` and in the new
+  `findByIdAndLock` (`specs/004-saga-engine/research.md` §3): `FOR UPDATE` would block the context store's
+  `saga_context` foreign-key check (`FOR KEY SHARE`) on its own connection (G-ENG-11).
+- Under the engine the lock is taken at the start of the unit of work by `findByIdAndLock`; the lock in `save` is then
+  re-entrant within the same transaction, and the forward-transition check normally passes.
+- Step 5: "derive the history entries" now reads "insert the entries handed over".
+- `ConcurrentSagaUpdateException` extends `core.spi.SagaConcurrencyConflictException`; the engine reports it
+  `NOT_HANDLED`, never `FAILED` (FR-026).

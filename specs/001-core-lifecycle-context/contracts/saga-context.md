@@ -68,3 +68,12 @@ Exercisable with a saga defining two steps, independent of any lifecycle or stor
 5. `updateStateAttribute` on an existing structured value → other fields of that value are unchanged.
 6. `updateStateAttribute` on a name with no existing value → new structured value with just that field.
 7. `updateStateAttribute` on an existing scalar value → `NonStructuredStateValueException`, value untouched.
+
+## 004 delta (2026-11-09, `specs/004-saga-engine`)
+
+Source: `specs/004-saga-engine/contracts/contract-deltas.md`. Where this contract says "the future engine", read `saga-forge-engine`.
+
+"Relationship to other SPI contracts" (values map onto `SagaInstance.state`) was already superseded by 002 and is
+restated: `SagaContext` values live in a `SagaContextRecord` behind `SagaContextStore`, written through after every
+`putState`/`updateStateAttribute` by the engine's `EngineSagaContext`, never inside the unit of work's transaction.
+`SagaInstance.state` stays empty (G-ENG-06).

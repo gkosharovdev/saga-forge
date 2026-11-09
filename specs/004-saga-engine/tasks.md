@@ -978,12 +978,12 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
 `.../concurrency-control.md`, `.../postgres-schema.md`; `README.md`; `docs/architecture.md`; `AGENTS.md`;
 `.specify/memory/memory.md` (planned updates); `specs/004-saga-engine/quickstart.md`.
 
-- [ ] T100 [P] Update `saga-forge-example/pom.xml`: add test-scope dependencies
+- [x] T100 [P] Update `saga-forge-example/pom.xml`: add test-scope dependencies
   `io.github.gkosharovdev:saga-forge-engine:${project.version}`, the same with `<type>test-jar</type>` (engine test
   doubles and `TestTransport`), and `io.github.gkosharovdev:saga-forge-core:${project.version}` with
   `<type>test-jar</type>` (`InMemorySagaContextStore`, `MapHandlerInstanceProvider`, `Snapshottable`). Main sources of
   the example stay unchanged (SC-009).
-- [ ] T101 Create `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaEngineTest.java`
+- [x] T101 Create `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaEngineTest.java`
   (FR-040, quickstart 1, SC-007): the engine registers `OrderProcessingSaga`, `Order`, `OrderRepository` and
   `PaymentService` (instances through `MapHandlerInstanceProvider`), over `InMemoryTransactionBoundary`,
   `TransactionalInMemoryStorageProvider`, `InMemorySagaContextStore` and `TestTransport` as dispatcher. Seed the
@@ -994,13 +994,13 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   `processPayment`'s unit of work → `FAILED` naming `processPayment`, `orderAmount` still readable from the context
   store. A third publishes `OrderCreatedEvent` through `engine.eventPublisher()` with `loopBack(true)` and sees the
   saga start (US1-7). `OrderRepository` is a plain map, so aggregate rollback is not asserted here (research.md §14).
-- [ ] T102 [P] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/DiagnosticsTest.java`
+- [x] T102 [P] Create `saga-forge-engine/src/test/java/io/github/gkosharovdev/sagaforge/engine/DiagnosticsTest.java`
   (FR-038, quickstart 22): with `RecordingLogger` passed to `builder().logger(...)`, provoke each event name of
   contracts/diagnostics.md (refused and started startup, ignored, unmatched, unexpected, duplicate start, committed,
   rolled back plus `saga.instance.failed`, `saga.instance.failedNotRecorded`, conflict, `saga.uow.notStarted`,
   `saga.handoff.failed`, `saga.event.notHandled`) and assert the level and that `event`, `sagaType`, `sagaId` and `uow`
   are present wherever the table lists them; the throwable is attached where required.
-- [ ] T103 Principle III gate: append Properties 21 to 28 of research.md §13 to `.kiro/specs/saga-forge-framework/design.md`
+- [x] T103 Principle III gate: append Properties 21 to 28 of research.md §13 to `.kiro/specs/saga-forge-framework/design.md`
   after Property 20, in that document's format (`### Property N: title`, "*For any* ..." statement,
   `**Validates: Feature spec specs/004-saga-engine FR-...**`), each also naming its test class (21 to 24
   `StartupChecksPropertyTest`, 25 `ConcurrentDuplicateStartTest`, 26 `HandoffObligationsPropertyTest`, 27
@@ -1009,7 +1009,7 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   `getProperty`/`registerProperty`/`setContext`, which do not exist; G-002-05), its "Engine-Level Error Handling" rule
   is honored by `DomainEventScope.runWith` restoring the previous binding, and that document is left unchanged
   (AGENTS.md). Properties 1 to 20 are not changed. Confirm against the delivered tests that each property holds.
-- [ ] T104 Apply contracts/contract-deltas.md to the base contracts, as a dated "004 delta" section at the end of each
+- [x] T104 Apply contracts/contract-deltas.md to the base contracts, as a dated "004 delta" section at the end of each
   file (or an inline correction where the delta replaces a sentence), quoting the delta in Saga Forge vocabulary:
   `specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md` (begin/commit/rollback steps made concrete,
   invariants), `.../command-gateway.md` (parameter resolution, several resolvers, non-saga unit of work, loader/saver
@@ -1020,13 +1020,13 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   the engine, `sequenceNumber` removed, limitations closed), `.../concurrency-control.md` (`FOR NO KEY UPDATE`,
   `findByIdAndLock`, inserted not derived, superclass), `.../postgres-schema.md` (numbering from hand-over order,
   rollback-only in joined mode). Also add the `EventDispatcher` outbound-only note where `saga-lifecycle.md` relates it.
-- [ ] T105 [P] Update `README.md` (FR-040, Principle V): "Status" says the engine runtime exists in
+- [x] T105 [P] Update `README.md` (FR-040, Principle V): "Status" says the engine runtime exists in
   `saga-forge-engine` (event routing, saga-scoped unit of work, transaction boundary, one unit of work per instance,
   outbox-ready handoff, startup validation), verified by unit tests over in-memory doubles; the Postgres provider joins
   the engine transaction; still missing: Spring Boot starter, transports, compensation, retry, idempotency. "Modules"
   table gains a `saga-forge-engine` row (role: runtime over the core SPI; depends on `saga-forge-core`) and the
   `saga-forge-example` row's dependencies mention the engine (test scope). Keep the canonical example unchanged.
-- [ ] T106 [P] Update `docs/architecture.md`: "Status at a glance" gains an engine row (implemented) and corrects any
+- [x] T106 [P] Update `docs/architecture.md`: "Status at a glance" gains an engine row (implemented) and corrects any
   row the engine changes; "Module responsibilities" gains `saga-forge-engine` and replaces "storage modules record
   history by diffing" with "storage modules persist the lifecycle entries the engine hands over, numbered in hand-over
   order"; the "Why orchestration..." sentence "None of these has a runtime implementation yet" becomes accurate (the
@@ -1034,14 +1034,14 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   triggering dispatch" says it is implemented by 004 (`TransactionBoundary`/`LocalTransaction`, storage joins via
   `resource(Class)`, `FAILED` written separately), with the remaining gaps (G-ENG-05, G-ENG-07, G-ENG-08, G-ENG-10,
   G-ENG-12) named as limitations. No implementation prescription for a consumer (Principle IV).
-- [ ] T107 [P] Update `AGENTS.md`: "Current Status" (engine implemented and unit-tested in `saga-forge-engine`;
+- [x] T107 [P] Update `AGENTS.md`: "Current Status" (engine implemented and unit-tested in `saga-forge-engine`;
   `saga-forge-storage-postgres` implemented by 003 and adapted by 004; Spring starter and transports still
   placeholders; container suites fenced by `@Tag("container")`, run with `-Pcontainer-tests`); "Module Map" gains
   `saga-forge-engine` (runtime; JDK + core only; host-facing builder; contracts it needs live in `core.spi`);
   "Known Gaps" replaces the items the engine closes ("no engine populates the `SagaContext`/`CommandGateway` fields",
   "Deferred to the engine feature: the transaction SPI ... cross-process one-unit-of-work ... non-command parameters
   ... startup check") with what remains (G-ENG-05 to G-ENG-13, compensation, retry, `@StartSaga` as handler).
-- [ ] T108 Update `.specify/memory/memory.md` with what this feature delivered, each with the closing task IDs:
+- [x] T108 Update `.specify/memory/memory.md` with what this feature delivered, each with the closing task IDs:
   close G-003-04, G-003-16 and G-003-27; close G-ENG-01, G-ENG-02, G-ENG-03 (database verification still under
   G-003-23) and G-ENG-04; mark G-003-01 moot (no derivation exists any more) and the derivation half of G-003-15
   closed; G-ENG-06: Javadoc done, use-or-drop decision still open; G-003-21: now also applies to `findByIdAndLock`,
@@ -1050,7 +1050,7 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   run); G-002-05: Properties 21 to 28 appended (T103). Add new `G-ENG-NN` entries for anything found during
   implementation, at least: `identicalConcurrentSaves` now hands no entries because storage no longer de-duplicates
   history (T023); the harness `InMemoryStorageProvider.findByIdAndLock` does not lock (T018). Never reuse an ID.
-- [ ] T109 Dependency check (FR-037, SC-008, quickstart 24): run `git diff master -- pom.xml '*/pom.xml'` and confirm
+- [x] T109 Dependency check (FR-037, SC-008, quickstart 24): run `git diff master -- pom.xml '*/pom.xml'` and confirm
   the only changes are the root `<module>` entry (T004), core's `maven-jar-plugin` test-jar (T006), the new
   `saga-forge-engine/pom.xml` (T005), Postgres surefire/profile (T001) and the example's test-scope internal artifacts
   (T100); no `<dependency>` outside `io.github.gkosharovdev` was added or changed in any module. Then compare resolved
@@ -1058,14 +1058,14 @@ Principle V), the gap register, the dependency check (FR-037, SC-008), the quick
   `/opt/homebrew/bin/mvn -B -q -DskipTests clean verify dependency:tree -DoutputFile=deps.txt` in both trees (runs no
   test), diff each module's third-party lines (`grep -v io.github.gkosharovdev`), expect no new artifact, then
   `git worktree remove /tmp/saga-forge-master` and delete the `deps.txt` files. Record the result in this task's report.
-- [ ] T110 Walk quickstart.md scenarios 1 to 24 against the delivered tests: add a "Test" column (or line) naming the
+- [x] T110 Walk quickstart.md scenarios 1 to 24 against the delivered tests: add a "Test" column (or line) naming the
   class and method that covers each scenario in `specs/004-saga-engine/quickstart.md`, fix any command that changed,
   drop the note about the 003 `-Dtest` exclusion now that the tag is in place, and list any scenario left uncovered in
   this task's report.
-- [ ] T111 Checkpoint (Polish). Run the full unit suite at the root: `/opt/homebrew/bin/mvn -B clean verify`. Requires
+- [x] T111 Checkpoint (Polish). Run the full unit suite at the root: `/opt/homebrew/bin/mvn -B clean verify`. Requires
   `BUILD SUCCESS` and zero failures in every module (core, engine, Postgres unit tests, example, placeholders), and the
   container guard. This is the last task of the feature that runs tests.
-- [ ] T112 Container hand-off (runs nothing). Write a section "Container tests for the user to run" at the end of
+- [x] T112 Container hand-off (runs nothing). Write a section "Container tests for the user to run" at the end of
   `specs/004-saga-engine/quickstart.md` and report the same list to the user. For every container class and method
   this feature affected or added (check the names against the code), give what it verifies and the FR/SC and
   memory.md IDs it covers, at least:

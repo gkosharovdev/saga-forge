@@ -32,9 +32,21 @@
   caller-supplied `DataSource`, with the DDL shipped as the classpath resource `schema.sql`; failures surface as
   `ConcurrentSagaUpdateException` (concurrent diverging save) or `UncheckedSqlException`. `saga-forge-core` gains
   the storage-agnostic, write-only lifecycle-history vocabulary `core.spi.SagaLifecycleEntry` /
-  `SagaLifecycleEventKind` (no SPI method takes or returns it).
-- Not implemented: the saga engine runtime, MySQL and MongoDB storage, both transports (no `EventDispatcher`
-  implementation), and Spring Boot autoconfiguration. The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb`,
+  `SagaLifecycleEventKind`, which since 004 is handed to storage through `StorageProvider.save(instance, entries)`.
+  004 adapted the module: `PostgresStorageProvider(DataSource, TransactionBoundary)` joins the engine's transaction
+  and locks with `findByIdAndLock` (`FOR NO KEY UPDATE`), and `JdbcTransactionBoundary` is a plain-JDBC
+  `TransactionBoundary`.
+- Implemented and unit-tested over in-memory doubles, added by `specs/004-saga-engine`: the saga engine runtime in
+  `saga-forge-engine` (`SagaEngine`, an `EventReceiver`): event routing by association, the saga-scoped unit of work
+  in the host's local transaction, the `FAILED` write, one unit of work per instance (in-process lock plus
+  `findByIdAndLock`), the outbox-ready `EventHandoff` (`AFTER_COMMIT` default, `IN_TRANSACTION`), reentrancy
+  rejection and fail-fast startup validation. Production implementations of `SagaContext`, `SagaLifecycle`,
+  `CommandGateway` and `EventPublisher` live there, package-private. The 002 harness stays as a test-only reference
+  the engine is compared against.
+- Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; the 004 container
+  tests have not been run yet (G-003-23).
+- Not implemented: MySQL and MongoDB storage, both transports (no `EventDispatcher` implementation), and Spring Boot
+  autoconfiguration. The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb`,
   `saga-forge-transport-*`, and `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
   actual `.java` source before relying on it.
@@ -44,6 +56,12 @@
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
+- `saga-forge-engine` — the saga runtime; depends on the JDK and `saga-forge-core` only. Public surface:
+  `SagaEngine` with its host-facing builder, `StartupReport`, `SagaEngineStartupException`,
+  `DispatchingEventHandoff`; everything else is package-private in `engine.internal`. Every contract it needs lives
+  in `core.spi` (`EventReceiver`, `TransactionBoundary`, `EventHandoff`, `HandlerParameterResolver`,
+  `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
+  `TransactionalInMemoryStorageProvider`, `TestTransport`, ...).
 - `saga-forge-spring-boot-starter` — target: autoconfiguration that detects an available datastore and
   transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
@@ -122,13 +140,14 @@
   `.kiro/specs/saga-forge-framework/` first — retry attributes must be framework-owned, not aliased into a
   third-party retry annotation.
 - No compensation-vs-intervention-required outcome categorization exists in code yet.
-- `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore` (not `SagaInstance.state`,
-  which holds only the saga class's own fields), but no engine populates the `SagaContext`/`CommandGateway`
-  fields or round-trips either record through a concrete store across dispatches.
-- Deferred to the engine feature: the transaction SPI that brackets a saga-scoped unit of work; cross-process
-  one-unit-of-work-per-instance enforcement (optimistic version on the instance record); resolving
-  non-command `@CommandHandler` parameters; the startup check that every aggregate with instance-method
-  handlers has a loader (the scanner can't see host `AggregateResolver`s, so it can't enforce this).
+- `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the engine leaves
+  `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
+- Engine limitations, see memory.md G-ENG-05 to G-ENG-13: a crash between the creation write and the first unit of
+  work strands a `CREATED` instance (G-ENG-05); the default handoff is at most once, an outbox needs
+  `IN_TRANSACTION` (G-ENG-07); duplicate starts are caught across processes only after the creation write committed
+  (G-ENG-08); the `FAILED` write can mark an instance another process moved on (G-ENG-10); the Postgres
+  `FOR NO KEY UPDATE` reasoning is unverified against a database (G-ENG-11); `begin()` suspending vs. rejecting a
+  host transaction is boundary-specific (G-ENG-12).
 - Deferred to the Spring starter: a Spring Data repository adapter behind `AggregateResolver`.
 - Compensation semantics (when/how `@SagaCompensation` runs) belong to a separate spec; a `FAILED` saga's
   committed effects currently stay in place.
