@@ -76,7 +76,7 @@ explicit precedence order, contributors and agents will act on stale information
 
 - Module boundaries follow the Module Map in `AGENTS.md`: `saga-forge-core` has no dependents' concerns
   leaking in; `saga-forge-spring-boot-starter` auto-detects an available datastore and transport on the
-  classpath rather than requiring users to hand-assemble a `SagaEngineConfig`.
+  classpath rather than requiring users to hand-assemble a `SagaRuntimeConfig`.
 - `@SagaStep` currently has no retry/backoff attributes. Any such addition MUST update
   `.kiro/specs/saga-forge-framework/` first and MUST be framework-owned (Principle II).
 - `SagaContext` holds named, type-safe business state for one saga instance. Its values live in a

@@ -11,9 +11,9 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
@@ -42,7 +42,7 @@ public final class TransportHarness implements AutoCloseable {
 
     private final Class<?>[] model;
     private final TransportSettings settings;
-    private SagaEngine engine;
+    private SagaRuntime engine;
     private InMemoryTransport transport;
     private RecordingReceiver receiver;
 
@@ -54,7 +54,7 @@ public final class TransportHarness implements AutoCloseable {
 
     private void assemble() {
         transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).settings(settings).build();
-        engine = SagaEngine.builder()
+        engine = SagaRuntime.builder()
                 .register(model)
                 .storage(storage)
                 .contextStore(contexts)
@@ -97,7 +97,7 @@ public final class TransportHarness implements AutoCloseable {
         return start();
     }
 
-    public SagaEngine engine() {
+    public SagaRuntime engine() {
         return engine;
     }
 

@@ -5,8 +5,8 @@ import java.time.Duration;
 import java.util.function.Function;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.engine.support.RecordingLogger;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 

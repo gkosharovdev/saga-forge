@@ -20,7 +20,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
@@ -29,7 +29,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
  * Spring wiring of the in-memory transport only ({@code specs/007-in-memory-transport} FR-029,
  * contracts/spring-wiring.md): the host's transaction manager as {@link TransactionBoundary}, a Postgres
  * {@link MessageStore}, a Spring-managed executor, start and stop with the application context, and the optional
- * application-event bridge. The host still builds its {@code SagaEngine} bean, passing
+ * application-event bridge. The host still builds its {@code SagaRuntime} bean, passing
  * {@code transport.dispatcher()} and {@code transport.outbox()}.
  */
 @AutoConfiguration(afterName = {
@@ -70,11 +70,11 @@ public class InMemoryTransportConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public TransportLifecycle sagaForgeTransportLifecycle(InMemoryTransport transport,
-            ObjectProvider<SagaEngine> engines, ObjectProvider<EventReceiverCustomizer> customizers,
+            ObjectProvider<SagaRuntime> runtimes, ObjectProvider<EventReceiverCustomizer> customizers,
             Environment environment) {
         Duration timeout = environment.getProperty("spring.lifecycle.timeout-per-shutdown-phase", Duration.class,
                 Duration.ofSeconds(30));
-        return new TransportLifecycle(transport, engines, customizers, timeout);
+        return new TransportLifecycle(transport, runtimes, customizers, timeout);
     }
 
     @Bean

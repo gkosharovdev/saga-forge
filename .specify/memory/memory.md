@@ -283,7 +283,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   `saga-forge-core/src/test/java/io/github/gkosharovdev/sagaforge/core/execution/harness/HarnessUnitOfWork.java`,
   `HarnessSagaContext.java`.
 - **Status**: closed by 004 (T014 `SagaContextStore` Javadoc; T039 creation write in its own transaction before
-  the first unit of work; verified by `SagaEngineHappyPathTest`, `FailurePositionTest`).
+  the first unit of work; verified by `SagaRuntimeHappyPathTest`, `FailurePositionTest`).
 
 ### G-ENG-02: Placement of `SagaLifecycleEntry` in `core.spi`
 - **Description**: `SagaLifecycleEntry`/`SagaLifecycleEventKind` live in `saga-forge-core`'s `spi` package, but no
@@ -419,7 +419,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   another thread already committed. Only `TransactionalInMemoryStorageProvider` isolates (per-transaction buffers).
   Concurrency tests (US4, SC-003/SC-012) must not assert aggregate state across concurrently rolled-back units of work,
   or must give each instance its own participant.
-- **Origin**: `saga-forge-engine/src/test/.../engine/support/InMemoryTransactionBoundary.java` (004 T024).
+- **Origin**: `saga-forge-runtime/src/test/.../engine/support/InMemoryTransactionBoundary.java` (004 T024).
 - **Status**: open (test-scaffolding limitation; documented in the class Javadoc).
 
 ### G-ENG-15: `SagaHandlingResult` enforces only part of the data-model rules
@@ -433,7 +433,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Status**: open.
 
 ### G-ENG-16: Public "not API" types in `engine.internal`
-- **Description**: `SagaEngine` lives in `engine` and the runtime in `engine.internal`, so the runtime cannot be
+- **Description**: `SagaRuntime` lives in `engine` and the runtime in `engine.internal`, so the runtime cannot be
   package-private end to end. tasks.md and plan.md do not say how to cross the package boundary. US1 makes exactly
   four internal types public, each documented "Not API": `EngineRuntime` (composition root: `assemble`, `receive`,
   `commandGateway`, `eventPublisher`, `sagaTypes`, `needsHandlerInstances`), `EngineSettings` (parameter object of
@@ -442,9 +442,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   list: `UnitOfWork` (the interface both units of work implement, so the gateway can report failures) and
   `LocalTransactions` (rollback-if-still-active on failure paths). A JPMS `module-info` (exporting only `engine`)
   would hide the public internals.
-- **Origin**: 004 T042; `saga-forge-engine/src/main/java/.../engine/internal/`.
+- **Origin**: 004 T042; `saga-forge-runtime/src/main/java/.../engine/internal/`.
 - **Status**: open (decide when the starter or a `module-info` is added; T094 `StartupChecks` will need the same
-  treatment if `SagaEngine` calls it directly).
+  treatment if `SagaRuntime` calls it directly).
 
 ### G-ENG-17: US1 transitional behavior closed by later 004 phases
 - **Description**: After US1 the engine still: rethrows any unit-of-work failure from `receive` after rolling back,
@@ -483,7 +483,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   harness does, not memoized after the first use; (c) `saga.startup.refused` logs the count line, then one line per
   error as `saga.startup.refused error=<text>`; (d) a `registerSagaType` failure refuses the engine at the first
   rejected saga type, without trying the rest; (e) an unresolvable handler parameter is named `#<1-based position>
-  <SimpleType>`, reading engine-startup.md's `#2 Clock` as 1-based; (f) `SagaEngineStartupException`'s message is a
+  <SimpleType>`, reading engine-startup.md's `#2 Clock` as 1-based; (f) `SagaRuntimeStartupException`'s message is a
   header line, then one error per line.
 - **Origin**: 004 T031, T035, T038, T041, T042.
 - **Status**: open (confirm or change in the US1 tests or US6).
@@ -604,7 +604,7 @@ Noted only; nothing is bumped until the starter feature decides.
   Failsafe/Resilience4j (behind framework-owned retry attributes, Principle II), an outbox library (Kafka
   feature) and a jMolecules adapter. Feature 004 (engine) stays dependency-free.
 - **Status**: open until Principle I and the AGENTS.md Module Map are reworded to match (constitution
-  amendment, at the first feature that adds one of these). The 004 plan adds a `saga-forge-engine` module
+  amendment, at the first feature that adds one of these). The 004 plan adds a `saga-forge-runtime` module
   (`specs/004-saga-engine/research.md` §1), held by plan to Principle I's constraints (no Spring, datastore or
   transport types; no third-party dependency). The amendment should name it, since SLF4J and the JTA API would land
   there rather than in core.
@@ -828,7 +828,7 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Per module**: core — `Outbox` rename, `CommandDelivery`, `OutgoingCommand`, `OutgoingMessages.commands`,
   `Outbox.supportsCommands`/`committed`, `CommandReceiver`/`OutboxCommand`, `core.spi.store` (12 types), scanner R23.
   Engine — `OutboxCommitted` hook, outbox commands in the gateway and all three unit-of-work kinds,
-  `SagaEngine.commandReceiver()`, startup refusal for a OUTBOX handler with an outbox that cannot store commands.
+  `SagaRuntime.commandReceiver()`, startup refusal for a OUTBOX handler with an outbox that cannot store commands.
   Transport — `InMemoryTransport`, `TransportSettings`, `MessageStoreQueries`, `Relay`, `KeyedWorkers`,
   `OrderingKeys`, `LogAppender`, `Backoff`. Postgres — `PostgresMessageStore`, `PayloadCodec` (typed JSON, separate
   from `JsonCodec`), schema plus `schema-upgrade-007.sql` with check constraints. Starter — `SpringTransactionBoundary`,

@@ -116,7 +116,7 @@
         <!-- Wired only when present (007 FR-029) -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
-            <artifactId>saga-forge-engine</artifactId>
+            <artifactId>saga-forge-runtime</artifactId>
             <version>${project.version}</version>
             <optional>true</optional>
         </dependency>
@@ -171,7 +171,7 @@
         </dependency>
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
-            <artifactId>saga-forge-engine</artifactId>
+            <artifactId>saga-forge-runtime</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
             <scope>test</scope>

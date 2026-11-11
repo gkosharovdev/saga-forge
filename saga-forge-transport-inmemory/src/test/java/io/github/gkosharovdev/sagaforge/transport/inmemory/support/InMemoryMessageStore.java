@@ -25,7 +25,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.store.UnreadableMessageException;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary.Scope;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary.Scope;
 
 /**
  * A thread-safe {@link MessageStore} double for transport tests ({@code specs/007-in-memory-transport} tasks.md T019).

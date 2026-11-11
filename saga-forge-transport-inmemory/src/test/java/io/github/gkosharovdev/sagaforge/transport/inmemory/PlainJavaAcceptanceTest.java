@@ -5,9 +5,9 @@ import java.time.Duration;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
@@ -34,7 +34,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
         private final ShippingService shipping = new ShippingService();
         private final CardService cards = new CardService();
         private InMemoryTransport transport;
-        private SagaEngine engine;
+        private SagaRuntime engine;
         private FlakyReceiver receiver;
 
         PlainSetup() {
@@ -44,7 +44,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
         private void assembleAndStart() {
             transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).settings(TransportHarness.FAST
                     .withMaxAttempts(3)).build();
-            engine = SagaEngine.builder().register(MODEL).storage(storage).contextStore(contexts)
+            engine = SagaRuntime.builder().register(MODEL).storage(storage).contextStore(contexts)
                     .transactions(boundary).dispatcher(transport.dispatcher()).outbox(transport.outbox())
                     .handlerInstances(new MapHandlerInstanceProvider().register(payments).register(shipping)
                             .register(cards))

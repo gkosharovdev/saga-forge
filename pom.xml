@@ -14,7 +14,7 @@
 
     <modules>
         <module>saga-forge-core</module>
-        <module>saga-forge-engine</module>
+        <module>saga-forge-runtime</module>
         <module>saga-forge-storage-postgres</module>
         <module>saga-forge-storage-mongodb</module>
         <module>saga-forge-storage-mysql</module>

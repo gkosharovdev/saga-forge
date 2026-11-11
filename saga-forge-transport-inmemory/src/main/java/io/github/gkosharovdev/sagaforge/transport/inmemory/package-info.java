@@ -15,6 +15,6 @@
  * </ul>
  *
  * <p>Assembly order: build the transport, build the engine with {@code transport.dispatcher()} and
- * {@code transport.outbox()}, start the engine, then {@code transport.start(engine, engine.commandReceiver())}.</p>
+ * {@code transport.outbox()}, start the engine, then {@code transport.start(runtime, runtime.commandReceiver())}.</p>
  */
 package io.github.gkosharovdev.sagaforge.transport.inmemory;

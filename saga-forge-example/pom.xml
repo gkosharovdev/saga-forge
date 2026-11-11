@@ -24,14 +24,14 @@
         <!-- Runs the example on the engine in tests only; main sources stay engine-free (SC-009) -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
-            <artifactId>saga-forge-engine</artifactId>
+            <artifactId>saga-forge-runtime</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
         <!-- Engine test doubles: InMemoryTransactionBoundary, TransactionalInMemoryStorageProvider, TestTransport -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
-            <artifactId>saga-forge-engine</artifactId>
+            <artifactId>saga-forge-runtime</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
             <scope>test</scope>

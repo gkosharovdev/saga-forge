@@ -11,7 +11,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
@@ -37,7 +37,7 @@ final class PostgresTransportHarness implements AutoCloseable {
     private DataSource dataSource;
     private JdbcTransactionBoundary boundary;
     private PostgresMessageStore log;
-    private SagaEngine engine;
+    private SagaRuntime engine;
     private InMemoryTransport transport;
     private RecordingReceiver receiver;
 
@@ -54,7 +54,7 @@ final class PostgresTransportHarness implements AutoCloseable {
         log = new PostgresMessageStore(dataSource, boundary);
         MessageStore used = logOverride != null ? logOverride : log;
         transport = InMemoryTransport.builder().messageStore(used).transactions(boundary).settings(settings).build();
-        engine = SagaEngine.builder()
+        engine = SagaRuntime.builder()
                 .register(model)
                 .storage(new PostgresStorageProvider(dataSource, boundary))
                 .contextStore(new PostgresSagaContextStore(dataSource))

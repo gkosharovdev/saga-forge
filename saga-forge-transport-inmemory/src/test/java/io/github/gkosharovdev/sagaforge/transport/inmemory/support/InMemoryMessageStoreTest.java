@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 
 /** {@link InMemoryMessageStore} against the {@link MessageStoreContract}, plus its test hooks (tasks.md T020). */
 class InMemoryMessageStoreTest extends MessageStoreContract {

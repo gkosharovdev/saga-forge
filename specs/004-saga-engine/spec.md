@@ -1,5 +1,10 @@
 # Feature Specification: Saga Engine Runtime
 
+> **Renamed after 007** (2026-11-11): `SagaEngine` → `SagaRuntime`, `SagaEngineStartupException` →
+> `SagaRuntimeStartupException`, module `saga-forge-engine` → `saga-forge-runtime`, package
+> `io.github.gkosharovdev.sagaforge.engine` → `io.github.gkosharovdev.sagaforge.runtime`. Specs 004 to 007 keep the names
+> they were written with.
+
 > **Renamed in 007** (`specs/007-in-memory-transport` research §14, 2026-11-11): `EventHandoff` → `Outbox`,
 > `handOff` → `store`, `HandedOffEvents` → `OutgoingMessages`, `DispatchingEventHandoff` → `ImmediateDispatchOutbox`,
 > `SagaEngine.Builder.handoff` → `outbox`, `SagaHandlingResult.handoffFailures` → `outboxFailures`. This document keeps

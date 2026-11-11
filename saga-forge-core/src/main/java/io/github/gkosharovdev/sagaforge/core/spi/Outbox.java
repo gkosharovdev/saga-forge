@@ -3,7 +3,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 /**
  * SPI receiving the outgoing messages of a committed unit of work, one {@link OutgoingMessages} batch per unit
  * of work: its buffered domain events and, since {@code specs/007-in-memory-transport}, its
- * {@code @Command(delivery = OUTBOX)} commands. Named {@code EventHandoff} (with {@code handOff}) before 007. The default implementation ({@code ImmediateDispatchOutbox} in {@code saga-forge-engine}) calls
+ * {@code @Command(delivery = OUTBOX)} commands. Named {@code EventHandoff} (with {@code handOff}) before 007. The default implementation ({@code ImmediateDispatchOutbox} in {@code saga-forge-runtime}) calls
  * {@link EventDispatcher#dispatch(Object)} for each event after commit; a transactional outbox can take its place
  * without an engine change.
  *

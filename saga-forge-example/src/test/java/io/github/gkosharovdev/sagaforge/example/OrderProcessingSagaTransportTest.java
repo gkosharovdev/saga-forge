@@ -14,9 +14,9 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaConte
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.example.events.OrderCreatedEvent;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
@@ -42,7 +42,7 @@ class OrderProcessingSagaTransportTest {
     @Test
     @DisplayName("an order created outside any unit of work completes through the transport")
     void orderCompletes() {
-        SagaEngine engine = SagaEngine.builder()
+        SagaRuntime engine = SagaRuntime.builder()
                 .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
                 .storage(storage)
                 .contextStore(new InMemorySagaContextStore())

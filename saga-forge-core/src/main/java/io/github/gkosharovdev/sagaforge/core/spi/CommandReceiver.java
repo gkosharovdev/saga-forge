@@ -5,7 +5,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * {@link EventReceiver} for commands a transport delivers from its message store ({@code specs/007-in-memory-transport}
  * research §3).
  *
- * <p><strong>Implemented by the engine</strong> ({@code SagaEngine.commandReceiver()}); called by transports.</p>
+ * <p><strong>Implemented by the engine</strong> ({@code SagaRuntime.commandReceiver()}); called by transports.</p>
  *
  * <h3>Effect</h3>
  * <p>Synchronously, on the calling thread: opens a new non-saga unit of work, runs the single {@code @CommandHandler}

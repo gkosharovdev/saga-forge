@@ -765,25 +765,25 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 ### Property 21: Loader availability at engine start
 
-*For any* registered `@Aggregate` class with a non-static `@CommandHandler` method, `SagaEngine.start()` shall report an engine error naming that aggregate if and only if no registered class declares an `@AggregateLoader` for it and no registered `AggregateResolver` supports it.
+*For any* registered `@Aggregate` class with a non-static `@CommandHandler` method, `SagaRuntime.start()` shall report an engine error naming that aggregate if and only if no registered class declares an `@AggregateLoader` for it and no registered `AggregateResolver` supports it.
 
 **Validates: Feature spec `specs/004-saga-engine` FR-035** (test: `StartupChecksPropertyTest`)
 
 ### Property 22: Handler parameter resolvability at engine start
 
-*For any* parameter of a registered `@CommandHandler` method or constructor other than its `@Command` parameter, `SagaEngine.start()` shall report an engine error naming the handler and the parameter (`#<position> <SimpleType>`) if and only if no registered `HandlerParameterResolver` supports it.
+*For any* parameter of a registered `@CommandHandler` method or constructor other than its `@Command` parameter, `SagaRuntime.start()` shall report an engine error naming the handler and the parameter (`#<position> <SimpleType>`) if and only if no registered `HandlerParameterResolver` supports it.
 
 **Validates: Feature spec `specs/004-saga-engine` FR-019, FR-035** (test: `StartupChecksPropertyTest`)
 
 ### Property 23: Saga instantiability at engine start
 
-*For any* registered `@Saga` class, `SagaEngine.start()` shall report an engine error naming it if and only if a `SagaObjectProvider` is registered and does not support it, or none is registered and the class declares no no-argument constructor.
+*For any* registered `@Saga` class, `SagaRuntime.start()` shall report an engine error naming it if and only if a `SagaObjectProvider` is registered and does not support it, or none is registered and the class declares no no-argument constructor.
 
 **Validates: Feature spec `specs/004-saga-engine` FR-035** (test: `StartupChecksPropertyTest`)
 
 ### Property 24: Single-pass startup
 
-*For any* registered model and plug-ins, the `StartupReport` thrown by `SagaEngine.start()` shall contain every `validateAll` error and every error of Properties 21 to 23 at once, and an engine whose report holds any error shall accept zero events, commands and publications.
+*For any* registered model and plug-ins, the `StartupReport` thrown by `SagaRuntime.start()` shall contain every `validateAll` error and every error of Properties 21 to 23 at once, and an engine whose report holds any error shall accept zero events, commands and publications.
 
 **Validates: Feature spec `specs/004-saga-engine` FR-034, FR-036, SC-006** (test: `StartupChecksPropertyTest`)
 

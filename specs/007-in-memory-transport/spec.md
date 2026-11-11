@@ -1,5 +1,10 @@
 # Feature Specification: In-Memory Transport with a Durable Message Log
 
+> **Renamed after 007** (2026-11-11): `SagaEngine` → `SagaRuntime`, `SagaEngineStartupException` →
+> `SagaRuntimeStartupException`, module `saga-forge-engine` → `saga-forge-runtime`, package
+> `io.github.gkosharovdev.sagaforge.engine` → `io.github.gkosharovdev.sagaforge.runtime`. Specs 004 to 007 keep the names
+> they were written with.
+
 **Feature Branch**: `007-in-memory-transport`
 
 **Created**: 2026-11-11

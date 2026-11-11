@@ -5,7 +5,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * domain event it delivers to {@link #receive(Object)}; routing and correlation to saga types and instances are the
  * engine's.
  *
- * <p><strong>Implemented by the engine</strong> ({@code SagaEngine} in {@code saga-forge-engine}); called by
+ * <p><strong>Implemented by the engine</strong> ({@code SagaRuntime} in {@code saga-forge-runtime}); called by
  * transport modules and by tests standing in for them. Transports depend on {@code saga-forge-core} only.</p>
  *
  * <h3>Pre-conditions</h3>

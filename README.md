@@ -116,7 +116,7 @@ public class PaymentService {
 The first unit of work runs `onBookingRequested` and `onAvailabilityClaimed`. No step reacts to
 `PaymentInitiatedEvent`, so that unit of work commits there and the saga waits `RUNNING`. The payment
 provider's callback starts the second unit of work. A confirmation reaches the `@EndSaga` outcome; a decline is the
-`@StartCompensation` step, whose commit moves the saga to `COMPENSATING`, after which the engine runs `releaseClaim`
+`@StartCompensation` step, whose commit moves the saga to `COMPENSATING`, after which the runtime runs `releaseClaim`
 for the claim that committed earlier and the saga ends `COMPENSATED`. If a step or handler fails, its unit of work
 rolls back. A transient failure (marked `TransientFailure` or listed in `retryOn`) is retried under the failing
 step's policy, re-running the whole unit of work. A final failure (marked `FinalFailure`) or running out of attempts
@@ -162,7 +162,7 @@ library instead of re-plumbing it per service.
    `SagaContext` values are stored separately and survive a rollback.
 5. **Zero-ceremony infrastructure.** You pick a starter dependency (Postgres, MySQL, MongoDB) and a
    transport dependency (Kafka or in-memory), and autoconfiguration does the rest. There is no
-   `SagaEngineConfig` to hand-assemble.
+   `SagaRuntimeConfig` to hand-assemble.
 6. **Boring is a feature.** No DSL, no XML, no custom build plugin. Plain classes, plain
    annotations, plain Spring beans for dependencies you inject into a saga (repositories, read
    models) via regular DI.
@@ -181,12 +181,12 @@ Saga Forge is an independent, zero-dependency implementation designed for JDK 21
 This is an early-stage framework. The annotation model, SPI contracts, and module layout exist and
 are tested (`saga-forge-core`). The step, command-handler, and unit-of-work contracts (`CommandGateway`,
 `DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined, first proven by a test-only harness (feature 002).
-The saga engine runtime exists in `saga-forge-engine` (feature 004): event routing by association, the
+The saga runtime exists in `saga-forge-runtime` (feature 004): event routing by association, the
 saga-scoped unit of work in the host's local transaction (`TransactionBoundary`), one unit of work per instance at
 a time, an outbox SPI (`Outbox`, default `ImmediateDispatchOutbox` after commit), and fail-fast startup validation. It is verified by unit tests over
 in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
-`StorageProvider` joins the engine's transaction (feature 004). Step retry with failure classification, stable
-command identities and duplicate-event detection are implemented in the engine and persisted by Postgres (feature
+`StorageProvider` joins the runtime's transaction (feature 004). Step retry with failure classification, stable
+command identities and duplicate-event detection are implemented in the runtime and persisted by Postgres (feature
 005). Compensation (feature 006) runs `@SagaCompensation` methods after a `@StartCompensation` business failure or a
 final or exhausted step failure, in reverse completion order, and resumes after a crash. The in-memory transport
 (feature 007) delivers events — and commands marked `@Command(delivery = OUTBOX)` — between the modules of one process,
@@ -203,12 +203,12 @@ historical planning artifacts, superseded by the docs above where they conflict.
 | Module | Role | Depends on |
 |---|---|---|
 | `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
-| `saga-forge-engine` | Saga runtime over the core SPI: `SagaEngine` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
-| `saga-forge-spring-boot-starter` | Autoconfiguration. Today: the in-memory transport's wiring (Spring transactions, lifecycle, application-event bridge, Spring Modulith interop). Target: detects datastore + transport, wires the engine | `saga-forge-core`; transport, Postgres, engine (optional) |
+| `saga-forge-runtime` | Saga runtime over the core SPI: `SagaRuntime` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
+| `saga-forge-spring-boot-starter` | Autoconfiguration. Today: the in-memory transport's wiring (Spring transactions, lifecycle, application-event bridge, Spring Modulith interop). Target: detects datastore + transport, wires the runtime | `saga-forge-core`; transport, Postgres, engine (optional) |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | In-process transport with a durable message store (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
-| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-engine` (test scope) |
+| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-runtime` (test scope) |
 
 ## Getting started (target shape)
 
@@ -233,7 +233,7 @@ the in-memory transport. See [docs/architecture.md](docs/architecture.md) for th
 ```java
 PostgresMessageStore log = new PostgresMessageStore(dataSource, transactions);   // tables in schema.sql
 InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(transactions).build();
-SagaEngine engine = SagaEngine.builder()
+SagaRuntime runtime = SagaRuntime.builder()
         .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
         .storage(new PostgresStorageProvider(dataSource, transactions))
         .contextStore(new PostgresSagaContextStore(dataSource))
@@ -241,8 +241,8 @@ SagaEngine engine = SagaEngine.builder()
         .dispatcher(transport.dispatcher())
         .outbox(transport.outbox())
         .build();
-engine.start();
-transport.start(engine, engine.commandReceiver());
+runtime.start();
+transport.start(runtime, runtime.commandReceiver());
 ```
 
 A command type can opt into the log, so it is handled after the sending step commits instead of inside it:

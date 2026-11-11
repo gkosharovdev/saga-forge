@@ -26,13 +26,13 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.Relay;
  *         .messageStore(messageStore)
  *         .transactions(transactionBoundary)
  *         .build();
- * SagaEngine engine = SagaEngine.builder()
+ * SagaRuntime runtime = SagaRuntime.builder()
  *         .dispatcher(transport.dispatcher())
  *         .outbox(transport.outbox())
  *         // storage, contextStore, transactions, register(...)
  *         .build();
- * engine.start();
- * transport.start(engine, engine.commandReceiver());
+ * runtime.start();
+ * transport.start(runtime, runtime.commandReceiver());
  * // ...
  * transport.stop(Duration.ofSeconds(30));
  * }</pre>
@@ -67,7 +67,7 @@ public final class InMemoryTransport {
      * The engine's {@code EventDispatcher}: an event published outside any unit of work is appended to the store (in
      * the host's active transaction, or in one of its own) and delivered after commit.
      *
-     * @return the dispatcher to pass to {@code SagaEngine.Builder.dispatcher}
+     * @return the dispatcher to pass to {@code SagaRuntime.Builder.dispatcher}
      */
     public EventDispatcher dispatcher() {
         return dispatcher;
@@ -76,7 +76,7 @@ public final class InMemoryTransport {
     /**
      * The engine's {@code Outbox}: {@code IN_TRANSACTION}, supports outbox commands, wakes the relay after commit.
      *
-     * @return the outbox to pass to {@code SagaEngine.Builder.outbox}
+     * @return the outbox to pass to {@code SagaRuntime.Builder.outbox}
      */
     public Outbox outbox() {
         return outbox;
@@ -85,7 +85,7 @@ public final class InMemoryTransport {
     /**
      * Starts delivering: unconsumed messages first (in per-key order), then new ones.
      *
-     * @param events   where events go, normally the started {@code SagaEngine}; non-null
+     * @param events   where events go, normally the started {@code SagaRuntime}; non-null
      * @param commands where outbox commands go, normally {@code engine.commandReceiver()}; may be {@code null} if the
      *                 model sends no outbox command
      * @throws IllegalStateException if called twice

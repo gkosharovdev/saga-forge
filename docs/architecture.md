@@ -11,18 +11,18 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Annotation model (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`, `@StartCompensation`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`) | Implemented, tested |
 | `AnnotationScanner` / `ReflectiveAnnotationScanner` / `SagaValidationResult` / `validateAll` → `ValidationReport` | Implemented, tested |
 | `DomainEvents.record` / `DomainEventScope` (thread-bound event recording) | Implemented, tested |
-| `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined; implemented by the engine (`saga-forge-engine`, [004](../specs/004-saga-engine/spec.md)), tested |
-| `CommandGateway`, `EventPublisher` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
-| SPI `AggregateResolver`, `HandlerInstanceProvider`, `SagaContextStore` / `SagaContextRecord` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
-| `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the engine (004), tested |
-| SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)) and joins the engine's transaction (004); the in-memory transport implements `EventDispatcher` (007) |
-| SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `Outbox`/`OutgoingMessages` (named `EventHandoff`/`HandedOffEvents` until 007), `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the engine, tested; `JdbcTransactionBoundary` in the Postgres module |
-| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the engine, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
-| Saga engine runtime (`saga-forge-engine`: event routing, saga-scoped unit of work, one unit of work per instance, outbox SPI, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
-| Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the engine, persisted by Postgres, tested, including the Postgres container suites ([005](../specs/005-step-retry/spec.md)) |
-| Compensation (`@StartCompensation`, `@SagaCompensation` run by the engine, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`REQUIRES_INTERVENTION`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the engine, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
+| `SagaContext` / `SagaLifecycle` (`start`, `recordStepCompleted`, `advance`, `complete(sagaId, outcomeStep)`, `fail`) | Contracts defined; implemented by the runtime (`saga-forge-runtime`, [004](../specs/004-saga-engine/spec.md)), tested |
+| `CommandGateway`, `EventPublisher` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the runtime (004), tested |
+| SPI `AggregateResolver`, `HandlerInstanceProvider`, `SagaContextStore` / `SagaContextRecord` | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the runtime (004), tested |
+| `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the runtime (004), tested |
+| SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)) and joins the runtime's transaction (004); the in-memory transport implements `EventDispatcher` (007) |
+| SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `Outbox`/`OutgoingMessages` (named `EventHandoff`/`HandedOffEvents` until 007), `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the runtime, tested; `JdbcTransactionBoundary` in the Postgres module |
+| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the runtime, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
+| Saga runtime (`saga-forge-runtime`: event routing, saga-scoped unit of work, one unit of work per instance, outbox SPI, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
+| Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([005](../specs/005-step-retry/spec.md)) |
+| Compensation (`@StartCompensation`, `@SagaCompensation` run by the runtime, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`REQUIRES_INTERVENTION`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
-| Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the engine, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
+| Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the runtime, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
 | Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
 | Spring Boot autoconfiguration | The in-memory transport's wiring only (`SpringTransactionBoundary`, lifecycle, application-event bridge, Spring Modulith interop) ([007](../specs/007-in-memory-transport/spec.md)); storage/transport detection and engine assembly not implemented |
 
@@ -33,24 +33,24 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   no implementation), `DomainEvents.record`, and the SPI contracts. Zero runtime dependencies, including no
   Spring dependency. This is deliberate: the annotation model and validation rules must be usable from a
   future non-Spring runtime without forcing a Spring dependency on every consumer.
-- **`saga-forge-engine`** — the saga runtime over the core SPI, depending on `saga-forge-core` and the JDK only.
-  `SagaEngine` is the `EventReceiver` transports deliver to: it routes each event to saga types and instances by
+- **`saga-forge-runtime`** — the saga runtime over the core SPI, depending on `saga-forge-core` and the JDK only.
+  `SagaRuntime` is the `EventReceiver` transports deliver to: it routes each event to saga types and instances by
   association, runs each saga-scoped unit of work in the host's local transaction through `TransactionBoundary`,
   allows one unit of work per instance at a time, stores committed events in an `Outbox`, and validates the
   registered model and plug-ins at `start()`. Host integrations assemble it through its builder; application
   developers using the starter never do.
 - **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring. Detects, via
   `@ConditionalOnClass`, which storage and transport dependencies are on the classpath, and assembles the
-  engine accordingly. There is no `SagaEngineConfig` for a user to hand-build; if autoconfiguration can't
+  engine accordingly. There is no `SagaRuntimeConfig` for a user to hand-build; if autoconfiguration can't
   resolve an unambiguous choice (e.g. two storage providers on the classpath), it should fail fast with a
   clear error rather than guess. Today (007) it carries only the in-memory transport's wiring:
   `SpringTransactionBoundary` over the host's `PlatformTransactionManager` (joining an active Spring transaction),
   a Postgres `MessageStore`, a managed executor, start/stop with the context, re-publication of delivered events as
   Spring application events, and Spring Modulith interop (when `EventPublicationRepository` is present, the
   messages live in Modulith's registry and Saga Forge keeps only its delivery records — one outbox). The host still
-  builds its `SagaEngine` bean (G-007-02).
+  builds its `SagaRuntime` bean (G-007-02).
 - **`saga-forge-storage-{postgres,mysql,mongodb}`** — each implements `StorageProvider` and
-  `SagaContextStore` for one backend, and persists the lifecycle entries the engine hands over
+  `SagaContextStore` for one backend, and persists the lifecycle entries the runtime hands over
   (`SagaLifecycleEntry`: creation, step completions, terminal outcome), numbered in hand-over order, for direct
   data-store inspection only. Only Postgres exists so far.
   Exactly one should be on the classpath per application. These are the only three storage backends in
@@ -103,7 +103,7 @@ unit of work** (specified in
 At the transport level this is choreography: no central dispatcher decides what happens next. But every
 `@Saga` instance keeps durable process state — its `SagaInstance` record (status, per-step `StepRecord`s,
 `outcome`, `failure`) through a `StorageProvider`, and its named business state through `SagaContext`,
-persisted as a `SagaContextRecord` via `SagaContextStore`. The engine (`saga-forge-engine`) drives these, and
+persisted as a `SagaContextRecord` via `SagaContextStore`. The runtime (`saga-forge-runtime`) drives these, and
 Postgres implements the storage and the context store. With
 that state you can ask "where is this saga, and what has it already done" without replaying every event it
 reacted to. That queryable, durable process state is what makes this orchestration rather than pure
@@ -140,8 +140,8 @@ flowchart LR
         RELAY["Relay: polling loop<br/>lease / renew / release"] -->|"one lane per<br/>ordering key"| WORKERS["Keyed workers"]
     end
 
-    WORKERS -->|"event"| RECEIVER["SagaEngine<br/>EventReceiver"]
-    WORKERS -->|"OUTBOX command"| CRECEIVER["SagaEngine<br/>CommandReceiver"]
+    WORKERS -->|"event"| RECEIVER["SagaRuntime<br/>EventReceiver"]
+    WORKERS -->|"OUTBOX command"| CRECEIVER["SagaRuntime<br/>CommandReceiver"]
     RECEIVER -->|"correlate by<br/>associationProperty"| NEXT["Next unit of work of<br/>the same or another saga"]
     CRECEIVER -->|"handler in its own unit of work;<br/>consumed mark in the same transaction"| NEXT
     WORKERS -.->|"fails 10 times or<br/>cannot be read"| ASIDE["SET_ASIDE<br/>(operator redelivers)"]
@@ -157,9 +157,9 @@ flowchart LR
 4. **The relay leases** committed messages: it reserves them for itself for a limited time, at most one message per
    ordering key (an event's aggregate), and hands each to a worker lane for that key, so one aggregate's messages
    arrive in order while others run in parallel.
-5. **Delivery**: an event goes to the engine's `EventReceiver`, which finds the saga instances it concerns by their
+5. **Delivery**: an event goes to the runtime's `EventReceiver`, which finds the saga instances it concerns by their
    `associationProperty` and runs each one's next unit of work — whose own outgoing messages start at step 1 again.
-   A outbox command goes to the engine's `CommandReceiver`, which runs its handler in a unit of work of its own and
+   A outbox command goes to the runtime's `CommandReceiver`, which runs its handler in a unit of work of its own and
    marks the message consumed inside that transaction.
 6. **Failures** are retried with growing backoff. After the tenth failure, or at once if the payload cannot be read,
    the message is set aside; it no longer blocks its aggregate and an operator can deliver it again.
@@ -173,7 +173,7 @@ sequenceDiagram
     participant Log as saga_message_store
     participant R1 as Relay (process 1)
     participant R2 as Relay (process 2, after restart)
-    participant E as SagaEngine
+    participant E as SagaRuntime
     participant S as Fulfilment saga instance
 
     A->>Log: append PaymentConfirmed (same transaction as the payment)
@@ -213,14 +213,14 @@ names on the left are from *Enterprise Integration Patterns* (Hohpe and Woolf) u
 | Pattern | Where it shows up in Saga Forge |
 |---|---|
 | [Process Manager](https://www.enterpriseintegrationpatterns.com/patterns/messaging/ProcessManager.html) | A `@Saga` instance: durable process state (`SagaInstance`, `SagaContext`) that decides the next step from the messages it receives. The [Saga pattern](https://microservices.io/patterns/data/saga.html) (microservices.io) adds compensation. |
-| [Correlation Identifier](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CorrelationIdentifier.html) | `@SagaStep(associationProperty = "...")`: the engine finds the saga instances an event belongs to by this value. |
+| [Correlation Identifier](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CorrelationIdentifier.html) | `@SagaStep(associationProperty = "...")`: the runtime finds the saga instances an event belongs to by this value. |
 | [Event Message](https://www.enterpriseintegrationpatterns.com/patterns/messaging/EventMessage.html) / [Command Message](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CommandMessage.html) | `@DomainEvent` types (published, possibly many interested sagas) and `@Command` types (exactly one `@CommandHandler`). |
 | [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html) (microservices.io), building on [Transactional Client](https://www.enterpriseintegrationpatterns.com/patterns/messaging/TransactionalClient.html) | The `IN_TRANSACTION` `Outbox`: outgoing messages are rows written in the unit of work's own transaction, so state and messages commit or roll back together. |
 | [Guaranteed Delivery](https://www.enterpriseintegrationpatterns.com/patterns/messaging/GuaranteedMessaging.html), [Message Store](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageStore.html) | `MessageStore` (`saga_message_store`): every message is stored before it is delivered, kept until consumed, then for 7 days for diagnostics. |
 | Message Relay / [Polling Publisher](https://microservices.io/patterns/data/polling-publisher.html) (microservices.io), [Polling Consumer](https://www.enterpriseintegrationpatterns.com/patterns/messaging/PollingConsumer.html) | The `Relay`: a polling loop that reads committed rows from the log and delivers them; woken early by `Outbox.committed`. |
 | Lease (Gray and Cheriton, 1989; also SQS's visibility timeout, Pub/Sub's ack deadline) | `MessageStore.lease` / `renew` / `release`: a reservation with an expiry, so a crashed process's messages become available again without cleanup. It is what would let [Competing Consumers](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CompetingConsumers.html) share a log safely, although this transport targets one running instance. |
 | [Message Dispatcher](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageDispatcher.html), with ordering keys in the spirit of Kafka partition keys and JMS message groups | The keyed worker lanes: one lane per ordering key keeps an aggregate's messages in order while different aggregates are delivered in parallel. |
-| [Idempotent Receiver](https://www.enterpriseintegrationpatterns.com/patterns/messaging/IdempotentReceiver.html) / [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html) (microservices.io) | Delivery is at least once. The engine reports a redelivered event of a completed step as `DUPLICATE`, and a handler passes `CommandId` on as the idempotency key; a outbox command is marked consumed in its handler's transaction. |
+| [Idempotent Receiver](https://www.enterpriseintegrationpatterns.com/patterns/messaging/IdempotentReceiver.html) / [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html) (microservices.io) | Delivery is at least once. The runtime reports a redelivered event of a completed step as `DUPLICATE`, and a handler passes `CommandId` on as the idempotency key; a outbox command is marked consumed in its handler's transaction. |
 | [Dead Letter Channel](https://www.enterpriseintegrationpatterns.com/patterns/messaging/DeadLetterChannel.html), [Invalid Message Channel](https://www.enterpriseintegrationpatterns.com/patterns/messaging/InvalidMessageChannel.html) | `SET_ASIDE` with reason `MAX_ATTEMPTS` (delivery kept failing) or `UNREADABLE` (the payload cannot be decoded), visible through `MessageStoreQueries` and redeliverable by an operator. |
 
 In a Spring application with Spring Modulith, the Message Store is Spring Modulith's event publication registry
@@ -249,7 +249,7 @@ silently breaks the saga's ability to resume or retry correctly.
 The following are requirements a production-grade saga runtime must satisfy, derived from real multi-step,
 multi-aggregate orchestration use cases (see [use-cases.md](use-cases.md)). None of them has a runtime in
 `saga-forge-core` today; some now have their contracts defined, as noted per item. They are listed here as the
-backlog for the engine/starter work, each phrased as a capability the framework must provide — not as an
+backlog for the runtime/starter work, each phrased as a capability the framework must provide — not as an
 implementation prescription.
 
 ### Queryable process-level state (highest priority)
@@ -318,7 +318,7 @@ before a saga instance exists, and a redelivered start event after a saga ended,
 
 - A step declares `@SagaStep(retry = @RetryPolicy(maxAttempts, initialBackoffMillis, multiplier, maxBackoffMillis,
   retryOn))`. The scanner validates it (rule R19, Property 29 in `.kiro/specs/saga-forge-framework/design.md`), and
-  engine startup rejects a policy whose total wait exceeds `SagaEngine.Builder.maxTotalRetryBackoff` (default 30 s).
+  engine startup rejects a policy whose total wait exceeds `SagaRuntime.Builder.maxTotalRetryBackoff` (default 30 s).
 - Failures are classified with the core markers `TransientFailure` and `FinalFailure`, implemented by any exception
   class, and the policy's `retryOn` types. The result is `FailureClassification`: `TRANSIENT` (retried), `FINAL`,
   `EXHAUSTED` (transient, attempts used up) or `UNCLASSIFIED` (unmarked and not listed, for example a programming
@@ -341,7 +341,7 @@ rolls back as a whole on any failure. A later unit of work sees only what earlie
 (plus `SagaContext` values, which are written outside the transaction). At most one unit of work runs per
 saga instance at a time.
 
-This is now **implemented** by the engine ([004](../specs/004-saga-engine/spec.md)): the engine opens, commits and
+This is now **implemented** by the runtime ([004](../specs/004-saga-engine/spec.md)): the runtime opens, commits and
 rolls back the host's local transaction through `TransactionBoundary`/`LocalTransaction`; storage joins it through
 `LocalTransaction.resource(Class)` (Postgres: the bound `java.sql.Connection`); a failed unit of work is recorded
 `FAILED` in a separate write after the rollback; and one unit of work per instance is enforced in-process by a

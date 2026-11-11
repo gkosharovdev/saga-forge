@@ -17,7 +17,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.transport.EventReceiverCustomizer;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresSagaContextStore;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresStorageProvider;
@@ -32,7 +32,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportAcce
 /**
  * A Spring Boot application context hosting the acceptance model over Testcontainers Postgres
  * (specs/007-in-memory-transport SC-008): the starter's transport configuration wires the transport; the application
- * builds its {@link SagaEngine} bean. With {@code modulith} the Spring Modulith JDBC registry is active, otherwise its
+ * builds its {@link SagaRuntime} bean. With {@code modulith} the Spring Modulith JDBC registry is active, otherwise its
  * auto-configurations are excluded. A restart closes the context and opens a new one; the services survive it.
  */
 public final class SpringSetup implements TransportAcceptanceSuite.Setup {
@@ -79,7 +79,7 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
 
     @Override
     public void publish(Object event) {
-        context.getBean(SagaEngine.class).eventPublisher().publish(event);
+        context.getBean(SagaRuntime.class).eventPublisher().publish(event);
     }
 
     @Override
@@ -133,7 +133,7 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
         return new JdbcTemplate(StarterPostgres.dataSource());
     }
 
-    /** The application: its own DataSource, transaction manager, services and engine. */
+    /** The application: its own DataSource, transaction manager, services and runtime. */
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
     static class App {
@@ -159,9 +159,9 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
         }
 
         @Bean
-        SagaEngine sagaEngine(DataSource dataSource, TransactionBoundary transactions, InMemoryTransport transport,
+        SagaRuntime sagaRuntime(DataSource dataSource, TransactionBoundary transactions, InMemoryTransport transport,
                 Services services) {
-            SagaEngine engine = SagaEngine.builder()
+            SagaRuntime runtime = SagaRuntime.builder()
                     .register(TransportAcceptanceSuite.MODEL)
                     .storage(new PostgresStorageProvider(dataSource, transactions))
                     .contextStore(new PostgresSagaContextStore(dataSource))
@@ -171,7 +171,7 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
                     .handlerInstances(new MapHandlerInstanceProvider().register(services.payments())
                             .register(services.shipping()).register(services.cards()))
                     .build();
-            return engine;
+            return runtime;
         }
 
         /** Lets tests fail deliveries, through the starter's customizer hook. */

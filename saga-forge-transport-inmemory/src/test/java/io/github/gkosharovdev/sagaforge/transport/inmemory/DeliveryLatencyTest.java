@@ -13,7 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 

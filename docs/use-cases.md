@@ -10,7 +10,7 @@ The simplest shape: three steps, one failure outcome and one compensation, livin
 continuously compiled reference. Every step is triggered by a Domain Event and returns `void`. A step dispatches Commands through the
 `CommandGateway` field; a `@CommandHandler` on an Aggregate or a service handles each Command and records the
 next Domain Event with `DomainEvents.record`. The `SagaContext` and `CommandGateway` fields are recognized by
-type and populated by the engine.
+type and populated by the runtime.
 
 ```java
 @Saga
@@ -114,7 +114,7 @@ order change commit together or not at all. A failure anywhere rolls the unit of
 If the order turns out to be out of stock, `Order` records `StockUnavailableEvent` instead, and the `@StartCompensation`
 step `rejectOrder` handles it in the same unit of work. That unit of work commits with `processPayment` completed and
 the instance `COMPENSATING` ([006](../specs/006-saga-compensation/spec.md)). The provider's charge happened outside the
-transaction, so it has to be undone: the engine then runs `compensatePayment` in its own unit of work, the refund is
+transaction, so it has to be undone: the runtime then runs `compensatePayment` in its own unit of work, the refund is
 handled with its own stable `CommandId` as the provider's idempotency key, and the saga ends `COMPENSATED` with
 `rejectOrder` and `StockUnavailableEvent` recorded as its trigger. A repeated `StockUnavailableEvent` is `DUPLICATE`
 and refunds nothing.
@@ -242,7 +242,7 @@ trigger; an unmarked failure still ends `FAILED`. If releasing the claim itself 
 Production lessons this example carries (see architecture.md's feature gaps):
 
 - **Idempotency** ([005](../specs/005-step-retry/spec.md)). If `AvailabilityClaimedEvent` is delivered twice
-  (at-least-once transport) after `onAvailabilityClaimed` completed, the engine reports `DUPLICATE` and does not
+  (at-least-once transport) after `onAvailabilityClaimed` completed, the runtime reports `DUPLICATE` and does not
   dispatch `InitiatePayment` again. If the unit of work is run again before it committed, `InitiatePayment` keeps its
   `CommandId`, and a payment handler that passes it to the gateway as the idempotency key charges once.
 - **Retry** ([005](../specs/005-step-retry/spec.md)). A transient failure (a timeout calling the payment gateway,
@@ -331,7 +331,7 @@ which asks the payment module to charge the customer and waits. The payment modu
 - The process is redeployed after the commit but before the relay delivered the confirmation. On start, the new
   process finds the confirmation unconsumed and delivers it; the saga completes as if nothing happened.
 - If the process stopped after the saga's step committed but before the message was marked consumed, the
-  confirmation is delivered again and the engine reports the step as a `DUPLICATE` — no second shipment is booked.
+  confirmation is delivered again and the runtime reports the step as a `DUPLICATE` — no second shipment is booked.
 - A command marked `@Command(delivery = OUTBOX)`, such as `ChargeCard`, is stored with the step that sent it and
   handled after that step commits; its handler receives the same `CommandId` on every delivery and passes it to the
   payment provider as the idempotency key.

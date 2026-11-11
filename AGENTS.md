@@ -33,28 +33,28 @@
   `ConcurrentSagaUpdateException` (concurrent diverging save) or `UncheckedSqlException`. `saga-forge-core` gains
   the storage-agnostic, write-only lifecycle-history vocabulary `core.spi.SagaLifecycleEntry` /
   `SagaLifecycleEventKind`, which since 004 is handed to storage through `StorageProvider.save(instance, entries)`.
-  004 adapted the module: `PostgresStorageProvider(DataSource, TransactionBoundary)` joins the engine's transaction
+  004 adapted the module: `PostgresStorageProvider(DataSource, TransactionBoundary)` joins the runtime's transaction
   and locks with `findByIdAndLock` (`FOR NO KEY UPDATE`), and `JdbcTransactionBoundary` is a plain-JDBC
   `TransactionBoundary`.
-- Implemented and unit-tested over in-memory doubles, added by `specs/004-saga-engine`: the saga engine runtime in
-  `saga-forge-engine` (`SagaEngine`, an `EventReceiver`): event routing by association, the saga-scoped unit of work
+- Implemented and unit-tested over in-memory doubles, added by `specs/004-saga-engine`: the saga runtime in
+  `saga-forge-runtime` (`SagaRuntime`, an `EventReceiver`): event routing by association, the saga-scoped unit of work
   in the host's local transaction, the `FAILED` write, one unit of work per instance (in-process lock plus
   `findByIdAndLock`), the `Outbox` SPI (named `EventHandoff` until 007; `AFTER_COMMIT` default `ImmediateDispatchOutbox`, `IN_TRANSACTION`), reentrancy
   rejection and fail-fast startup validation. Production implementations of `SagaContext`, `SagaLifecycle`,
   `CommandGateway` and `EventPublisher` live there, package-private. The 002 harness stays as a test-only reference
-  the engine is compared against.
+  the runtime is compared against.
 - Implemented and unit-tested, added by `specs/005-step-retry`: step retry and idempotent command processing.
   `@SagaStep(retry = @RetryPolicy(...))` (scanner rule R19, Property 29); core `core.failure` markers
   `TransientFailure`/`FinalFailure` and `FailureClassification` (`TRANSIENT`, `FINAL`, `EXHAUSTED`,
   `UNCLASSIFIED`); `core.command.CommandId`, supplied to a `@CommandHandler` that declares a `CommandId` parameter;
   `HandlingOutcome.DUPLICATE` for an event of an already completed step; `SagaInstance.pendingRetry`,
   `StepRecord.attempts`/`handledCommands`, `SagaFailure.classification`/`attempts`, lifecycle kind `ATTEMPT_FAILED`.
-  The engine's `AttemptLoop` re-runs a unit of work after an in-process, bounded wait (`RetryPause`,
+  The runtime's `AttemptLoop` re-runs a unit of work after an in-process, bounded wait (`RetryPause`,
   `maxTotalRetryBackoff`, default 30 s). Postgres persists the new fields; existing databases apply
   `schema-upgrade-005.sql`.
 - Implemented and tested, added by `specs/006-saga-compensation`: compensation. `@StartCompensation` marks a
   business-failure step (with `@SagaStep`; scanner rules R20 to R22, Properties 30 to 32); a `@SagaCompensation`
-  method returns `void` and takes no parameter or one `core.compensation.CompensationTrigger`. The engine compensates
+  method returns `void` and takes no parameter or one `core.compensation.CompensationTrigger`. The runtime compensates
   every other `COMPLETED` step, most recently completed first (`StepRecord.completionSequence`), each in its own unit
   of work (`CompensationRun`/`CompensationUnitOfWork`), after a `@StartCompensation` step commits or a `FINAL`/
   `EXHAUSTED` failure once a step committed (`CompensationStartWrite`); an `UNCLASSIFIED` failure, or one with nothing
@@ -68,7 +68,7 @@
   `handoffFailures` → `outboxFailures`). Core gains the storage-agnostic `core.spi.store.MessageStore` (append in the
   unit of work's transaction, leases with expiry, consumed/set-aside, queries, retention), `Outbox.committed` and
   `supportsCommands`, `OutgoingMessages.commands`, and outbox commands: `@Command(delivery = CommandDelivery.OUTBOX)`
-  (rule R23, Property 35) stored with the sending unit of work and handled after it commits through the engine's
+  (rule R23, Property 35) stored with the sending unit of work and handled after it commits through the runtime's
   `CommandReceiver`, with the `CommandId` assigned at send time. `saga-forge-transport-inmemory` (core-only) is an
   `IN_TRANSACTION` outbox plus an in-process relay: at least once, per-aggregate order, backoff and set-aside,
   restart recovery, operator queries. `PostgresMessageStore` stores the log (`saga_message_store`; existing databases
@@ -88,8 +88,8 @@
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
-- `saga-forge-engine` — the saga runtime; depends on the JDK and `saga-forge-core` only. Public surface:
-  `SagaEngine` with its host-facing builder, `StartupReport`, `SagaEngineStartupException`,
+- `saga-forge-runtime` — the saga runtime; depends on the JDK and `saga-forge-core` only. Public surface:
+  `SagaRuntime` with its host-facing builder, `StartupReport`, `SagaRuntimeStartupException`,
   `ImmediateDispatchOutbox`; everything else is package-private in `engine.internal`. Every contract it needs lives
   in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
   `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
@@ -97,7 +97,7 @@
 - `saga-forge-spring-boot-starter` — today: the in-memory transport's wiring (`SpringTransactionBoundary`,
   `InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`, `ApplicationEventBridge`,
   `ModulithInteropConfiguration`/`ModulithMessageStore`). Target: autoconfiguration that detects an available datastore
-  and transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
+  and transport on the classpath and wires the runtime. No `SagaRuntimeConfig` for users to hand-assemble.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
   (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
   (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core.
@@ -137,7 +137,7 @@
   `FAILED`, or compensates if the failure is `FINAL`/`EXHAUSTED` and an earlier unit of work committed.
   `SagaContext` values live in a separate `SagaContextRecord` and survive the rollback.
 - Write order (decided, `specs/003-postgres-saga-persistence/research.md` §8): a `SagaContextRecord` is saved
-  only after its `SagaInstance` row exists. The engine's unit of work persists the instance with
+  only after its `SagaInstance` row exists. The runtime's unit of work persists the instance with
   `StorageProvider.save` before the first `SagaContextStore.save` for that `sagaId`; a context save for an
   unknown `sagaId` fails with `UncheckedSqlException` (FK violation). 002's harness does not follow this yet
   (G-ENG-01).
@@ -193,7 +193,7 @@
   event (G-006-06); upgraded instances may get a name-ordered `completionSequence` (G-006-07); compensations block the
   caller and hold the instance (G-006-08); a failed compensation is never retried (G-006-09). A compensation
   interrupted before its commit runs again on resume, so its commands must be idempotent (pass `CommandId` on).
-- `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the engine leaves
+- `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the runtime leaves
   `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
 - Engine limitations, see memory.md G-ENG-05 to G-ENG-13: a crash between the creation write and the first unit of
   work strands a `CREATED` instance (G-ENG-05); the default `ImmediateDispatchOutbox` is at most once, an outbox needs
