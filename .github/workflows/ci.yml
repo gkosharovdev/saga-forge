@@ -1,0 +1,70 @@
+name: CI
+
+# Pushes to any branch run the unit test suites. Pushes to master (a merged pull request) run the unit and the
+# integration suites: the Testcontainers classes tagged "container", enabled by the container-tests profile.
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A newer push to a branch supersedes the running build; every master build runs to the end.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    if: github.ref != 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and run unit tests
+        run: mvn -B -ntp clean verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: "**/target/surefire-reports/"
+          retention-days: 7
+
+  unit-and-integration-tests:
+    name: Unit and integration tests
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Testcontainers uses the runner's Docker daemon (postgres:16-alpine).
+      - name: Build and run unit and integration tests
+        run: mvn -B -ntp -Pcontainer-tests clean verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: "**/target/surefire-reports/"
+          retention-days: 7
