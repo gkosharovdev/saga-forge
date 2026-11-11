@@ -15,12 +15,17 @@ import java.util.List;
  *                     copy
  * @param commands     the outbox commands, in send order; non-null, no {@code null} element; an unmodifiable
  *                     defensive copy
+ * @param recordedEvents every event recorded in the unit of work, in recording order, including events a step of the
+ *                     owning instance ran in process; a superset of {@code events} (since
+ *                     {@code specs/008-spring-boot-starter}); non-null, no {@code null} element; an unmodifiable
+ *                     defensive copy
  * @throws IllegalArgumentException if {@code unitOfWorkId}, {@code events}, {@code commands} or an element of them is
- *                                  {@code null}, if both {@code events} and {@code commands} are empty, or if exactly
+ *                                  {@code null}, if {@code events}, {@code commands} and {@code recordedEvents} are all
+ *                                  empty, or if exactly
  *                                  one of {@code sagaType} and {@code sagaId} is present
  */
 public record OutgoingMessages(String unitOfWorkId, String sagaType, String sagaId, List<Object> events,
-        List<OutgoingCommand> commands) {
+        List<OutgoingCommand> commands, List<Object> recordedEvents) {
 
     public OutgoingMessages {
         if (unitOfWorkId == null) {
@@ -33,9 +38,21 @@ public record OutgoingMessages(String unitOfWorkId, String sagaType, String saga
         }
         events = copyWithoutNulls(events, "events");
         commands = copyWithoutNulls(commands, "commands");
-        if (events.isEmpty() && commands.isEmpty()) {
-            throw new IllegalArgumentException("events must not be empty when there are no commands");
+        recordedEvents = copyWithoutNulls(recordedEvents, "recordedEvents");
+        if (events.isEmpty() && commands.isEmpty() && recordedEvents.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "events must not be empty when there are no commands and no recorded events");
         }
+    }
+
+    /**
+     * A batch whose recorded events are its {@code events}, as before {@code specs/008-spring-boot-starter}.
+     *
+     * @throws IllegalArgumentException under the rules of the canonical constructor
+     */
+    public OutgoingMessages(String unitOfWorkId, String sagaType, String sagaId, List<Object> events,
+            List<OutgoingCommand> commands) {
+        this(unitOfWorkId, sagaType, sagaId, events, commands, events);
     }
 
     /**

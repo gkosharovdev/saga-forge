@@ -17,7 +17,8 @@ import org.springframework.modulith.events.core.EventSerializer;
 
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
-import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
@@ -26,13 +27,14 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
  * present, the transport's {@link MessageStore} is a {@link ModulithMessageStore}, so the application has one outbox.
  * Switched off with {@code saga-forge.transport.modulith-interop=false}.
  */
-@AutoConfiguration(before = InMemoryTransportConfiguration.class, afterName = {
+@AutoConfiguration(before = PostgresStorageConfiguration.class, after = SpringTransactionConfiguration.class, afterName = {
         "org.springframework.modulith.events.jdbc.JdbcEventPublicationAutoConfiguration",
         "org.springframework.modulith.events.config.EventPublicationAutoConfiguration",
         "org.springframework.modulith.events.jackson.JacksonEventSerializationConfiguration",
         "org.springframework.modulith.events.jackson2.Jackson2EventSerializationConfiguration" })
 @ConditionalOnClass({ EventPublicationRepository.class, InMemoryTransport.class, PostgresMessageStore.class })
-@ConditionalOnBean({ EventPublicationRepository.class, EventSerializer.class, DataSource.class })
+@ConditionalOnBean({ EventPublicationRepository.class, EventSerializer.class, DataSource.class,
+        TransactionBoundary.class })
 @ConditionalOnProperty(prefix = "saga-forge.transport", name = "modulith-interop", havingValue = "true",
         matchIfMissing = true)
 public class ModulithInteropConfiguration {

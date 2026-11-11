@@ -123,8 +123,8 @@ step's policy, re-running the whole unit of work. A final failure (marked `Final
 compensates the steps that already committed; an unmarked failure ends the saga `FAILED`. A compensation that fails
 is never retried: the saga ends `REQUIRES_INTERVENTION`, and the stored instance shows what was and was not undone.
 An event for a step that already completed is reported `DUPLICATE` and runs nothing. Loading and saving aggregates
-stays in your code, through `@AggregateLoader`/`@AggregateSaver` methods or, once the starter ships, its
-Spring Data adapter (not implemented yet).
+stays in your code, through `@AggregateLoader`/`@AggregateSaver` methods, or, in a Spring Boot application, goes
+through the aggregate's Spring Data repository.
 
 Nothing in these classes imports a datastore driver, a Kafka client, or a transaction manager. Those
 are cross-cutting concerns Spring Boot autoconfiguration wires up for you based on what it finds on
@@ -191,8 +191,10 @@ command identities and duplicate-event detection are implemented in the runtime 
 final or exhausted step failure, in reverse completion order, and resumes after a crash. The in-memory transport
 (feature 007) delivers events — and commands marked `@Command(delivery = OUTBOX)` — between the modules of one process,
 from a durable message store written in the same transaction as the saga state, so unconsumed messages survive a
-restart; the starter wires it into Spring Boot, with optional Spring Modulith interop. Not implemented yet: the
-Kafka transport, the starter's storage/transport detection, and MySQL and MongoDB storage. See
+restart. The Spring Boot starter (feature 008) assembles and starts the runtime from the application's beans,
+`DataSource` and Spring Data repositories, publishes saga events to Spring Modulith's module listeners, and reports
+the message store through Actuator. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
+Quarkus extension. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as
@@ -204,13 +206,16 @@ historical planning artifacts, superseded by the docs above where they conflict.
 |---|---|---|
 | `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
 | `saga-forge-runtime` | Saga runtime over the core SPI: `SagaRuntime` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
-| `saga-forge-spring-boot-starter` | Autoconfiguration. Today: the in-memory transport's wiring (Spring transactions, lifecycle, application-event bridge, Spring Modulith interop). Target: detects datastore + transport, wires the runtime | `saga-forge-core`; transport, Postgres, engine (optional) |
+| `saga-forge-spring-boot-starter` | Auto-configuration: collects the saga model, detects storage and transport, builds and starts the runtime, Spring host SPIs (beans, parameters, Spring Data aggregates), Spring Modulith delivery, Actuator. See [its README](saga-forge-spring-boot-starter/README.md) | `saga-forge-runtime`, `saga-forge-transport-inmemory`; Postgres, Spring Data, Modulith, Actuator (optional) |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | In-process transport with a durable message store (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
 | `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-runtime` (test scope) |
+| `saga-forge-example-spring` | The canonical saga as a Spring Boot application: Spring Data JDBC aggregate, service beans, no Saga Forge assembly code | the starter, `saga-forge-storage-postgres` |
 
-## Getting started (target shape)
+## Getting started
+
+In a Spring Boot 4.1 application, add the starter and the Postgres storage module:
 
 ```xml
 <dependency>
@@ -225,10 +230,22 @@ historical planning artifacts, superseded by the docs above where they conflict.
 </dependency>
 ```
 
-Add `saga-forge-transport-kafka` if you're on Kafka; omit it and the starter falls back to
-the in-memory transport. See [docs/architecture.md](docs/architecture.md) for the full detection matrix.
+Point Spring Boot at your database as usual:
 
-### The in-memory transport today (plain Java)
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/orders
+spring.datasource.username=orders
+spring.datasource.password=orders
+saga-forge.storage.postgres.initialize-schema=always   # development only
+```
+
+That is all the configuration there is. The starter finds the saga, handler and aggregate classes in your
+application's packages, builds the runtime over your `DataSource` and transactions, delivers events through the
+in-memory transport, and starts it. Publish the first event through the `EventPublisher` bean. See the
+[starter README](saga-forge-spring-boot-starter/README.md) for what it assembles, the Spring Modulith and Actuator
+setups, every property and how to replace each piece; `saga-forge-example-spring` is the complete application.
+
+### Without Spring (plain Java)
 
 ```java
 PostgresMessageStore log = new PostgresMessageStore(dataSource, transactions);   // tables in schema.sql

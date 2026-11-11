@@ -447,15 +447,20 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     /**
-     * Every recorded event no step of this instance ran, in recording order, and every outbox command sent, in send
-     * order; empty if there is neither.
+     * Every recorded event no step of this instance ran, in recording order, every outbox command sent, in send order,
+     * and every recorded event at all (008 {@code recordedEvents}); empty if there is neither an event to hand on nor a
+     * command, unless the outbox observes recorded events and some were recorded.
      */
     private Optional<OutgoingMessages> buffered() {
         List<Object> events = recorded.stream().filter(entry -> !entry.ranInProcess).map(entry -> entry.event)
                 .toList();
-        return events.isEmpty() && outboxCommands.isEmpty() ? Optional.empty()
-                : Optional.of(new OutgoingMessages(unitOfWorkId, trigger.saga().typeName(), trigger.sagaId(), events,
-                        outboxCommands));
+        List<Object> recordedEvents = recorded.stream().map(entry -> entry.event).toList();
+        boolean nothingToHandOn = events.isEmpty() && outboxCommands.isEmpty();
+        if (nothingToHandOn && (recordedEvents.isEmpty() || !settings.outbox().observesRecordedEvents())) {
+            return Optional.empty();
+        }
+        return Optional.of(new OutgoingMessages(unitOfWorkId, trigger.saga().typeName(), trigger.sagaId(), events,
+                outboxCommands, recordedEvents));
     }
 
     private Object newSagaObject() {

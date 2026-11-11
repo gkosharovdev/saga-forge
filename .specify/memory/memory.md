@@ -66,6 +66,9 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   `OrderProcessingSaga` stores a `BigDecimal` (`orderAmount`) and `CreateBookingSaga` a `Long` (`amount`, read back as
   `Long`) in `SagaContext`, so both would fail on `PostgresSagaContextStore` (rejected on write / type mismatch on
   read). 004's tests use in-memory stores only; the starter's first Postgres run will meet it.
+  Met at 008 (2026-11-11): the starter's order fixture failed `handleOrderCreated` with "unsupported value type
+  java.math.BigDecimal". The 008 fixtures and `saga-forge-example-spring` keep the amount as a `String`; the
+  framework-free `saga-forge-example` still stores a `BigDecimal` and so cannot run on Postgres as written.
 
 ### G-003-08: `values` column name is an SQL keyword
 - **Description**: `saga_context.values` uses an SQL keyword as a column name; quote it as `"values"` in the
@@ -257,7 +260,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   and create or configure no connection pool. Detecting the datastore and wiring a `DataSource`/pool is the
   Spring Boot starter's job, which does not exist yet.
 - **Origin**: `specs/003-postgres-saga-persistence/research.md` §7; plan.md "Carried forward".
-- **Status**: open (deferred to the starter feature).
+- **Status**: closed by 008 (2026-11-12): the starter builds Postgres storage over the application's `DataSource`
+  bean, which Spring Boot's own auto-configuration creates and pools; the starter configures no pool of its own.
 
 ### G-003-27: A plain `mvn test` still runs the container suites
 - **Description**: Nothing separates the container-backed test classes (G-003-23) from the unit tests: there is
@@ -518,6 +522,19 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Origin**: 004 T018.
 - **Status**: open (documented in its Javadoc; not used by any engine test).
 
+### G-ENG-24: An event a step of the recording instance ran is not handed to other saga types
+- **Description**: `SagaUnitOfWork.buffered()` hands the outbox only the recorded events no step of the owning
+  instance ran in process. An event that continues its own saga (for example `OrderCompletedEvent`, which ends
+  `OrderProcessingSaga`) therefore never reaches another saga type with a step for the same event class (a
+  `FulfilmentSaga` starting on it): the event is consumed in process and not dispatched. 004's fan-out rule (research
+  §16, "for each saga type ... with a step for the event's class") applies only to events that come through the
+  transport or the `EventPublisher`. Since 008 the batch's `recordedEvents` does carry the event, so an outbox that
+  observes recorded events (the starter's application-event publishing) sees it, but the transport does not.
+- **Origin**: 008 T019 (`RuntimeAssemblyContainerTest`, 2026-11-11); the test's second saga listens to an event of
+  its own (`OrderReadyToShipEvent`) instead.
+- **Status**: open. Deciding needs a spec: hand on every recorded event that another saga type has a step for, and
+  keep in-process delivery for the owning instance only.
+
 ## Dependency alignment with Spring Boot 4.1.2 (future starter feature)
 
 Noted only; nothing is bumped until the starter feature decides.
@@ -773,7 +790,9 @@ Noted only; nothing is bumped until the starter feature decides.
   Modulith interop) into `saga-forge-spring-boot-starter`. Classpath detection of storage and transport and engine
   assembly remain a separate starter feature.
 - **Origin**: `specs/007-in-memory-transport/spec.md` FR-029.
-- **Status**: open (deferred).
+- **Status**: closed by 008 (2026-11-12): storage detection, runtime assembly and lifecycle live in
+  `SagaRuntimeConfiguration`, `PostgresStorageConfiguration` and `SagaRuntimeLifecycle`; 007's acceptance suites run
+  through the starter-assembled runtime (SC-006). Broker detection waits for the Kafka transport.
 
 ### G-007-03: Redelivery does not recover a stranded start
 - **Description**: The durable log redelivers a start event after a crash, but the engine reports it as a duplicate
@@ -853,6 +872,80 @@ Noted only; nothing is bumped until the starter feature decides.
   commands"). Research §16.
 - **Gap status**: G-ENG-07 closed for hosts using the in-memory transport; G-007-01 to -04, -06 to -08 open or
   accepted as recorded above.
+
+## Spring Boot starter (008)
+
+### G-008-01: Spring Modulith event externalization and `Scenario` test support deferred
+- **Description**: 008 gives Spring Modulith applications the single outbox (007), module-structure compatibility and
+  delivery of saga-produced events to `@ApplicationModuleListener`s with Modulith's transactional semantics
+  (FR-018a). Not covered: Spring Modulith's event externalization (publishing saga events to a broker through
+  Modulith's externalization support) and `Scenario`-based test support for sagas in a Modulith application.
+- **Origin**: `specs/008-spring-boot-starter/spec.md` Clarifications (Q1, option B chosen over C), FR-018b.
+- **Remark for the next Spring Modulith spec**: start from FR-018a's in-transaction publication — externalization
+  hooks onto the same registry entries. Decide how `Scenario` relates to the planned saga test fixture
+  (`SagaFixture`) so the two do not grow into competing test APIs, and check overlap with the Kafka transport
+  before externalizing to a broker.
+- **Status**: open (deferred to a later Spring Modulith feature).
+
+### G-008-02: Operator endpoint is read-only; write operations and richer views deferred
+- **Description**: 008 exposes a read-only `sagaforge` Actuator endpoint (message counts per status, oldest unconsumed
+  message age) and a health indicator that is down while messages are set aside. Not covered: redelivering set-aside
+  messages through the endpoint, saga-instance views (status, steps, failure) and a way out of
+  `REQUIRES_INTERVENTION` (G-006-03).
+- **Origin**: `specs/008-spring-boot-starter/spec.md` Clarifications (Q2, option B chosen over C), FR-020.
+- **Remark for the observability spec**: build on 008's endpoint and health indicator rather than adding a parallel
+  surface; redelivery over HTTP needs a security decision (who may call it) and an audit trail; metrics (set-aside
+  count, oldest unconsumed age, saga outcomes, retries) should mirror what the endpoint reports, and trace context
+  should travel through the message store.
+- **Status**: open (deferred to the observability feature).
+
+### G-008-03: Events published through Spring's own publisher do not reach sagas
+- **Description**: with 008, saga-produced events reach Spring listeners (FR-018a), but not the other way round: an
+  event application code publishes through Spring's `ApplicationEventPublisher` is not routed to sagas. Sagas receive
+  events through Saga Forge's `EventPublisher` or `DomainEvents.record`.
+- **Origin**: `specs/008-spring-boot-starter/research.md` §8, contracts/application-events.md.
+- **Status**: open (revisit with the Spring Modulith follow-up, G-008-01).
+
+### G-008-04: Repository tests cannot use `@SpringBootTest`
+- **Description**: the repository stays on JUnit 5 (jqwik 1.9 runs on JUnit Platform 1.x), while Spring Framework 7's
+  `SpringExtension` follows its JUnit line, so the starter's own tests use `ApplicationContextRunner` and
+  `SpringApplicationBuilder` contexts. Applications using the starter are unaffected. Related to G-DEP-01.
+- **Origin**: `specs/008-spring-boot-starter/research.md` §13.
+- **Status**: open (decide together with G-DEP-01 and a jqwik upgrade).
+
+### Spring Boot starter (008), implementation notes
+- 2026-11-11 to 2026-11-12: implemented from `specs/008-spring-boot-starter/tasks.md` (T001 to T058).
+- **Core**: `OutgoingMessages.recordedEvents` (sixth component; older constructors default it to `events`) and
+  `Outbox.observesRecordedEvents()` (default `false`). **Deviation from research §8**: the runtime hands a batch that
+  carries only recorded events to an outbox that opts in, so the default outbox keeps 004's "nothing to hand on,
+  nothing stored" behaviour. Property 26 in `.kiro/specs/saga-forge-framework/design.md` says so.
+- **Runtime**: `SagaUnitOfWork.buffered()` fills `recordedEvents`; tests `RecordedEventsTest`, Property 26 property
+  test.
+- **Starter**: as listed in AGENTS.md's Module Map. Deviations: no separate `SagaForgeStartupCheck` bean — storage
+  detection (`StorageDetection`, keyed by module name so a second module can be simulated) and the Spring host checks
+  run inside the `SagaRuntime` bean method, the two-runtime check in a shared `soleRuntime` used by the gateway,
+  publisher and lifecycle beans; `SpringSagaObjectProvider.supports` also accepts saga classes without a bean that
+  have a no-argument constructor, because the runtime asks the provider for every saga type (contract updated); the
+  `in-transaction` mode decorates the `Outbox` bean through a `BeanPostProcessor`; the starter and the Spring example
+  compile with `-parameters` (Spring Data maps constructor parameters by name).
+- **007 changes**: `TransportLifecycle` no longer starts the runtime; the `SpringTransactionBoundary` and
+  `PostgresMessageStore` beans moved to `SpringTransactionConfiguration` and `PostgresStorageConfiguration`;
+  `saga-forge.transport.publish-application-events` was removed (replaced by `saga-forge.application-events.mode`);
+  the acceptance app (`spring-test/acceptance/AcceptanceApp`) lets the starter assemble the runtime from a
+  `SagaModelContributor`.
+- **Found while implementing**: G-ENG-24 (an event its own instance runs is not handed to other saga types) and the
+  first Postgres run of G-003-07 (`BigDecimal` in `SagaContext`).
+- **Self-check (T056)**: FR-001 to FR-005 — `RuntimeAssemblyContainerTest`, `SagaModelCollectorTest`; FR-006 to FR-009
+  — `MisconfigurationTest`, `StorageDetectionTest`, `InMemoryTransportConfigurationTest`; FR-010 to FR-013 —
+  `SpringHostSpisContainerTest`; FR-014 — `OverridesTest`; FR-015 — `SagaForgePropertiesTest`, `ReadmePropertiesTest`;
+  FR-016 — `SchemaInitializerContainerTest`; FR-017 — `MisconfigurationTest`, `FailureAnalyzersTest`; FR-018 — the 007
+  Modulith interop acceptance suite; FR-018a — `ApplicationEventsModeTest`, `ModuleListenerContainerTest`; FR-018b —
+  G-008-01; FR-019 — `ModulithModulesTest`; FR-020 — `ActuatorTest`. SC-001/SC-002 — `OrderApplicationContainerTest`
+  (no assembly code); SC-003 — `MisconfigurationTest`, `SpringHostSpisContainerTest`; SC-004 — `OverridesTest`; SC-005 —
+  `StartupOverheadTest` (18 ms for 20 sagas); SC-006 — `SpringOwnLogAcceptanceContainerTest`,
+  `ModulithInteropAcceptanceContainerTest`.
+- **Final checkpoint (T057, 2026-11-12)**: `mvn -B -Pcontainer-tests clean verify` green for the whole build, 1,502
+  tests (core 465, runtime 678, in-memory transport 51, Postgres 212, starter 81, example 13, Spring example 2).
 
 ## Repository hygiene
 

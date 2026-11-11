@@ -25,7 +25,6 @@ public class TransportProperties {
     private Duration retention = DEFAULTS.retention();
     private Duration retentionSweepInterval = DEFAULTS.retentionSweepInterval();
     private Duration heartbeatInterval = DEFAULTS.heartbeatInterval();
-    private boolean publishApplicationEvents = true;
     private boolean modulithInterop = true;
 
     /** @return the settings these properties describe */
@@ -54,8 +53,6 @@ public class TransportProperties {
     public void setRetentionSweepInterval(Duration value) { this.retentionSweepInterval = value; }
     public Duration getHeartbeatInterval() { return heartbeatInterval; }
     public void setHeartbeatInterval(Duration heartbeatInterval) { this.heartbeatInterval = heartbeatInterval; }
-    public boolean isPublishApplicationEvents() { return publishApplicationEvents; }
-    public void setPublishApplicationEvents(boolean value) { this.publishApplicationEvents = value; }
     public boolean isModulithInterop() { return modulithInterop; }
     public void setModulithInterop(boolean modulithInterop) { this.modulithInterop = modulithInterop; }
 }

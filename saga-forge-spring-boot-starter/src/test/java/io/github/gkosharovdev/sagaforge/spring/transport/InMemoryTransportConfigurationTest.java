@@ -13,24 +13,34 @@ import org.springframework.modulith.events.core.EventPublicationRepository;
 import org.springframework.modulith.events.core.EventSerializer;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
+import io.github.gkosharovdev.sagaforge.spring.SagaForgeProperties.SchemaInitialization;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithInteropConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithMessageStore;
+import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
-/** Conditions and properties of the transport's Spring wiring (contracts/spring-wiring.md, tasks.md T074). */
+/** Conditions and properties of the transport's Spring wiring (contracts/spring-wiring.md, tasks.md T074; 008 moved the
+ * boundary and the Postgres store into their own configurations). */
 class InMemoryTransportConfigurationTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner().withConfiguration(
-            AutoConfigurations.of(ModulithInteropConfiguration.class, InMemoryTransportConfiguration.class));
+            AutoConfigurations.of(SpringTransactionConfiguration.class, ModulithInteropConfiguration.class,
+                    PostgresStorageConfiguration.class, InMemoryTransportConfiguration.class));
 
+    /** A data source that is never connected to: the schema initializer is replaced by one that checks nothing. */
     private ApplicationContextRunner withDatabase() {
         DataSource dataSource = new org.postgresql.ds.PGSimpleDataSource();
         return runner.withBean(DataSource.class, () -> dataSource)
-                .withBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource));
+                .withBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource))
+                .withBean(SchemaInitializer.class, () -> new SchemaInitializer(dataSource, SchemaInitialization.NEVER));
     }
 
     @Test
@@ -40,27 +50,26 @@ class InMemoryTransportConfigurationTest {
     }
 
     @Test
-    @DisplayName("with a database: Spring boundary, Postgres log, transport, lifecycle and event bridge")
+    @DisplayName("with a database: Spring boundary, Postgres store, transport, its dispatcher and outbox, lifecycle")
     void ownLogWiring() {
         withDatabase().run(context -> {
             assertThat(context).hasSingleBean(InMemoryTransport.class);
             assertThat(context.getBean(TransactionBoundary.class)).isInstanceOf(SpringTransactionBoundary.class);
             assertThat(context.getBean(MessageStore.class)).isInstanceOf(PostgresMessageStore.class);
-            assertThat(context).hasSingleBean(TransportLifecycle.class).hasSingleBean(ApplicationEventBridge.class);
+            assertThat(context).hasSingleBean(TransportLifecycle.class).hasSingleBean(EventDispatcher.class)
+                    .hasSingleBean(Outbox.class);
         });
     }
 
     @Test
-    @DisplayName("properties are bound; the application-event bridge can be switched off")
+    @DisplayName("transport properties are bound")
     void properties() {
         withDatabase().withPropertyValues("saga-forge.transport.workers=7",
-                "saga-forge.transport.max-attempts=4", "saga-forge.transport.retention=3d",
-                "saga-forge.transport.publish-application-events=false").run(context -> {
+                "saga-forge.transport.max-attempts=4", "saga-forge.transport.retention=3d").run(context -> {
                     TransportProperties properties = context.getBean(TransportProperties.class);
                     assertThat(properties.toSettings().workers()).isEqualTo(7);
                     assertThat(properties.toSettings().maxAttempts()).isEqualTo(4);
                     assertThat(properties.toSettings().retention()).hasDays(3);
-                    assertThat(context).doesNotHaveBean(ApplicationEventBridge.class);
                 });
     }
 

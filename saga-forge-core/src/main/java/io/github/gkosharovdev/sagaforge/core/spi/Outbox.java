@@ -87,6 +87,18 @@ public interface Outbox {
     }
 
     /**
+     * Reports whether this outbox wants batches whose only content is {@link OutgoingMessages#recordedEvents()}: a unit
+     * of work whose every event ran in process and that sent no outbox command. Outboxes that publish every recorded
+     * event to other listeners, such as the Spring starter's application-event outbox, return {@code true}
+     * ({@code specs/008-spring-boot-starter} FR-018a). Read once, when the runtime starts.
+     *
+     * @return {@code false} unless overridden: such units of work then reach no outbox, as before 008
+     */
+    default boolean observesRecordedEvents() {
+        return false;
+    }
+
+    /**
      * Called after the commit of a unit of work whose batch this outbox stored with {@link Timing#IN_TRANSACTION},
      * after the instance lock was released, on the unit-of-work thread, with no engine transaction active; for
      * example to wake a relay ({@code specs/007-in-memory-transport} research §2). Never called after a rollback,

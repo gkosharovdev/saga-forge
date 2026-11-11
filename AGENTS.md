@@ -76,9 +76,22 @@
   Modulith interop (one outbox: messages in Modulith's registry, Saga Forge's delivery records beside them).
 - Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; they all passed on
   2026-11-09 (186 tests), closing G-003-23. The 007 container suites (Postgres log contract, fault injection,
-  10k-message restart, Spring own-log and Spring Modulith interop acceptance) passed on 2026-11-11.
-- Not implemented: MySQL and MongoDB storage, the Kafka transport, and the starter's storage/transport detection and
-  engine assembly (G-007-02); no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
+  10k-message restart, Spring own-log and Spring Modulith interop acceptance) passed on 2026-11-11. The whole build
+  with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests).
+- Implemented and tested, including container suites, added by `specs/008-spring-boot-starter`: the Spring Boot
+  starter assembles and starts the runtime with no host code. It collects the model (auto-configuration packages,
+  beans, `saga-forge.scan-packages`, `SagaModelContributor`), detects storage (`saga-forge.storage.type` when
+  ambiguous), builds Postgres storage over the `DataSource`, backs the host SPIs with Spring (`SpringSagaObjectProvider`:
+  prototype saga beans or the no-argument constructor; `SpringHandlerInstanceProvider`;
+  `SpringHandlerParameterResolver`; `SpringDataAggregateResolver`), and starts the runtime in `SagaRuntimeLifecycle`
+  one phase before `TransportLifecycle`. Misconfigurations fail through `FailureAnalyzer`s. Every bean backs off for an
+  application bean. Core gains the additive `OutgoingMessages.recordedEvents` and `Outbox.observesRecordedEvents()`;
+  the starter's `ApplicationEventPublishingOutbox` publishes recorded events to Spring inside the unit of work
+  (`saga-forge.application-events.mode`, replacing 007's `publish-application-events`), so Spring Modulith's
+  `@ApplicationModuleListener`s receive saga events. Optional `sagaforge` Actuator endpoint and health indicator.
+  `saga-forge-example-spring` is the canonical saga as a Spring Boot app. The starter's README documents defaults,
+  properties and overrides; `ReadmePropertiesTest` keeps it in step with the configuration metadata.
+- Not implemented: MySQL and MongoDB storage, the Kafka transport; no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
   `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
   actual `.java` source before relying on it.
@@ -94,10 +107,13 @@
   in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
   `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
   `TransactionalInMemoryStorageProvider`, `TestTransport`, ...).
-- `saga-forge-spring-boot-starter` — today: the in-memory transport's wiring (`SpringTransactionBoundary`,
-  `InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`, `ApplicationEventBridge`,
-  `ModulithInteropConfiguration`/`ModulithMessageStore`). Target: autoconfiguration that detects an available datastore
-  and transport on the classpath and wires the runtime. No `SagaRuntimeConfig` for users to hand-assemble.
+- `saga-forge-spring-boot-starter` — auto-configuration (008), see its `README.md`: `SagaRuntimeConfiguration`
+  (`SagaModelCollector`, the runtime, `CommandGateway`/`EventPublisher` beans, `SagaRuntimeLifecycle`),
+  `SpringTransactionConfiguration`, `PostgresStorageConfiguration` (`SchemaInitializer`), `SpringHostConfiguration`,
+  `ApplicationEventsConfiguration`, `SagaForgeActuatorConfiguration`, the failure analyzers, `SagaForgeProperties`;
+  plus 007's transport wiring (`InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`,
+  `ApplicationEventBridge`, `ModulithInteropConfiguration`/`ModulithMessageStore`). No `SagaRuntimeConfig` for users
+  to hand-assemble. Spring code stays in this module and `saga-forge-example-spring`.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
   (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
   (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core.
@@ -110,6 +126,9 @@
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
   whatever the annotation model currently supports.
+- `saga-forge-example-spring` — the canonical saga as a Spring Boot application (Spring Data JDBC `Order`, service
+  beans, no assembly code). Keep it in step with `saga-forge-example`; it keeps amounts as `String` in `SagaContext`
+  (G-003-07).
 
 ## Saga Model (Project-Specific)
 - Sagas are class-based and annotation-driven: `@Saga` on the class, `@SagaId` on exactly one `String` field.
@@ -201,7 +220,6 @@
   (G-ENG-08); the `FAILED` write can mark an instance another process moved on (G-ENG-10); the Postgres
   `FOR NO KEY UPDATE` reasoning is unverified against a database (G-ENG-11); `begin()` suspending vs. rejecting a
   host transaction is boundary-specific (G-ENG-12).
-- Deferred to the Spring starter: a Spring Data repository adapter behind `AggregateResolver`.
 - A `FAILED` saga (an `UNCLASSIFIED` failure) keeps its committed effects in place; only `FINAL`/`EXHAUSTED`
   failures and `@StartCompensation` steps compensate.
 - A retried attempt sees the `SagaContext` values earlier attempts wrote (they live outside the transaction); steps
@@ -216,6 +234,11 @@
   start (G-007-03); delivery order is per aggregate, not per saga instance (G-007-04); relay logic may need a shared
   module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); one running instance per
   log (FR-021).
+- Spring Boot starter (008), see memory.md G-008-01 to G-008-04: Modulith event externalization and `Scenario`
+  support deferred (G-008-01); the Actuator endpoint is read-only (G-008-02); events published through Spring's own
+  `ApplicationEventPublisher` do not reach sagas (G-008-03); repository tests use `ApplicationContextRunner` /
+  `SpringApplicationBuilder`, not `@SpringBootTest` (G-008-04). An event a step of its own instance runs is not handed
+  to other saga types (G-ENG-24).
 - Postgres storage (003), see memory.md for detail: concurrency is a row lock plus a forward-transition check,
   with no version field (G-003-02, -03, -13, -19 to -22; G-003-01/-02 explicitly deferred); steps completed in one
   `save()` are ordered by a step-name tiebreak (G-003-04, -16); no lifecycle-history query API, FR-012

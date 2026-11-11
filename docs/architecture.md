@@ -24,7 +24,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the runtime, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
 | Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
-| Spring Boot autoconfiguration | The in-memory transport's wiring only (`SpringTransactionBoundary`, lifecycle, application-event bridge, Spring Modulith interop) ([007](../specs/007-in-memory-transport/spec.md)); storage/transport detection and engine assembly not implemented |
+| Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
 
 ## Module responsibilities
 
@@ -39,16 +39,25 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   allows one unit of work per instance at a time, stores committed events in an `Outbox`, and validates the
   registered model and plug-ins at `start()`. Host integrations assemble it through its builder; application
   developers using the starter never do.
-- **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring. Detects, via
-  `@ConditionalOnClass`, which storage and transport dependencies are on the classpath, and assembles the
-  engine accordingly. There is no `SagaRuntimeConfig` for a user to hand-build; if autoconfiguration can't
-  resolve an unambiguous choice (e.g. two storage providers on the classpath), it should fail fast with a
-  clear error rather than guess. Today (007) it carries only the in-memory transport's wiring:
-  `SpringTransactionBoundary` over the host's `PlatformTransactionManager` (joining an active Spring transaction),
-  a Postgres `MessageStore`, a managed executor, start/stop with the context, re-publication of delivered events as
-  Spring application events, and Spring Modulith interop (when `EventPublicationRepository` is present, the
-  messages live in Modulith's registry and Saga Forge keeps only its delivery records — one outbox). The host still
-  builds its `SagaRuntime` bean (G-007-02).
+- **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring (008; details in
+  [its README](../saga-forge-spring-boot-starter/README.md)). It:
+  - collects the saga model from the auto-configuration packages, the application's beans,
+    `saga-forge.scan-packages` and `SagaModelContributor` beans;
+  - detects the storage module and builds Postgres storage, context store and message store over the application's
+    `DataSource`, with `SpringTransactionBoundary` joining the application's transactions;
+  - backs the host SPIs with Spring: prototype saga beans (or the no-argument constructor), handler beans, handler
+    parameters resolved like injection points, aggregates through their Spring Data repositories;
+  - builds the `SagaRuntime` bean and starts it in a `SmartLifecycle` one phase before the transport, which stops
+    first;
+  - publishes every recorded domain event through Spring's `ApplicationEventPublisher` inside the unit of work
+    (`saga-forge.application-events.mode`), so Spring Modulith's `@ApplicationModuleListener`s receive saga events
+    with Modulith's guarantees, and with Modulith's registry present keeps the transport's messages there too (one
+    outbox);
+  - exposes a read-only `sagaforge` Actuator endpoint and health indicator.
+
+  Every bean backs off for an application bean of its type. There is no `SagaRuntimeConfig` for a user to
+  hand-build. Ambiguity (two storage modules, two runtimes) and every misconfiguration fail startup with a
+  `FailureAnalyzer` description and action rather than a guess.
 - **`saga-forge-storage-{postgres,mysql,mongodb}`** — each implements `StorageProvider` and
   `SagaContextStore` for one backend, and persists the lifecycle entries the runtime hands over
   (`SagaLifecycleEntry`: creation, step completions, terminal outcome), numbered in hand-over order, for direct
@@ -66,20 +75,27 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 - **`saga-forge-example`** — a runnable saga (`OrderProcessingSaga`) used as a living spec. It must always
   compile against whatever the annotation model currently supports; if an annotation's contract changes, the
   example changes with it in the same change.
+- **`saga-forge-example-spring`** — the same saga as a Spring Boot application (008): `Order` as a Spring Data JDBC
+  aggregate, `PaymentService` as a bean, `OrderPlacement` publishing the start event in a `@Transactional` method,
+  and no Saga Forge assembly code. Spring stays out of `saga-forge-example`, which keeps its framework-free role.
 
-## Autoconfiguration detection matrix (target)
+## Autoconfiguration detection matrix
+
+Implemented by 008 for Postgres and the in-memory transport; the MySQL, MongoDB and Kafka rows are the target.
 
 | Classpath signal | Storage provider selected |
 |---|---|
-| `org.postgresql.Driver` + Postgres JDBC/R2DBC starter | `saga-forge-storage-postgres` |
-| MySQL driver | `saga-forge-storage-mysql` |
-| MongoDB driver | `saga-forge-storage-mongodb` |
-| None of the above | Autoconfiguration fails fast — a saga needs durable storage, so there is no silent fallback |
+| `saga-forge-storage-postgres` plus a `DataSource` and `PlatformTransactionManager` | `saga-forge-storage-postgres` (implemented) |
+| `saga-forge-storage-postgres` without a `DataSource` | Startup fails naming the missing beans and `spring.datasource.*` |
+| MySQL driver | `saga-forge-storage-mysql` (target) |
+| MongoDB driver | `saga-forge-storage-mongodb` (target) |
+| Several storage modules | Startup fails unless `saga-forge.storage.type` selects one |
+| None of the above | Startup fails naming the module to add — a saga needs durable storage, so there is no silent fallback |
 
 | Classpath signal | Transport selected |
 |---|---|
-| `org.apache.kafka.clients.producer.KafkaProducer` | `saga-forge-transport-kafka` |
-| Neither Kafka nor any other broker client present | `saga-forge-transport-inmemory` (default) |
+| `org.apache.kafka.clients.producer.KafkaProducer` | `saga-forge-transport-kafka` (target) |
+| Neither Kafka nor any other broker client present | `saga-forge-transport-inmemory` (default, implemented) |
 
 Exactly one storage provider and one transport are expected to resolve. Autoconfiguration does not attempt to
 support running two storage providers or two transports simultaneously.
