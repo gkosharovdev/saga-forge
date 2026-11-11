@@ -18,7 +18,7 @@ import java.util.function.Supplier;
  * compensating (specs/006-saga-compensation contracts/compensation-run.md "run remaining").
  *
  * <p>The caller holds the instance's in-process lock for the whole run and releases it afterwards; the
- * {@code AFTER_COMMIT} handoff of each committed compensation is added to the caller's list, to run after the
+ * {@code AFTER_COMMIT} outbox of each committed compensation is added to the caller's list, to run after the
  * release in commit order. A failed compensation is recorded by {@link CompensationFailedWrite} and never retried.</p>
  */
 final class CompensationRun {
@@ -37,14 +37,14 @@ final class CompensationRun {
      * @param saga     the saga type of the instance
      * @param sagaId   the compensating instance
      * @param about    the correlation of the handling call
-     * @param handoffs where each committed compensation's after-release handoff is added
+     * @param outboxs where each committed compensation's after-release outbox is added
      * @param ranBefore the unit of work that started compensation in this call, if any; reported when no
      *                  compensation unit of work runs after it
      * @return {@code COMPENSATED}, {@code REQUIRES_INTERVENTION}, or {@code NOT_HANDLED} if the run lost a conflict
      *         or found the instance moved on by another process
      * @throws RuntimeException if a locked read or the failed-compensation write fails; what committed before stays
      */
-    Summary run(SagaModel saga, String sagaId, Correlation about, List<Supplier<List<Throwable>>> handoffs,
+    Summary run(SagaModel saga, String sagaId, Correlation about, List<Supplier<List<Throwable>>> outboxs,
             String ranBefore) {
         String last = ranBefore;
         while (true) {
@@ -53,7 +53,7 @@ final class CompensationRun {
             switch (result) {
                 case Committed committed -> {
                     last = committed.unitOfWorkId();
-                    handoffs.add(committed::handOff);
+                    outboxs.add(committed::store);
                     if (committed.instance().status() == SagaStatus.COMPENSATED) {
                         return new Summary(HandlingOutcome.COMPENSATED, last);
                     }

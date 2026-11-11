@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A transport that only calls {@code EventReceiver.receive} and only receives dispatches runs sagas end to end, looping
- * dispatched events back from inside the after-commit handoff (specs/004-saga-engine tasks.md T087, User Story 5
+ * dispatched events back from inside the after-commit outbox (specs/004-saga-engine tasks.md T087, User Story 5
  * scenarios 1 and 5, SC-007 engine half, quickstart.md scenario 14).
  *
  * <p>The test drives the engine through {@link TestTransport} and {@link EventReceiver} only; the stores are test
@@ -132,7 +132,7 @@ class TestTransportEndToEndTest {
     }
 
     @Test
-    @DisplayName("US5-5: AuditSaga's handed-off CaseNoted, looped back, starts ReviewSaga after AuditSaga committed")
+    @DisplayName("US5-5: AuditSaga's outgoing CaseNoted, looped back, starts ReviewSaga after AuditSaga committed")
     void loopedBackEventRunsAsNewUnitOfWork() {
         List<String> atLoopBack = new ArrayList<>();
         EventDispatcher observing = new EventDispatcher() {
@@ -163,7 +163,7 @@ class TestTransportEndToEndTest {
         assertThat(review.started()).isTrue();
         assertThat(audit.sagaType()).isEqualTo(AuditSaga.class.getName());
         assertThat(audit.outcome()).isEqualTo(HandlingOutcome.WAITING);
-        assertThat(audit.handoffFailures()).isEmpty();
+        assertThat(audit.outboxFailures()).isEmpty();
         // Four transactions one after the other on this thread, none nested: AuditSaga's creation and unit of work,
         // then ReviewSaga's creation and unit of work.
         assertThat(boundary.historyOf(Thread.currentThread())).containsExactly(

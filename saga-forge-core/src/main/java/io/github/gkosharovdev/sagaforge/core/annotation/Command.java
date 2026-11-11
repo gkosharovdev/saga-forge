@@ -15,4 +15,12 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface Command {
+
+    /**
+     * How the command reaches its handler; {@link CommandDelivery#IN_UNIT_OF_WORK} unless the type opts into the
+     * message store with {@link CommandDelivery#OUTBOX} ({@code specs/007-in-memory-transport} FR-010).
+     *
+     * @return the delivery of this command type
+     */
+    CommandDelivery delivery() default CommandDelivery.IN_UNIT_OF_WORK;
 }

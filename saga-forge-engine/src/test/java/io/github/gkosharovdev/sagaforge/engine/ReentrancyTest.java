@@ -17,9 +17,9 @@ import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
-import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@code receive} called back from inside a running unit of work is rejected and fails that unit of work; called from
- * an {@code AFTER_COMMIT} handoff it runs as a new unit of work (specs/004-saga-engine tasks.md T091, FR-007,
+ * an {@code AFTER_COMMIT} outbox it runs as a new unit of work (specs/004-saga-engine tasks.md T091, FR-007,
  * quickstart.md scenario 19).
  */
 class ReentrancyTest {
@@ -135,7 +135,7 @@ class ReentrancyTest {
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final AtomicReference<EventReceiver> receiver = new AtomicReference<>();
 
-    private SagaEngine engine(EventHandoff handoff) {
+    private SagaEngine engine(Outbox outbox) {
         SagaObjectProvider sagaObjects = new SagaObjectProvider() {
             @Override
             public boolean supports(Class<?> sagaType) {
@@ -155,7 +155,7 @@ class ReentrancyTest {
                 .dispatcher(new RecordingEventDispatcher())
                 .handlerInstances(new MapHandlerInstanceProvider().register(new EchoService(receiver)))
                 .sagaObjects(sagaObjects)
-                .handoff(handoff)
+                .outbox(outbox)
                 .build();
         engine.start();
         receiver.set(engine);
@@ -163,7 +163,7 @@ class ReentrancyTest {
     }
 
     private SagaEngine engine() {
-        return engine(new DispatchingEventHandoff(new RecordingEventDispatcher()));
+        return engine(new ImmediateDispatchOutbox(new RecordingEventDispatcher()));
     }
 
     private static SagaHandlingResult onlyResult(HandlingReport report) {
@@ -198,16 +198,16 @@ class ReentrancyTest {
     }
 
     @Test
-    @DisplayName("receive from inside an IN_TRANSACTION handoff is rejected and fails that unit of work")
-    void fromInTransactionHandoff() {
-        EventHandoff callingBack = new EventHandoff() {
+    @DisplayName("receive from inside an IN_TRANSACTION outbox is rejected and fails that unit of work")
+    void fromInTransactionOutbox() {
+        Outbox callingBack = new Outbox() {
             @Override
             public Timing timing() {
                 return Timing.IN_TRANSACTION;
             }
 
             @Override
-            public void handOff(HandedOffEvents batch) {
+            public void store(OutgoingMessages batch) {
                 receiver.get().receive(new Knock("nested", Origin.NONE));
             }
         };
@@ -219,13 +219,13 @@ class ReentrancyTest {
     }
 
     @Test
-    @DisplayName("receive from inside an AFTER_COMMIT handoff runs as a new unit of work after the first committed")
-    void fromAfterCommitHandoff() {
+    @DisplayName("receive from inside an AFTER_COMMIT outbox runs as a new unit of work after the first committed")
+    void fromAfterCommitOutbox() {
         List<SagaStatus> committedAtCallback = new ArrayList<>();
         List<HandlingReport> nested = new ArrayList<>();
         AtomicBoolean calledBack = new AtomicBoolean();
-        EventHandoff callingBackOnce = batch -> {
-            // Set before the nested receive: its own unit of work hands off a batch too, which must not call back.
+        Outbox callingBackOnce = batch -> {
+            // Set before the nested receive: its own unit of work passes to the outbox a batch too, which must not call back.
             if (calledBack.compareAndSet(false, true)) {
                 storage.committed().all().forEach(instance -> committedAtCallback.add(instance.status()));
                 nested.add(receiver.get().receive(new Knock("room-2", Origin.NONE)));

@@ -4,7 +4,7 @@ import java.util.Optional;
 
 /**
  * SPI through which the engine begins the host's local transaction, and through which storage providers and an
- * outbox handoff find the transaction that is active on the calling thread.
+ * outbox outbox find the transaction that is active on the calling thread.
  *
  * <p><strong>Implemented by host integrations, never by client code.</strong> The Spring Boot starter will map it
  * onto Spring's transaction manager; {@code saga-forge-storage-postgres} ships a JDBC-only implementation for hosts
@@ -40,7 +40,7 @@ import java.util.Optional;
  *       {@code resource(java.sql.Connection.class)}.</li>
  *   <li><strong>{@link SagaContextStore}</strong> is never built with the boundary and never joins, so context
  *       values survive a rollback.</li>
- *   <li><strong>An outbox handoff</strong> ({@link EventHandoff.Timing#IN_TRANSACTION}) writes through
+ *   <li><strong>An outbox outbox</strong> ({@link Outbox.Timing#IN_TRANSACTION}) writes through
  *       {@link #current()} the same way, so its rows commit or roll back with the unit of work.</li>
  * </ul>
  *

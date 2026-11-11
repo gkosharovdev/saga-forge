@@ -7,7 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
-import io.github.gkosharovdev.sagaforge.engine.support.CapturingEventHandoff;
+import io.github.gkosharovdev.sagaforge.engine.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * A started engine running {@link FailureSaga} over the engine test doubles, with every client object a participant
  * of the {@link InMemoryTransactionBoundary} so a rollback undoes its changes (specs/004-saga-engine tasks.md T056).
  *
- * <p>The handoff is a {@link CapturingEventHandoff} ({@code AFTER_COMMIT}); diagnostics go to a
+ * <p>The outbox is a {@link CapturingOutbox} ({@code AFTER_COMMIT}); diagnostics go to a
  * {@link RecordingLogger}. Saga ids are {@code saga-1}, {@code saga-2}, ...; the clock is fixed.</p>
  *
  * <p>Test-only. Confined to the test's thread.</p>
@@ -43,7 +43,7 @@ public final class FailureFixture {
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final InMemorySagaContextStore contextStore = new InMemorySagaContextStore();
     private final RecordingEventDispatcher dispatcher = new RecordingEventDispatcher();
-    private final CapturingEventHandoff handoff = CapturingEventHandoff.afterCommit();
+    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private final RecordingLogger logger = new RecordingLogger();
     private final SagaEngine engine;
 
@@ -58,7 +58,7 @@ public final class FailureFixture {
                 .contextStore(contextStore)
                 .transactions(boundary)
                 .dispatcher(dispatcher)
-                .handoff(handoff)
+                .outbox(outbox)
                 .handlerInstances(new FailingHandlerInstances(plan, instances))
                 .aggregateResolver(labels)
                 .parameterResolver(new FeeScheduleResolver(plan, new FeeSchedule(CENTS_PER_KILOGRAM)))
@@ -116,8 +116,8 @@ public final class FailureFixture {
         return storage;
     }
 
-    public CapturingEventHandoff handoff() {
-        return handoff;
+    public CapturingOutbox outbox() {
+        return outbox;
     }
 
     public RecordingEventDispatcher dispatcher() {

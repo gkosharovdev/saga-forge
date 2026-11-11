@@ -5,8 +5,9 @@ import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner;
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
@@ -68,6 +69,7 @@ public final class SagaEngine implements EventReceiver {
     private final Diagnostics diagnostics;
     private final CommandGateway commandGateway = command -> started().commandGateway().send(command);
     private final EventPublisher eventPublisher = event -> started().eventPublisher().publish(event);
+    private final CommandReceiver commandReceiver = delivery -> started().receiveCommand(delivery);
     private final Object startLock = new Object();
     private volatile State state = State.BUILT;
     private volatile EngineRuntime runtime;
@@ -122,6 +124,15 @@ public final class SagaEngine implements EventReceiver {
     /** The engine's {@code CommandGateway}; {@code send} throws {@link IllegalStateException} unless started. */
     public CommandGateway commandGateway() {
         return commandGateway;
+    }
+
+    /**
+     * The engine's {@code CommandReceiver}, through which a transport delivers {@code @Command(delivery = OUTBOX)}
+     * commands from its message store ({@code specs/007-in-memory-transport}); {@code receive} throws
+     * {@link IllegalStateException} unless started.
+     */
+    public CommandReceiver commandReceiver() {
+        return commandReceiver;
     }
 
     /** The engine's {@code EventPublisher}; {@code publish} throws {@link IllegalStateException} unless started. */
@@ -197,7 +208,7 @@ public final class SagaEngine implements EventReceiver {
         private EventDispatcher dispatcher;
         private HandlerInstanceProvider handlerInstances;
         private SagaObjectProvider sagaObjects;
-        private EventHandoff handoff;
+        private Outbox outbox;
         private Clock clock = Clock.systemUTC();
         private Supplier<String> sagaIds = Builder::randomId;
         private Supplier<String> unitOfWorkIds = Builder::randomId;
@@ -268,9 +279,9 @@ public final class SagaEngine implements EventReceiver {
             return this;
         }
 
-        /** Optional: receives committed events; default {@link DispatchingEventHandoff} over the dispatcher. */
-        public Builder handoff(EventHandoff handoff) {
-            this.handoff = requireNonNull(handoff, "handoff");
+        /** Optional: receives committed events; default {@link ImmediateDispatchOutbox} over the dispatcher. */
+        public Builder outbox(Outbox outbox) {
+            this.outbox = requireNonNull(outbox, "outbox");
             return this;
         }
 
@@ -325,10 +336,10 @@ public final class SagaEngine implements EventReceiver {
 
         /**
          * Assembles the engine, which still has to be {@linkplain SagaEngine#start() started}. Reads the
-         * handoff's {@code timing()} once.
+         * outbox's {@code timing()} once.
          *
          * @throws IllegalStateException if no class was registered, a required plug-in is missing, or the
-         *                               handoff reports a {@code null} timing
+         *                               outbox reports a {@code null} timing
          */
         public SagaEngine build() {
             if (registered.isEmpty()) {
@@ -346,16 +357,16 @@ public final class SagaEngine implements EventReceiver {
         }
 
         private EngineSettings settings() {
-            EventHandoff effectiveHandoff = handoff != null ? handoff : new DispatchingEventHandoff(dispatcher);
-            EventHandoff.Timing timing = effectiveHandoff.timing();
+            Outbox effectiveOutbox = outbox != null ? outbox : new ImmediateDispatchOutbox(dispatcher);
+            Outbox.Timing timing = effectiveOutbox.timing();
             if (timing == null) {
-                throw new IllegalStateException("The EventHandoff reported a null timing()");
+                throw new IllegalStateException("The Outbox reported a null timing()");
             }
             HandlerInstanceProvider instances = handlerInstances != null
                     ? handlerInstances
                     : EngineSettings.noHandlerInstances();
             return new EngineSettings(storage, contextStore, transactions, dispatcher, instances, aggregateResolvers,
-                    parameterResolvers, Optional.ofNullable(sagaObjects), effectiveHandoff, timing,
+                    parameterResolvers, Optional.ofNullable(sagaObjects), effectiveOutbox, timing,
                     new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
                     new RetrySettings(maxTotalRetryBackoff, retryPause::pause));
         }

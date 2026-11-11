@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
+import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
@@ -69,8 +70,28 @@ final class StartupChecks {
                         + " no @AggregateLoader and no AggregateResolver supporting it");
             }
             handlers(type).forEach(handler -> errors.addAll(unresolvableParameters(handler, settings)));
+            if (!settings.outbox().supportsCommands()) {
+                handlers(type).forEach(handler -> outboxCommandError(handler).ifPresent(errors::add));
+            }
         }
         return List.copyOf(errors);
+    }
+
+    /**
+     * An error if {@code handler} handles a {@code @Command(delivery = OUTBOX)} type while the outbox cannot store
+     * commands ({@code specs/007-in-memory-transport} research §3, tasks.md T056).
+     */
+    private static Optional<String> outboxCommandError(Executable handler) {
+        int position = commandPosition(handler.getParameters());
+        if (position < 0) {
+            return Optional.empty();
+        }
+        Class<?> commandType = handler.getParameters()[position].getType();
+        if (commandType.getAnnotation(Command.class).delivery() != CommandDelivery.OUTBOX) {
+            return Optional.empty();
+        }
+        return Optional.of("Command " + commandType.getSimpleName() + " handled by @CommandHandler "
+                + handlerName(handler) + " is delivered through the outbox, but the Outbox does not support commands");
     }
 
     /**

@@ -44,7 +44,8 @@ final class PostgresTestSupport {
     private static final String FAULT_FUNCTION = "saga_forge_test_fault";
     private static final String FAULT_TRIGGER_PREFIX = "saga_forge_test_fault_";
     private static final Set<String> TABLES =
-            Set.of("saga_instance", "saga_association", "saga_context", "saga_lifecycle_history");
+            Set.of("saga_instance", "saga_association", "saga_context", "saga_lifecycle_history",
+                    "saga_message_store");
     private static final Set<String> OPERATIONS = Set.of("INSERT", "UPDATE", "DELETE");
 
     private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
@@ -75,6 +76,18 @@ final class PostgresTestSupport {
      * and drops every fault trigger installed by {@link #failOn(String, String)}.
      */
     static void reset() {
+        dropFaults();
+        try (Connection connection = newDataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("TRUNCATE saga_instance CASCADE");
+            statement.execute("TRUNCATE saga_message_store, saga_message_store_consumer RESTART IDENTITY");
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not reset the test database", e);
+        }
+    }
+
+    /** Drops every fault trigger installed by {@link #failOn(String, String)}, keeping the data (007). */
+    static void dropFaults() {
         try (Connection connection = newDataSource().getConnection();
              Statement statement = connection.createStatement()) {
             List<String> drops = new ArrayList<>();
@@ -88,9 +101,8 @@ final class PostgresTestSupport {
             for (String drop : drops) {
                 statement.execute(drop);
             }
-            statement.execute("TRUNCATE saga_instance CASCADE");
         } catch (SQLException e) {
-            throw new IllegalStateException("could not reset the test database", e);
+            throw new IllegalStateException("could not drop the fault triggers", e);
         }
     }
 
@@ -118,6 +130,31 @@ final class PostgresTestSupport {
                     + " FOR EACH ROW EXECUTE FUNCTION " + FAULT_FUNCTION + "()");
         } catch (SQLException e) {
             throw new IllegalStateException("could not install fault trigger on " + table, e);
+        }
+    }
+
+    /**
+     * Installs a trigger that fails the next {@code times} updates marking a {@code saga_message_store} row of
+     * {@code payloadType} consumed, and nothing else (007): a crash between a delivery and its consumed mark. The count
+     * lives in a sequence, which a failing transaction does not roll back. {@link #reset()} and {@link #dropFaults()}
+     * drop the trigger.
+     */
+    static void failOnConsume(Class<?> payloadType, int times) {
+        try (Connection connection = newDataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("DROP SEQUENCE IF EXISTS saga_forge_test_fault_seq");
+            statement.execute("CREATE SEQUENCE saga_forge_test_fault_seq");
+            statement.execute("CREATE OR REPLACE FUNCTION saga_forge_test_fault_consume_fn() RETURNS trigger "
+                    + "LANGUAGE plpgsql AS $$ BEGIN "
+                    + "IF NEW.status = 'CONSUMED' AND OLD.status <> 'CONSUMED' AND NEW.payload_type = '"
+                    + payloadType.getName() + "' AND nextval('saga_forge_test_fault_seq') <= " + times + " THEN "
+                    + "RAISE EXCEPTION 'injected test fault: consumed mark'; "
+                    + "END IF; RETURN NEW; END $$");
+            statement.execute("DROP TRIGGER IF EXISTS " + FAULT_TRIGGER_PREFIX + "consume ON saga_message_store");
+            statement.execute("CREATE TRIGGER " + FAULT_TRIGGER_PREFIX + "consume BEFORE UPDATE ON saga_message_store"
+                    + " FOR EACH ROW EXECUTE FUNCTION saga_forge_test_fault_consume_fn()");
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not install the consume fault", e);
         }
     }
 

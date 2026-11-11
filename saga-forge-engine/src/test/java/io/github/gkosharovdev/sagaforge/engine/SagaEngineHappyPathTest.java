@@ -133,7 +133,7 @@ class SagaEngineHappyPathTest {
             assertThat(result.outcomeStep()).isEqualTo(ThreeStepSaga.END_STEP);
             assertThat(result.sagaType()).isEqualTo(ThreeStepSaga.class.getName());
             assertThat(result.unitOfWorkId()).isNotNull();
-            assertThat(result.handoffFailures()).isEmpty();
+            assertThat(result.outboxFailures()).isEmpty();
 
             assertThat(storage.committed().all()).hasSize(1);
             SagaInstance instance = committed(result.sagaId());

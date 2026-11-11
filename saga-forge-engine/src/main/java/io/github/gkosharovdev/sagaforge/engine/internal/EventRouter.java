@@ -57,8 +57,8 @@ import java.util.function.Supplier;
  *
  * <h2>Reentrancy (FR-007)</h2>
  * <p>{@code receive} first rejects a call made while an engine unit of work runs on the calling thread (from a step,
- * a handler or an {@code IN_TRANSACTION} handoff) with {@link IllegalStateException}, which also fails that unit of
- * work ({@link ReentrancyGuard}). A call from inside an {@code AFTER_COMMIT} handoff is accepted: the previous unit of
+ * a handler or an {@code IN_TRANSACTION} outbox) with {@link IllegalStateException}, which also fails that unit of
+ * work ({@link ReentrancyGuard}). A call from inside an {@code AFTER_COMMIT} outbox is accepted: the previous unit of
  * work has committed and released its lock, so this is a new one.</p>
  *
  * <p>Immutable; thread-safe if the host plug-ins are. Each call runs on the calling thread.</p>

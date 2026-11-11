@@ -18,7 +18,7 @@ import java.util.List;
  *   <li>{@code onFeeCharged}: writes {@value #CONTEXT_FEE_ID}, sends {@link ReserveSlot} ({@link Slot} via
  *       {@link SlotRepository}, records {@link SlotReserved});</li>
  *   <li>{@code @EndSaga onSlotReserved}: sends {@link PrintLabel} ({@link Label} via {@link LabelResolver}, records
- *       {@link LabelPrinted}, which no step takes and is handed off after commit).</li>
+ *       {@link LabelPrinted}, which no step takes and goes to the outbox after commit).</li>
  * </ol>
  * <p>Each step fails after its work if its {@link FaultPoint} is armed. The {@link FaultPlan} is injected by
  * {@link FailureSagaObjects}.</p>

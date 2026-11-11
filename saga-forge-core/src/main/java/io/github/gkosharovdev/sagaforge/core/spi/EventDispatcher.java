@@ -28,8 +28,8 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} (or published
  * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher}, which inside a unit
  * of work is equivalent) that does not trigger a step of the saga instance owning the unit of work
- * is buffered and handed on only after that unit of work commits, through the after-commit handoff
- * ({@link EventHandoff}), whose default calls {@link #dispatch(Object)}; the buffer is discarded on
+ * is buffered and handed on only after that unit of work commits, through the after-commit outbox
+ * ({@link Outbox}), whose default calls {@link #dispatch(Object)}; the buffer is discarded on
  * rollback. The same applies to events recorded in the non-saga unit of work that
  * {@code CommandGateway.send} opens when called outside any unit of work. Events that do trigger a
  * step of the owning instance (same event type, same {@code associationProperty} value) are

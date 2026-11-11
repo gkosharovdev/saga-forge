@@ -9,8 +9,8 @@ package io.github.gkosharovdev.sagaforge.core.event;
  * <ul>
  *   <li><strong>Inside a unit of work</strong>, {@link #publish(Object)} is equivalent to
  *       {@link DomainEvents#record(Object)}: the event is delivered in-process if it triggers a step of the saga
- *       instance owning the unit of work, otherwise it is delivered after commit through the after-commit handoff
- *       ({@link io.github.gkosharovdev.sagaforge.core.spi.EventHandoff}; by default
+ *       instance owning the unit of work, otherwise it is delivered after commit through the after-commit outbox
+ *       ({@link io.github.gkosharovdev.sagaforge.core.spi.Outbox}; by default
  *       {@link io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher#dispatch(Object)}) and discarded on
  *       rollback.
  *   <li><strong>Outside any unit of work</strong>, the event is handed to

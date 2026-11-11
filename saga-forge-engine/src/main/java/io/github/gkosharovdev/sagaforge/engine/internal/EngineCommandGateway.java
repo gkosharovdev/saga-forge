@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
+import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
@@ -24,6 +25,8 @@ import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 
 /**
@@ -93,13 +96,15 @@ final class EngineCommandGateway implements CommandGateway {
 
     private final Map<Class<?>, CommandRoute> routes;
     private final TransactionBoundary transactions;
+    private final boolean outboxStoresCommands;
     private final Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork;
     private final Diagnostics diagnostics;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
-            Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics) {
+            boolean outboxStoresCommands, Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
+        this.outboxStoresCommands = outboxStoresCommands;
         this.nonSagaUnitsOfWork = nonSagaUnitsOfWork;
         this.diagnostics = diagnostics;
     }
@@ -125,7 +130,8 @@ final class EngineCommandGateway implements CommandGateway {
         for (Class<?> host : registered) {
             factory.routesOf(host).forEach((commandType, route) -> addRoute(routes, commandType, route));
         }
-        return new EngineCommandGateway(routes, settings.transactions(), () -> new NonSagaUnitOfWork(settings,
+        return new EngineCommandGateway(routes, settings.transactions(), settings.outbox().supportsCommands(),
+                () -> new NonSagaUnitOfWork(settings,
                 diagnostics, settings.sources().newUnitOfWorkId()), diagnostics);
     }
 
@@ -144,9 +150,21 @@ final class EngineCommandGateway implements CommandGateway {
         try {
             requireCommand(command);
             CommandRoute route = routeFor(command);
+            boolean logged = isOutbox(command);
+            if (logged && !outboxStoresCommands) {
+                throw new IllegalStateException("Command " + command.getClass().getName() + " is delivered OUTBOX, "
+                        + "but the engine's Outbox does not support commands; use a transport whose outbox does, "
+                        + "such as the in-memory transport");
+            }
             CommandId id = unitOfWork.nextCommandId(command.getClass());
             if (unitOfWork.alreadyHandled(id)) {
                 diagnostics.commandSkipped(id);
+                return;
+            }
+            if (logged) {
+                // 007 research §3: stored with the unit of work, handled after it commits, never if it rolls back.
+                unitOfWork.recordOutboxCommand(new OutgoingCommand(id, command));
+                unitOfWork.commandHandled(id);
                 return;
             }
             CommandIds.withBound(id, () -> {
@@ -159,6 +177,38 @@ final class EngineCommandGateway implements CommandGateway {
             unitOfWork.failed(failure);
             throw failure;
         }
+    }
+
+    /**
+     * Handles a outbox command delivered by a transport ({@code CommandReceiver}, 007 research §3): a new non-saga
+     * unit of work, the handler with the delivery's {@code CommandId} bound, then {@code inTransaction} before commit.
+     *
+     * @throws IllegalStateException if a unit of work is running on this thread
+     */
+    void receive(OutboxCommand delivery) {
+        if (delivery == null) {
+            throw new IllegalArgumentException("delivery must not be null");
+        }
+        Object command = delivery.command();
+        requireCommand(command);
+        if (UnitOfWork.bound().isPresent()) {
+            throw new IllegalStateException("CommandReceiver.receive was called inside a unit of work; a transport "
+                    + "delivers outbox commands from its own threads");
+        }
+        CommandRoute route = routeFor(command);
+        nonSagaUnitsOfWork.get().run(() -> {
+            CommandIds.withBound(delivery.commandId(), () -> {
+                route.handle(command);
+                return null;
+            });
+            LocalTransaction transaction = transactions.current().orElseThrow(() -> new IllegalStateException(
+                    "no transaction is active in the unit of work handling " + delivery.commandId()));
+            delivery.inTransaction().accept(transaction);
+        });
+    }
+
+    private static boolean isOutbox(Object command) {
+        return command.getClass().getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX;
     }
 
     private CommandRoute routeFor(Object command) {

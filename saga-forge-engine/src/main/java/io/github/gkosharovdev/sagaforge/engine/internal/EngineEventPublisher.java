@@ -12,7 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
  * <ul>
  *   <li>{@code null} or non-{@code @DomainEvent} event: {@link IllegalArgumentException}.</li>
  *   <li>A recorder is bound on the calling thread (an engine unit of work): exactly {@link DomainEvents#record},
- *       so the event runs in-process or goes to the after-commit handoff, and is discarded on rollback.</li>
+ *       so the event runs in-process or goes to the after-commit outbox, and is discarded on rollback.</li>
  *   <li>Outside any unit of work: {@link EventDispatcher#dispatch} immediately. The engine does not loop the event
  *       back into itself; the transport delivers it to {@code EventReceiver.receive} (contracts/event-handoff.md
  *       last section).</li>

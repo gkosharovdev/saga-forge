@@ -25,10 +25,10 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanc
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.engine.support.CapturingEventHandoff;
+import io.github.gkosharovdev.sagaforge.engine.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
 import java.lang.reflect.Executable;
@@ -207,6 +207,13 @@ class EngineCommandGatewayTest {
             handled.add(id);
         }
 
+        private final List<io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand> logged = new ArrayList<>();
+
+        @Override
+        public void recordOutboxCommand(io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand command) {
+            logged.add(command);
+        }
+
         @Override
         public void record(Object domainEvent) {
             recorded.add(domainEvent);
@@ -242,10 +249,10 @@ class EngineCommandGatewayTest {
         MapHandlerInstanceProvider instances = new MapHandlerInstanceProvider()
                 .register(payments).register(inventories).register(bookings).register(audits).register(identities);
         List<AggregateResolver> resolvers = List.of(unsupporting, firstSupporting, secondSupporting);
-        EventHandoff handoff = CapturingEventHandoff.afterCommit();
+        Outbox outbox = CapturingOutbox.afterCommit();
         EngineSettings settings = new EngineSettings(new TransactionalInMemoryStorageProvider(boundary),
                 new InMemorySagaContextStore(), boundary, new RecordingEventDispatcher(), instances, resolvers,
-                parameterResolvers, Optional.empty(), handoff, handoff.timing(),
+                parameterResolvers, Optional.empty(), outbox, outbox.timing(),
                 new TimeAndIdentity(Clock.fixed(NOW, ZoneOffset.UTC), () -> "saga-1", () -> "uow-1"));
         return EngineCommandGateway.of(registered, AggregateAccess.of(registered, instances, resolvers), settings,
                 new Diagnostics(System.getLogger(EngineCommandGatewayTest.class.getName())));

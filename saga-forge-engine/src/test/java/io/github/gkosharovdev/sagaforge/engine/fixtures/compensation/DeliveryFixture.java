@@ -10,7 +10,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
 import io.github.gkosharovdev.sagaforge.engine.fixtures.retry.RecordingPause;
-import io.github.gkosharovdev.sagaforge.engine.support.CapturingEventHandoff;
+import io.github.gkosharovdev.sagaforge.engine.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
@@ -34,7 +34,7 @@ public final class DeliveryFixture {
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final InMemorySagaContextStore contexts = new InMemorySagaContextStore();
     private final RecordingLogger logger = new RecordingLogger();
-    private final CapturingEventHandoff handoff = CapturingEventHandoff.afterCommit();
+    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private final AtomicInteger sagaIds = new AtomicInteger();
     private SagaEngine engine;
 
@@ -63,7 +63,7 @@ public final class DeliveryFixture {
                 .contextStore(contexts)
                 .transactions(boundary)
                 .dispatcher(new RecordingEventDispatcher())
-                .handoff(handoff)
+                .outbox(outbox)
                 .handlerInstances(new MapHandlerInstanceProvider().register(payments).register(deliveries)
                         .register(couriers))
                 .sagaObjects(new SagaObjectProvider() {
@@ -165,7 +165,7 @@ public final class DeliveryFixture {
         return logger;
     }
 
-    public CapturingEventHandoff handoff() {
-        return handoff;
+    public CapturingOutbox outbox() {
+        return outbox;
     }
 }

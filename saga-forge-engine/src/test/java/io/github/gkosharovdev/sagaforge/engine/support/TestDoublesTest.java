@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.Snapshottable;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
-import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
@@ -323,43 +323,43 @@ class TestDoublesTest {
     }
 
     @Nested
-    @DisplayName("CapturingEventHandoff")
-    class Handoff {
+    @DisplayName("CapturingOutbox")
+    class CapturingOutboxDouble {
 
-        private final HandedOffEvents first = new HandedOffEvents("uow-1", "com.example.OrderSaga", "s1",
+        private final OutgoingMessages first = new OutgoingMessages("uow-1", "com.example.OrderSaga", "s1",
                 List.of("event-1"));
-        private final HandedOffEvents second = new HandedOffEvents("uow-2", null, null, List.of("event-2"));
+        private final OutgoingMessages second = new OutgoingMessages("uow-2", null, null, List.of("event-2"));
 
         @Test
         @DisplayName("IN_TRANSACTION keeps a batch only when its transaction commits")
         void inTransactionKeepsOnlyCommitted() {
-            CapturingEventHandoff handoff = CapturingEventHandoff.inTransaction(boundary);
+            CapturingOutbox outbox = CapturingOutbox.inTransaction(boundary);
 
             LocalTransaction committed = boundary.begin();
-            handoff.handOff(first);
+            outbox.store(first);
             committed.commit();
             LocalTransaction rolledBack = boundary.begin();
-            handoff.handOff(second);
+            outbox.store(second);
             rolledBack.rollback();
 
-            assertThat(handoff.timing()).isEqualTo(EventHandoff.Timing.IN_TRANSACTION);
-            assertThat(handoff.received()).containsExactly(first, second);
-            assertThat(handoff.committed()).containsExactly(first);
+            assertThat(outbox.timing()).isEqualTo(Outbox.Timing.IN_TRANSACTION);
+            assertThat(outbox.received()).containsExactly(first, second);
+            assertThat(outbox.committed()).containsExactly(first);
         }
 
         @Test
         @DisplayName("AFTER_COMMIT keeps every batch it handles; an injected failure is received but not kept")
         void afterCommitWithFailure() {
-            CapturingEventHandoff handoff = CapturingEventHandoff.afterCommit();
+            CapturingOutbox outbox = CapturingOutbox.afterCommit();
             RuntimeException failure = new IllegalStateException("broker down");
-            handoff.failNext(failure);
+            outbox.failNext(failure);
 
-            assertThatThrownBy(() -> handoff.handOff(first)).isSameAs(failure);
-            handoff.handOff(second);
+            assertThatThrownBy(() -> outbox.store(first)).isSameAs(failure);
+            outbox.store(second);
 
-            assertThat(handoff.timing()).isEqualTo(EventHandoff.Timing.AFTER_COMMIT);
-            assertThat(handoff.received()).containsExactly(first, second);
-            assertThat(handoff.committed()).containsExactly(second);
+            assertThat(outbox.timing()).isEqualTo(Outbox.Timing.AFTER_COMMIT);
+            assertThat(outbox.received()).containsExactly(first, second);
+            assertThat(outbox.committed()).containsExactly(second);
         }
     }
 

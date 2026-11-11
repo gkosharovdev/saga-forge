@@ -39,7 +39,7 @@
 - Implemented and unit-tested over in-memory doubles, added by `specs/004-saga-engine`: the saga engine runtime in
   `saga-forge-engine` (`SagaEngine`, an `EventReceiver`): event routing by association, the saga-scoped unit of work
   in the host's local transaction, the `FAILED` write, one unit of work per instance (in-process lock plus
-  `findByIdAndLock`), the outbox-ready `EventHandoff` (`AFTER_COMMIT` default, `IN_TRANSACTION`), reentrancy
+  `findByIdAndLock`), the `Outbox` SPI (named `EventHandoff` until 007; `AFTER_COMMIT` default `ImmediateDispatchOutbox`, `IN_TRANSACTION`), reentrancy
   rejection and fail-fast startup validation. Production implementations of `SagaContext`, `SagaLifecycle`,
   `CommandGateway` and `EventPublisher` live there, package-private. The 002 harness stays as a test-only reference
   the engine is compared against.
@@ -62,11 +62,24 @@
   compensation, never retried); `SagaInstance.compensationTrigger`, `StepRecord.compensation` (`StepCompensation`),
   five lifecycle kinds; any event for a `COMPENSATING` instance resumes compensation (checked before the duplicate
   check). Postgres persists it; existing databases apply `schema-upgrade-006.sql`.
+- Implemented and tested, added by `specs/007-in-memory-transport`: the in-memory transport. The 004 handoff SPI is
+  renamed to outbox vocabulary (`EventHandoff` → `Outbox`, `handOff` → `store`, `HandedOffEvents` →
+  `OutgoingMessages`, `DispatchingEventHandoff` → `ImmediateDispatchOutbox`, `Builder.handoff` → `outbox`,
+  `handoffFailures` → `outboxFailures`). Core gains the storage-agnostic `core.spi.store.MessageStore` (append in the
+  unit of work's transaction, leases with expiry, consumed/set-aside, queries, retention), `Outbox.committed` and
+  `supportsCommands`, `OutgoingMessages.commands`, and outbox commands: `@Command(delivery = CommandDelivery.OUTBOX)`
+  (rule R23, Property 35) stored with the sending unit of work and handled after it commits through the engine's
+  `CommandReceiver`, with the `CommandId` assigned at send time. `saga-forge-transport-inmemory` (core-only) is an
+  `IN_TRANSACTION` outbox plus an in-process relay: at least once, per-aggregate order, backoff and set-aside,
+  restart recovery, operator queries. `PostgresMessageStore` stores the log (`saga_message_store`; existing databases
+  apply `schema-upgrade-007.sql`). The starter carries only this transport's Spring wiring, including Spring
+  Modulith interop (one outbox: messages in Modulith's registry, Saga Forge's delivery records beside them).
 - Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; they all passed on
-  2026-11-09 (186 tests), closing G-003-23.
-- Not implemented: MySQL and MongoDB storage, both transports (no `EventDispatcher` implementation), and Spring Boot
-  autoconfiguration. The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb`,
-  `saga-forge-transport-*`, and `saga-forge-spring-boot-starter` modules exist only as placeholder POMs.
+  2026-11-09 (186 tests), closing G-003-23. The 007 container suites (Postgres log contract, fault injection,
+  10k-message restart, Spring own-log and Spring Modulith interop acceptance) passed on 2026-11-11.
+- Not implemented: MySQL and MongoDB storage, the Kafka transport, and the starter's storage/transport detection and
+  engine assembly (G-007-02); no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
+  `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
   actual `.java` source before relying on it.
 
@@ -77,18 +90,22 @@
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
 - `saga-forge-engine` — the saga runtime; depends on the JDK and `saga-forge-core` only. Public surface:
   `SagaEngine` with its host-facing builder, `StartupReport`, `SagaEngineStartupException`,
-  `DispatchingEventHandoff`; everything else is package-private in `engine.internal`. Every contract it needs lives
-  in `core.spi` (`EventReceiver`, `TransactionBoundary`, `EventHandoff`, `HandlerParameterResolver`,
+  `ImmediateDispatchOutbox`; everything else is package-private in `engine.internal`. Every contract it needs lives
+  in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
   `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
   `TransactionalInMemoryStorageProvider`, `TestTransport`, ...).
-- `saga-forge-spring-boot-starter` — target: autoconfiguration that detects an available datastore and
-  transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
+- `saga-forge-spring-boot-starter` — today: the in-memory transport's wiring (`SpringTransactionBoundary`,
+  `InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`, `ApplicationEventBridge`,
+  `ModulithInteropConfiguration`/`ModulithMessageStore`). Target: autoconfiguration that detects an available datastore
+  and transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
   (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
   (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core.
 - `saga-forge-storage-mysql` / `-mongodb` — target: `StorageProvider` + `SagaContextStore` implementations, one
   per backend.
-- `saga-forge-transport-inmemory` — target: `EventDispatcher` over Spring `ApplicationEventPublisher`.
+- `saga-forge-transport-inmemory` — `InMemoryTransport`: `EventDispatcher` and `IN_TRANSACTION` `Outbox` over a
+  `MessageStore`, plus the in-process relay; depends on `saga-forge-core` only (no Spring, no CDI). Its test-jar ships
+  `InMemoryMessageStore`, `MessageStoreContract` and `TransportAcceptanceSuite`.
 - `saga-forge-transport-kafka` — target: `EventDispatcher` over Kafka. These two transports are the only ones
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
@@ -102,7 +119,9 @@
   `@DomainEvent`-annotated parameter and returning `void` (Property 10); no two steps take the same event type
   (Property 11). Steps run in event order, not declaration order.
 - Steps dispatch zero or more commands via `commandGateway.send(...)` on an optional `CommandGateway` field
-  (recognized by type, no annotation, at most one — Property 13), like the `SagaContext` field.
+  (recognized by type, no annotation, at most one — Property 13), like the `SagaContext` field. A command runs in
+  the sender's unit of work unless its type is `@Command(delivery = CommandDelivery.OUTBOX)` (007): then it is stored
+  in the outbox and handled after the sender commits, so its failure no longer rolls the step back.
 - Lifecycle boundaries: exactly one `@StartSaga`, one or more `@EndSaga` steps (each a named outcome; the
   instance records which one ended it); both must co-occur with `@SagaStep` on the same method.
 - `@CommandHandler` hosts: `@Aggregate` instance methods (target loaded by the command's `@AggregateIdentifier`
@@ -177,7 +196,7 @@
 - `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the engine leaves
   `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
 - Engine limitations, see memory.md G-ENG-05 to G-ENG-13: a crash between the creation write and the first unit of
-  work strands a `CREATED` instance (G-ENG-05); the default handoff is at most once, an outbox needs
+  work strands a `CREATED` instance (G-ENG-05); the default `ImmediateDispatchOutbox` is at most once, an outbox needs
   `IN_TRANSACTION` (G-ENG-07); duplicate starts are caught across processes only after the creation write committed
   (G-ENG-08); the `FAILED` write can mark an instance another process moved on (G-ENG-10); the Postgres
   `FOR NO KEY UPDATE` reasoning is unverified against a database (G-ENG-11); `begin()` suspending vs. rejecting a
@@ -192,6 +211,11 @@
 - No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled
   process.
 - jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
+- In-memory transport (007), see memory.md G-007-01 to G-007-08: Quarkus extension and the constitution amendment
+  pending (G-007-01); starter detection deferred (G-007-02); a redelivered start event does not recover a stranded
+  start (G-007-03); delivery order is per aggregate, not per saga instance (G-007-04); relay logic may need a shared
+  module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); one running instance per
+  log (FR-021).
 - Postgres storage (003), see memory.md for detail: concurrency is a row lock plus a forward-transition check,
   with no version field (G-003-02, -03, -13, -19 to -22; G-003-01/-02 explicitly deferred); steps completed in one
   `save()` are ordered by a step-name tiebreak (G-003-04, -16); no lifecycle-history query API, FR-012

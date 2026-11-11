@@ -264,8 +264,12 @@ class AnnotationMetadataTest {
         }
 
         @Test
-        void isMarkerAnnotationWithNoAttributes() {
-            assertThat(Command.class.getDeclaredMethods()).isEmpty();
+        void hasOnlyTheDeliveryAttributeDefaultingToInUnitOfWork() throws NoSuchMethodException {
+            // specs/007-in-memory-transport FR-010 adds delivery; before 007 @Command had no attributes.
+            assertThat(Command.class.getDeclaredMethods()).extracting(java.lang.reflect.Method::getName)
+                    .containsExactly("delivery");
+            assertThat(Command.class.getDeclaredMethod("delivery").getDefaultValue())
+                    .isEqualTo(CommandDelivery.IN_UNIT_OF_WORK);
         }
     }
 

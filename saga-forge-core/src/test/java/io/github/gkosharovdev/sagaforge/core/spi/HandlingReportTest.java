@@ -27,9 +27,9 @@ class HandlingReportTest {
                     Instant.parse("2026-01-01T10:15:30Z"));
 
     private static SagaHandlingResult result(HandlingOutcome outcome, String outcomeStep, SagaFailure failure,
-                                             List<Throwable> handoffFailures) {
+                                             List<Throwable> outboxFailures) {
         return new SagaHandlingResult(SAGA_TYPE, SAGA_ID, outcome, false, outcomeStep, failure, UOW,
-                handoffFailures);
+                outboxFailures);
     }
 
     private static SagaHandlingResult waiting() {
@@ -57,7 +57,7 @@ class HandlingReportTest {
         }
 
         @Test
-        @DisplayName("null sagaType, outcome or handoffFailures is rejected")
+        @DisplayName("null sagaType, outcome or outboxFailures is rejected")
         void nullsRejected() {
             assertThatThrownBy(() -> new SagaHandlingResult(null, SAGA_ID, HandlingOutcome.WAITING, false, null,
                     null, UOW, List.of())).isInstanceOf(IllegalArgumentException.class);
@@ -90,8 +90,8 @@ class HandlingReportTest {
         }
 
         @Test
-        @DisplayName("handoffFailures are allowed only for WAITING and COMPLETED, never with a null element")
-        void handoffFailuresOnlyAfterCommit() {
+        @DisplayName("outboxFailures are allowed only for WAITING and COMPLETED, never with a null element")
+        void outboxFailuresOnlyAfterCommit() {
             List<Throwable> failures = List.of(new IllegalStateException("broker down"));
 
             assertThatCode(() -> result(HandlingOutcome.WAITING, null, null, failures)).doesNotThrowAnyException();
@@ -107,15 +107,15 @@ class HandlingReportTest {
         }
 
         @Test
-        @DisplayName("handoffFailures is a defensive, unmodifiable copy")
-        void handoffFailuresCopied() {
+        @DisplayName("outboxFailures is a defensive, unmodifiable copy")
+        void outboxFailuresCopied() {
             List<Throwable> original = new ArrayList<>(List.of(new IllegalStateException("first")));
             SagaHandlingResult result = result(HandlingOutcome.WAITING, null, null, original);
 
             original.add(new IllegalStateException("second"));
 
-            assertThat(result.handoffFailures()).hasSize(1);
-            assertThatThrownBy(() -> result.handoffFailures().add(new IllegalStateException()))
+            assertThat(result.outboxFailures()).hasSize(1);
+            assertThatThrownBy(() -> result.outboxFailures().add(new IllegalStateException()))
                     .isInstanceOf(UnsupportedOperationException.class);
         }
     }

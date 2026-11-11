@@ -18,11 +18,11 @@ import java.util.List;
  *                        {@code COMPLETED}, {@code FAILED}, {@code NOT_HANDLED} after a conflict, and for
  *                        {@code COMPENSATED} and {@code REQUIRES_INTERVENTION} the last unit of work of the
  *                        compensation run)
- * @param handoffFailures the exceptions thrown by the after-commit handoffs of the committed units of work; non-null,
+ * @param outboxFailures the exceptions thrown by the after-commit outboxs of the committed units of work; non-null,
  *                        no {@code null} element, non-empty only for {@code WAITING}, {@code COMPLETED},
  *                        {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}; an unmodifiable defensive copy
- * @throws IllegalArgumentException if {@code sagaType}, {@code outcome} or {@code handoffFailures} is {@code null},
- *                                  if {@code handoffFailures} contains {@code null} or is non-empty for another
+ * @throws IllegalArgumentException if {@code sagaType}, {@code outcome} or {@code outboxFailures} is {@code null},
+ *                                  if {@code outboxFailures} contains {@code null} or is non-empty for another
  *                                  outcome, or if {@code outcomeStep} or {@code failure} is present or absent
  *                                  inconsistently with {@code outcome}
  */
@@ -34,7 +34,7 @@ public record SagaHandlingResult(
     String outcomeStep,
     SagaFailure failure,
     String unitOfWorkId,
-    List<Throwable> handoffFailures
+    List<Throwable> outboxFailures
 ) {
     public SagaHandlingResult {
         if (sagaType == null) {
@@ -45,25 +45,25 @@ public record SagaHandlingResult(
         }
         requirePresentIff("outcomeStep", outcomeStep, HandlingOutcome.COMPLETED, outcome);
         requirePresentIff("failure", failure, HandlingOutcome.FAILED, outcome);
-        handoffFailures = copyHandoffFailures(handoffFailures, outcome);
+        outboxFailures = copyOutboxFailures(outboxFailures, outcome);
     }
 
-    private static List<Throwable> copyHandoffFailures(List<Throwable> handoffFailures, HandlingOutcome outcome) {
-        if (handoffFailures == null) {
-            throw new IllegalArgumentException("handoffFailures must not be null");
+    private static List<Throwable> copyOutboxFailures(List<Throwable> outboxFailures, HandlingOutcome outcome) {
+        if (outboxFailures == null) {
+            throw new IllegalArgumentException("outboxFailures must not be null");
         }
-        for (Throwable failure : handoffFailures) {
+        for (Throwable failure : outboxFailures) {
             if (failure == null) {
-                throw new IllegalArgumentException("handoffFailures must not contain null elements");
+                throw new IllegalArgumentException("outboxFailures must not contain null elements");
             }
         }
         boolean committed = outcome == HandlingOutcome.WAITING || outcome == HandlingOutcome.COMPLETED
             || outcome == HandlingOutcome.COMPENSATED || outcome == HandlingOutcome.REQUIRES_INTERVENTION;
-        if (!committed && !handoffFailures.isEmpty()) {
-            throw new IllegalArgumentException("handoffFailures must be empty unless outcome is WAITING, COMPLETED, "
+        if (!committed && !outboxFailures.isEmpty()) {
+            throw new IllegalArgumentException("outboxFailures must be empty unless outcome is WAITING, COMPLETED, "
                 + "COMPENSATED or REQUIRES_INTERVENTION, but outcome is " + outcome);
         }
-        return List.copyOf(handoffFailures);
+        return List.copyOf(outboxFailures);
     }
 
     private static void requirePresentIff(String name, Object value, HandlingOutcome impliedBy,

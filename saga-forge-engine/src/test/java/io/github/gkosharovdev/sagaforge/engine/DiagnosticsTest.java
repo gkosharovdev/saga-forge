@@ -158,17 +158,17 @@ class DiagnosticsTest {
     }
 
     @Test
-    @DisplayName("handoff: saga.handoff.failed with the unit of work, saga, event count and throwable")
-    void handoffFailed() {
+    @DisplayName("outbox: saga.outbox.failed with the unit of work, saga, event count and throwable")
+    void outboxFailed() {
         FailureFixture fixture = new FailureFixture();
         IllegalStateException failure = new IllegalStateException("broker unavailable");
-        fixture.handoff().failNext(failure);
+        fixture.outbox().failNext(failure);
 
         SagaHandlingResult result = onlyResult(fixture.requestParcel("parcel-1", 4));
 
-        Logged handoff = logged(fixture.logger(), "saga.handoff.failed", Level.ERROR, "uow", "sagaType", "sagaId",
+        Logged outbox = logged(fixture.logger(), "saga.outbox.failed", Level.ERROR, "uow", "sagaType", "sagaId",
                 "events");
-        assertThat(handoff.keys()).containsEntry("uow", result.unitOfWorkId()).containsEntry("events", "1");
-        assertThat(handoff.thrown()).isSameAs(failure);
+        assertThat(outbox.keys()).containsEntry("uow", result.unitOfWorkId()).containsEntry("events", "1");
+        assertThat(outbox.thrown()).isSameAs(failure);
     }
 }

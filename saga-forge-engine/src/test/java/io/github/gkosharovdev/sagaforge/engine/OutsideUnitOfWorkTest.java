@@ -16,7 +16,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanc
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.engine.support.CapturingEventHandoff;
+import io.github.gkosharovdev.sagaforge.engine.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,7 +34,7 @@ class OutsideUnitOfWorkTest {
     private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final RecordingEventDispatcher dispatcher = new RecordingEventDispatcher();
-    private final CapturingEventHandoff handoff = CapturingEventHandoff.afterCommit();
+    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private final ReservationService reservations = new ReservationService();
     private SagaEngine engine;
 
@@ -48,7 +48,7 @@ class OutsideUnitOfWorkTest {
                 .contextStore(new InMemorySagaContextStore())
                 .transactions(boundary)
                 .dispatcher(dispatcher)
-                .handoff(handoff)
+                .outbox(outbox)
                 .handlerInstances(new MapHandlerInstanceProvider().register(reservations)
                         .register(new InvoiceService()).register(new ShipmentService()))
                 .build();
@@ -65,7 +65,7 @@ class OutsideUnitOfWorkTest {
         assertThat(dispatcher.dispatched()).containsExactly(placed);
         assertThat(storage.committed().all()).isEmpty();
         assertThat(boundary.begins()).isZero();
-        assertThat(handoff.received()).isEmpty();
+        assertThat(outbox.received()).isEmpty();
 
         assertThat(engine.receive(dispatcher.dispatched().get(0)).results()).singleElement()
                 .satisfies(result -> {
@@ -92,14 +92,14 @@ class OutsideUnitOfWorkTest {
 
         assertThat(reservations.changedAggregates()).containsExactly(ReservationService.reservationIdFor(ORDER));
         assertThat(boundary.commits()).isEqualTo(1);
-        assertThat(handoff.received()).singleElement().satisfies(batch -> {
+        assertThat(outbox.received()).singleElement().satisfies(batch -> {
             assertThat(batch.sagaType()).isNull();
             assertThat(batch.sagaId()).isNull();
             assertThat(batch.unitOfWorkId()).isNotBlank();
             assertThat(batch.events()).containsExactly(
                     new ItemsReserved(ReservationService.reservationIdFor(ORDER), ORDER, 3));
         });
-        // A handed-off event is not received back by the engine: no saga reacted to it.
+        // A outgoing event is not received back by the engine: no saga reacted to it.
         assertThat(storage.committed().all()).isEmpty();
     }
 
@@ -115,7 +115,7 @@ class OutsideUnitOfWorkTest {
         assertThat(boundary.commits()).isZero();
         assertThat(boundary.rollbacks()).isEqualTo(1);
         assertThat(boundary.isActive()).isFalse();
-        assertThat(handoff.received()).isEmpty();
+        assertThat(outbox.received()).isEmpty();
     }
 
     @Test
@@ -146,6 +146,6 @@ class OutsideUnitOfWorkTest {
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> notStarted.eventPublisher().publish(new OrderPlaced(ORDER, 1L, 1)))
                 .isInstanceOf(IllegalStateException.class);
-        assertThat(handoff.received()).isEmpty();
+        assertThat(outbox.received()).isEmpty();
     }
 }

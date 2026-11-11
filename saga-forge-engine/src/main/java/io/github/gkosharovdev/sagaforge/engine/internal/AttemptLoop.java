@@ -34,14 +34,14 @@ import java.util.function.Supplier;
  * attempt before running it, or writes {@code FAILED} {@code EXHAUSTED} if none is left. An interrupted wait returns
  * {@code NOT_HANDLED} with the claimed attempt left recorded.</p>
  *
- * <p>The lock is released before the {@code AFTER_COMMIT} handoff of a committed attempt, and after the
+ * <p>The lock is released before the {@code AFTER_COMMIT} outbox of a committed attempt, and after the
  * {@code FAILED} write otherwise.</p>
  *
  * <p>Since 006 a committed attempt that started compensation, an attempt that found the instance already
  * {@code COMPENSATING}, and a {@code FINAL} or {@code EXHAUSTED} failure after a step committed
  * ({@link CompensationStartWrite} instead of {@code FailedWrite}) continue with {@link CompensationRun} under the same
  * lock; the lock is released after the
- * run's last write and every committed unit of work's {@code AFTER_COMMIT} handoff then runs in commit order
+ * run's last write and every committed unit of work's {@code AFTER_COMMIT} outbox then runs in commit order
  * (specs/006-saga-compensation contracts/compensation-run.md).</p>
  */
 final class AttemptLoop {
@@ -74,10 +74,10 @@ final class AttemptLoop {
                     case Committed committed -> {
                         if (committed.compensationStarted()) {
                             return compensate(trigger, instanceLease, compensationCorrelation(trigger),
-                                    () -> committed.handOff().handoffFailures(), committed.unitOfWorkId());
+                                    () -> committed.store().outboxFailures(), committed.unitOfWorkId());
                         }
                         instanceLease.close();
-                        return committed.handOff();
+                        return committed.store();
                     }
                     case Compensating compensating -> {
                         with.diagnostics().compensationResumed(compensating.correlation(), trigger.step().name());
@@ -173,29 +173,29 @@ final class AttemptLoop {
     }
 
     /**
-     * Runs the remaining compensations under {@code instanceLease}, releases it, then runs {@code triggerHandoff} (the
-     * {@code AFTER_COMMIT} handoff of the unit of work that started compensation, if any) and each committed
-     * compensation's handoff, in commit order, also when the run raised.
+     * Runs the remaining compensations under {@code instanceLease}, releases it, then runs {@code triggerOutbox} (the
+     * {@code AFTER_COMMIT} outbox of the unit of work that started compensation, if any) and each committed
+     * compensation's outbox, in commit order, also when the run raised.
      */
     private SagaHandlingResult compensate(Trigger trigger, Lease instanceLease, Correlation about,
-            Supplier<List<Throwable>> triggerHandoff, String triggerUnitOfWorkId) {
-        List<Supplier<List<Throwable>>> handoffs = new ArrayList<>();
-        if (triggerHandoff != null) {
-            handoffs.add(triggerHandoff);
+            Supplier<List<Throwable>> triggerOutbox, String triggerUnitOfWorkId) {
+        List<Supplier<List<Throwable>>> outboxs = new ArrayList<>();
+        if (triggerOutbox != null) {
+            outboxs.add(triggerOutbox);
         }
         Summary summary;
-        List<Throwable> handoffFailures = new ArrayList<>();
+        List<Throwable> outboxFailures = new ArrayList<>();
         try {
-            summary = new CompensationRun(with).run(trigger.saga(), trigger.sagaId(), about, handoffs,
+            summary = new CompensationRun(with).run(trigger.saga(), trigger.sagaId(), about, outboxs,
                     triggerUnitOfWorkId);
         } finally {
             instanceLease.close();
-            handoffs.forEach(handoff -> handoffFailures.addAll(handoff.get()));
+            outboxs.forEach(outbox -> outboxFailures.addAll(outbox.get()));
         }
         boolean committed = summary.outcome() != HandlingOutcome.NOT_HANDLED;
         return new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(), summary.outcome(),
                 trigger.started(), null, null, summary.lastUnitOfWorkId(),
-                committed ? handoffFailures : List.of());
+                committed ? outboxFailures : List.of());
     }
 
     private static Correlation compensationCorrelation(Trigger trigger) {

@@ -1,5 +1,10 @@
 # Feature Specification: Saga Engine Runtime
 
+> **Renamed in 007** (`specs/007-in-memory-transport` research §14, 2026-11-11): `EventHandoff` → `Outbox`,
+> `handOff` → `store`, `HandedOffEvents` → `OutgoingMessages`, `DispatchingEventHandoff` → `ImmediateDispatchOutbox`,
+> `SagaEngine.Builder.handoff` → `outbox`, `SagaHandlingResult.handoffFailures` → `outboxFailures`. This document keeps
+> the names it was written with.
+
 **Feature Branch**: `004-saga-engine`
 
 **Created**: 2026-11-06
