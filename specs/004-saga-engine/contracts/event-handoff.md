@@ -1,5 +1,10 @@
 # Contract: `EventHandoff` (after-commit handoff, outbox-ready)
 
+> **Renamed in 007** (`specs/007-in-memory-transport` research §14, 2026-11-11): `EventHandoff` → `Outbox`,
+> `handOff` → `store`, `HandedOffEvents` → `OutgoingMessages`, `DispatchingEventHandoff` → `ImmediateDispatchOutbox`,
+> `SagaEngine.Builder.handoff` → `outbox`, `SagaHandlingResult.handoffFailures` → `outboxFailures`. This document keeps
+> the names it was written with.
+
 **Package**: `io.github.gkosharovdev.sagaforge.core.spi` | **Kind**: interface plus the `HandedOffEvents` record;
 default implementation `DispatchingEventHandoff` in `saga-forge-engine` | **Implemented by**: the engine (default),
 later a transactional outbox (Kafka feature), tests. Spec: FR-029 to FR-032, SC-005, SC-011; research §5.

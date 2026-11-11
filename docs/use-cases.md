@@ -319,3 +319,22 @@ not the scheduler.
 - **Transient vs. domain failure must be distinguishable by the step author**, because the correct response
   (retry vs. compensate/intervene) is opposite. This is the strongest argument in this document for adding
   retry/backoff and failure-classification attributes to `@SagaStep` in a future iteration.
+
+## 4. A restart in the middle of a saga (in-memory transport, 007)
+
+A modulith runs the order, payment and shipping modules in one process. `OrderPlaced` starts the fulfilment saga,
+which asks the payment module to charge the customer and waits. The payment module confirms with
+`PaymentConfirmed`, recorded in its own unit of work.
+
+- The confirmation is appended to the message log in the same transaction as the payment module's changes. If that
+  transaction rolls back, there is nothing to deliver.
+- The process is redeployed after the commit but before the relay delivered the confirmation. On start, the new
+  process finds the confirmation unconsumed and delivers it; the saga completes as if nothing happened.
+- If the process stopped after the saga's step committed but before the message was marked consumed, the
+  confirmation is delivered again and the engine reports the step as a `DUPLICATE` — no second shipment is booked.
+- A command marked `@Command(delivery = LOGGED)`, such as `ChargeCard`, is stored with the step that sent it and
+  handled after that step commits; its handler receives the same `CommandId` on every delivery and passes it to the
+  payment provider as the idempotency key.
+- A message that keeps failing is set aside after ten attempts, without holding up other orders, and an operator can
+  deliver it again once the cause is fixed.
+

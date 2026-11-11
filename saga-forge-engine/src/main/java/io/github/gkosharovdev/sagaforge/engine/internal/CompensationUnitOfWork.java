@@ -3,8 +3,9 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
-import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
@@ -29,14 +30,14 @@ import java.util.function.Supplier;
  * {@code SagaContext} and {@code CommandGateway} fields, this unit of work is bound as the thread's recorder and the
  * {@code @SagaCompensation} method runs with the persisted trigger if it declares one. Its commands get 005
  * identities scoped to the compensation method's name. Events recorded by their handlers are buffered for the
- * handoff, never run in-process: no forward step runs while compensating. The step is then marked
+ * outbox, never run in-process: no forward step runs while compensating. The step is then marked
  * {@code COMPENSATED} (and the instance {@code COMPENSATED} after the last one), saved and committed together with
  * the compensation's effects.</p>
  *
  * <p>A failure thrown by the compensation, or reported by the command gateway even if the compensation caught it,
  * rolls everything back and is reported as {@link Failed}; a write-time {@link SagaConcurrencyConflictException} as
- * {@link Conflicted}. A failure of the locked read propagates after the rollback. Handoff timing follows 004: with
- * {@code IN_TRANSACTION} inside the transaction, otherwise by {@link Committed#handOff()} after the caller released
+ * {@link Conflicted}. A failure of the locked read propagates after the rollback. Outbox timing follows 004: with
+ * {@code IN_TRANSACTION} inside the transaction, otherwise by {@link Committed#store()} after the caller released
  * the instance lock.</p>
  *
  * <p>Not thread-safe: confined to the thread that handles the triggering event.</p>
@@ -48,13 +49,13 @@ final class CompensationUnitOfWork implements UnitOfWork {
     }
 
     /**
-     * The compensation of {@code step} committed; {@code instance} is the instance as written. {@link #handOff()}
-     * runs the {@code AFTER_COMMIT} handoff and returns its failures.
+     * The compensation of {@code step} committed; {@code instance} is the instance as written. {@link #store()}
+     * runs the {@code AFTER_COMMIT} outbox and returns its failures.
      */
     record Committed(String step, SagaInstance instance, String unitOfWorkId,
             Supplier<List<Throwable>> afterRelease) implements Result {
 
-        List<Throwable> handOff() {
+        List<Throwable> store() {
             return afterRelease.get();
         }
     }
@@ -80,6 +81,7 @@ final class CompensationUnitOfWork implements UnitOfWork {
     private final EngineSagaLifecycle lifecycle;
     private final CommandIds commandIds;
     private final List<Object> recorded = new ArrayList<>();
+    private final List<OutgoingCommand> loggedCommands = new ArrayList<>();
     private String step;
     private boolean writing;
     private Throwable firstFailure;
@@ -141,7 +143,7 @@ final class CompensationUnitOfWork implements UnitOfWork {
         if (write.instance().status() == SagaStatus.COMPENSATED) {
             with.diagnostics().compensationEnded(correlation);
         }
-        return new Committed(step, write.instance(), unitOfWorkId, this::handOffAfterCommit);
+        return new Committed(step, write.instance(), unitOfWorkId, this::storeAfterCommit);
     }
 
     /** The id of this unit of work. */
@@ -170,6 +172,11 @@ final class CompensationUnitOfWork implements UnitOfWork {
     @Override
     public CommandId nextCommandId(Class<?> commandType) {
         return commandIds.next(commandType);
+    }
+
+    @Override
+    public void recordLoggedCommand(OutgoingCommand command) {
+        loggedCommands.add(command);
     }
 
     private Optional<SagaInstance> lockOrRollBack(LocalTransaction transaction) {
@@ -205,8 +212,8 @@ final class CompensationUnitOfWork implements UnitOfWork {
         writing = true;
         settings.storage().save(write.instance(), write.entries());
         writing = false;
-        if (settings.handoffTiming() == EventHandoff.Timing.IN_TRANSACTION) {
-            buffered().ifPresent(settings.handoff()::handOff);
+        if (settings.outboxTiming() == Outbox.Timing.IN_TRANSACTION) {
+            buffered().ifPresent(settings.outbox()::store);
         }
         writing = true;
         transaction.commit();
@@ -222,32 +229,35 @@ final class CompensationUnitOfWork implements UnitOfWork {
 
     private void discard(LocalTransaction transaction, Throwable cause) {
         recorded.clear();
+        loggedCommands.clear();
         LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
     }
 
-    private List<Throwable> handOffAfterCommit() {
-        if (settings.handoffTiming() != EventHandoff.Timing.AFTER_COMMIT) {
+    private List<Throwable> storeAfterCommit() {
+        if (settings.outboxTiming() != Outbox.Timing.AFTER_COMMIT) {
+            OutboxCommitted.notify(settings, buffered(), with.diagnostics(), correlation);
             return List.of();
         }
-        Optional<HandedOffEvents> batch = buffered();
+        Optional<OutgoingMessages> batch = buffered();
         if (batch.isEmpty()) {
             return List.of();
         }
         try {
-            settings.handoff().handOff(batch.get());
+            settings.outbox().store(batch.get());
             return List.of();
-        } catch (RuntimeException handoffFailure) {
-            with.diagnostics().handoffFailed(correlation, batch.get().events().size(), handoffFailure);
+        } catch (RuntimeException outboxFailure) {
+            with.diagnostics().outboxFailed(correlation, batch.get().events().size(), outboxFailure);
             List<Throwable> failures = new ArrayList<>();
-            failures.add(handoffFailure);
-            failures.addAll(List.of(handoffFailure.getSuppressed()));
+            failures.add(outboxFailure);
+            failures.addAll(List.of(outboxFailure.getSuppressed()));
             return failures;
         }
     }
 
-    private Optional<HandedOffEvents> buffered() {
-        return recorded.isEmpty() ? Optional.empty()
-                : Optional.of(new HandedOffEvents(unitOfWorkId, saga.typeName(), sagaId, List.copyOf(recorded)));
+    private Optional<OutgoingMessages> buffered() {
+        return recorded.isEmpty() && loggedCommands.isEmpty() ? Optional.empty()
+                : Optional.of(new OutgoingMessages(unitOfWorkId, saga.typeName(), sagaId, List.copyOf(recorded),
+                        loggedCommands));
     }
 
     private Object newSagaObject() {

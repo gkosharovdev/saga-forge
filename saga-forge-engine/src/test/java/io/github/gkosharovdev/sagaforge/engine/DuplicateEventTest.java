@@ -91,7 +91,7 @@ class DuplicateEventTest {
         assertThat(fixture.faults().reached(Faults.AFTER_PACKED)).isEqualTo(1);
         assertThat(fixture.committed(placed.sagaId()).steps().get(ChargeSaga.PACKED_STEP).status())
                 .isEqualTo(StepStatus.COMPLETED);
-        assertThat(fixture.handoff().received()).singleElement()
+        assertThat(fixture.outbox().received()).singleElement()
                 .satisfies(batch -> assertThat(batch.events()).containsExactly(new OrderPacked(ORDER)));
     }
 }

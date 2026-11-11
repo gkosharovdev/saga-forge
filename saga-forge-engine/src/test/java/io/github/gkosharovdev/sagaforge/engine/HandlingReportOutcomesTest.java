@@ -51,11 +51,11 @@ class HandlingReportOutcomesTest {
 
     /** The fields of a result, with the presence of the nullable ones. */
     private record Shape(HandlingOutcome outcome, boolean started, boolean hasSagaId, String outcomeStep,
-            boolean hasFailure, boolean hasUnitOfWork, boolean hasHandoffFailures) {
+            boolean hasFailure, boolean hasUnitOfWork, boolean hasOutboxFailures) {
 
         static Shape of(SagaHandlingResult result) {
             return new Shape(result.outcome(), result.started(), result.sagaId() != null, result.outcomeStep(),
-                    result.failure() != null, result.unitOfWorkId() != null, !result.handoffFailures().isEmpty());
+                    result.failure() != null, result.unitOfWorkId() != null, !result.outboxFailures().isEmpty());
         }
     }
 

@@ -1,0 +1,2 @@
+io.github.gkosharovdev.sagaforge.spring.modulith.ModulithInteropConfiguration
+io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration

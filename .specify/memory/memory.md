@@ -346,17 +346,18 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Status**: open. Javadoc done in 004 (T015: `SagaInstance.state` "reserved, not populated"; the engine writes
   `Map.of()`); the use-or-drop decision remains.
 
-### G-ENG-07: Events are lost if the process stops between commit and handoff
-- **Description**: 004's default after-commit handoff is at-most-once: a committed unit of work's buffered
+### G-ENG-07: Events are lost if the process stops between commit and dispatch
+- **Description**: 004's default after-commit outbox (`ImmediateDispatchOutbox`, called `DispatchingEventHandoff` until 007) is at-most-once: a committed unit of work's buffered
   events go to `EventDispatcher` right after the commit, and are lost if the process stops in between. The saga
-  state stays committed and nothing redelivers them. 004 defines the handoff as an outbox-ready contract (which
+  state stays committed and nothing redelivers them. 004 defines the `Outbox` SPI (called `EventHandoff` until 007) as an outbox-ready contract (which
   events, recording order, unit-of-work identity plus saga type and id, and the option to receive the events
   inside the unit of work's transaction) so that a transactional outbox can close the window without changing
   the engine.
 - **Origin**: `specs/004-saga-engine/spec.md` FR-030, Edge Cases "Crash between commit and handoff",
   Assumptions "Delivery guarantee"; user decision, 2026-11-06.
-- **Status**: open until the Kafka feature adds the transactional outbox (events captured in the unit of work's
-  transaction and relayed at least once) behind the 004 handoff contract.
+- **Status**: closed for hosts using the in-memory transport (specs/007: an `IN_TRANSACTION` outbox over a durable
+  message log, relayed at least once); still open with the default `ImmediateDispatchOutbox`, and for Kafka until that
+  feature reuses the log.
 
 ### G-ENG-08: Concurrent duplicate starts across processes are not prevented
 - **Description**: 004 guarantees at most one active instance per saga type and association value within one
@@ -396,7 +397,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   added (T081), not yet run.
 
 ### G-ENG-12: Entry point called inside an active host transaction
-- **Description**: Spec FR-007 covers calls from a handoff and from a running unit of work, not a call made while the
+- **Description**: Spec FR-007 covers calls from an outbox and from a running unit of work, not a call made while the
   host's own transaction is active on the thread (for example a synchronous transport invoked from a
   `@Transactional` method). The 004 `TransactionBoundary.begin()` never joins: it suspends the host transaction or
   throws, per implementation. The Spring starter and the in-memory transport must choose (for example deliver after
@@ -755,6 +756,100 @@ Noted only; nothing is bumped until the starter feature decides.
   R21/R22.
 - **Gap status**: G-006-01 closed by 005; G-006-02 to G-006-09 open as recorded above; G-003-23 closed (all Postgres
   container suites green).
+
+## In-memory transport (007)
+
+### G-007-01: Quarkus extension deferred; constitution amendment pending
+- **Description**: Quarkus is to be an in-scope host framework next to Spring (user decision, 2026-11-11). 007 keeps
+  the transport and log framework-free (FR-026) so a Quarkus extension needs no change to them, but delivers no
+  Quarkus wiring. Quarkus has no equivalent of Spring Modulith's event publication registry, so it always uses Saga
+  Forge's own log. Constitution Principle IV and Technical Constraints do not yet list Quarkus.
+- **Origin**: `specs/007-in-memory-transport/spec.md` Clarifications, FR-029, Assumptions "Scope boundary".
+- **Status**: open. Amend the constitution via `/speckit-constitution` before `/speckit-plan`; the extension is a
+  later feature.
+
+### G-007-02: Full starter autoconfiguration still deferred
+- **Description**: 007 puts only this transport's Spring wiring (transaction manager, executor, lifecycle, Spring
+  Modulith interop) into `saga-forge-spring-boot-starter`. Classpath detection of storage and transport and engine
+  assembly remain a separate starter feature.
+- **Origin**: `specs/007-in-memory-transport/spec.md` FR-029.
+- **Status**: open (deferred).
+
+### G-007-03: Redelivery does not recover a stranded start
+- **Description**: The durable log redelivers a start event after a crash, but the engine reports it as a duplicate
+  start when the instance exists, so an instance whose first unit of work never committed stays stranded
+  (G-ENG-05, G-005-06). 007 does not change that rule.
+- **Origin**: `specs/007-in-memory-transport/spec.md` Edge Cases, Assumptions "Start-event recovery".
+- **Status**: open (decide with G-ENG-05).
+
+### G-007-04: Delivery order is per aggregate, not per saga instance
+- **Description**: The transport cannot know which saga instance an event reaches before the engine routes it, so
+  FR-007's order "per saga instance" is implemented per ordering key: the event's aggregate type and identifier (a
+  command's aggregate identifier, or its sending saga). This equals the instance when `associationProperty` is the
+  aggregate identifier. Positions are assigned at append, so two concurrent, unserialized units of work of one key can
+  commit out of position order. Queries "by saga instance" (FR-022) find messages a saga produced; messages it received
+  are found only by ordering key.
+- **Origin**: `specs/007-in-memory-transport/research.md` §5, data-model.md.
+- **Status**: open (accepted for 007).
+
+### G-007-05: Spring Modulith completion lookup by event (risk R1)
+- **Description**: Interop mode marks registry publications completed with `markCompleted(event, target)`, which finds
+  the publication by the serialized event. The `SagaForgeEnvelope` must serialize deterministically; unverified.
+- **Origin**: `specs/007-in-memory-transport/research.md` §10, Risks R1.
+- **Status**: closed 2026-11-11. Interop uses `EventPublicationRepository` by publication id only
+  (`create`, `markCompleted(UUID, Instant)`, `markFailed(UUID)`, `findIncompletePublications()`,
+  `deleteCompletedPublicationsBefore`), checked with `javap` against Spring Modulith 2.1.1; the payload travels in
+  `SagaForgeEnvelope` as JSON produced by Modulith's own `EventSerializer`. `ModulithInteropAcceptanceContainerTest`
+  covers it end to end.
+
+### G-007-06: Relay logic lives in the in-memory transport module
+- **Description**: Claiming, ordering, backoff and set-aside are written in `saga-forge-transport-inmemory`. A Kafka
+  outbox relay needs the same claim loop with a different sink; it may have to be extracted into a shared module.
+- **Origin**: `specs/007-in-memory-transport/plan.md` Project Structure.
+- **Status**: open (decide in the Kafka feature).
+
+### G-007-07: Interop leasing reads every incomplete registry publication
+- **Description**: `ModulithMessageLog.lease` resolves payloads by calling `findIncompletePublications()` and
+  filtering by Saga Forge's target identifier, once per lease call. Fine for a modulith's volumes, but it reads every
+  incomplete publication of the application (Saga Forge's and its listeners') each time; a backlog of many
+  thousands would make leasing slow. Spring Modulith 2.1 has no lookup of several publications by id.
+- **Origin**: `saga-forge-spring-boot-starter/.../modulith/ModulithMessageLog.java`; specs/007 research §10.
+- **Status**: open (accepted for 007; revisit if Modulith adds an id lookup or a host reports slow leasing).
+
+### G-007-08: Plain-Java detail tests are not run through the acceptance suite
+- **Description**: tasks.md T072 asked to refactor the plain-Java tests of US1 to US4 to run through
+  `TransportAcceptanceSuite`. They stay as detailed tests (fixture- and double-specific assertions); a separate
+  `PlainJavaAcceptanceTest` runs the shared suite, so SC-008's three setups run the same four scenarios.
+- **Origin**: specs/007 tasks.md T072.
+- **Status**: accepted deviation.
+
+### In-memory transport (007), implementation notes
+- 2026-11-11: implemented from `specs/007-in-memory-transport/tasks.md` (82 tasks).
+- **Per module**: core — `Outbox` rename, `CommandDelivery`, `OutgoingCommand`, `OutgoingMessages.commands`,
+  `Outbox.supportsCommands`/`committed`, `CommandReceiver`/`LoggedCommand`, `core.spi.log` (12 types), scanner R23.
+  Engine — `OutboxCommitted` hook, logged commands in the gateway and all three unit-of-work kinds,
+  `SagaEngine.commandReceiver()`, startup refusal for a LOGGED handler with an outbox that cannot store commands.
+  Transport — `InMemoryTransport`, `TransportSettings`, `MessageLogQueries`, `Relay`, `KeyedWorkers`,
+  `OrderingKeys`, `LogAppender`, `Backoff`. Postgres — `PostgresMessageLog`, `PayloadCodec` (typed JSON, separate
+  from `JsonCodec`), schema plus `schema-upgrade-007.sql` with check constraints. Starter — `SpringTransactionBoundary`,
+  `InMemoryTransportConfiguration`, `TransportProperties`, `TransportLifecycle`, `EventReceiverCustomizer`,
+  `ApplicationEventBridge`, `ModulithInteropConfiguration`, `ModulithMessageLog`, `SagaForgeEnvelope`; versions pinned
+  to Boot 4.1.2 / Framework 7.0.10 / Jackson 3.1.7 without importing Boot's BOM (G-DEP-01).
+- **Tests** (full `-Pcontainer-tests` build, 2026-11-11): core 464, engine 675, transport 51, Postgres 212, starter 18,
+  example 13 — all green, container suites included (run locally with Podman).
+- **Deviations from the contracts**: `MessageLog.lease` returns `LeasedMessages` (readable and unreadable messages)
+  instead of throwing `UnreadableMessageException`, so one bad payload does not abort a batch. R23 checks only the
+  LOGGED command types passed to `validateAll` (steps do not declare the commands they send); `send` also resolves the
+  handler first. `TransportLifecycle` applies optional `EventReceiverCustomizer` beans (added so tests, and hosts for
+  tracing, can wrap deliveries). Interop goes through `EventPublicationRepository` by id rather than the registry's
+  lookup by event (G-007-05 closed). The R1 spike (T067) was replaced by a `javap` check of the 2.1.1 API plus
+  `ModulithInteropAcceptanceContainerTest.oneOutbox`. Plain-Java detail tests stay as they are (G-007-08).
+- **Naming** (2026-11-11, user decision): "claim" was replaced by "lease" throughout the message log, so the whole
+  lifecycle reads lease / renew / release: `MessageLog.lease`, `LeasedMessages`, `leasedBy`/`leasedUntil`
+  (`leased_by`/`leased_until`), `TransportSettings.leaseDuration`/`leaseBatchSize` (`saga-forge.transport.
+  lease-duration`, `lease-batch-size`); the relay's loop is the "polling loop" (EIP Polling Consumer). Research §15.
+- **Gap status**: G-ENG-07 closed for hosts using the in-memory transport; G-007-01 to -04, -06 to -08 open or
+  accepted as recorded above.
 
 ## Repository hygiene
 

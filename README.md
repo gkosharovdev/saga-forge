@@ -183,13 +183,16 @@ are tested (`saga-forge-core`). The step, command-handler, and unit-of-work cont
 `DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined, first proven by a test-only harness (feature 002).
 The saga engine runtime exists in `saga-forge-engine` (feature 004): event routing by association, the
 saga-scoped unit of work in the host's local transaction (`TransactionBoundary`), one unit of work per instance at
-a time, an outbox-ready after-commit handoff, and fail-fast startup validation. It is verified by unit tests over
+a time, an outbox SPI (`Outbox`, default `ImmediateDispatchOutbox` after commit), and fail-fast startup validation. It is verified by unit tests over
 in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
 `StorageProvider` joins the engine's transaction (feature 004). Step retry with failure classification, stable
 command identities and duplicate-event detection are implemented in the engine and persisted by Postgres (feature
 005). Compensation (feature 006) runs `@SagaCompensation` methods after a `@StartCompensation` business failure or a
-final or exhausted step failure, in reverse completion order, and resumes after a crash. Not implemented yet: the
-Spring Boot starter, the transports, and MySQL and MongoDB storage. See
+final or exhausted step failure, in reverse completion order, and resumes after a crash. The in-memory transport
+(feature 007) delivers events — and commands marked `@Command(delivery = LOGGED)` — between the modules of one process,
+from a durable message log written in the same transaction as the saga state, so unconsumed messages survive a
+restart; the starter wires it into Spring Boot, with optional Spring Modulith interop. Not implemented yet: the
+Kafka transport, the starter's storage/transport detection, and MySQL and MongoDB storage. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
 `docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as
@@ -201,9 +204,9 @@ historical planning artifacts, superseded by the docs above where they conflict.
 |---|---|---|
 | `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
 | `saga-forge-engine` | Saga runtime over the core SPI: `SagaEngine` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
-| `saga-forge-spring-boot-starter` | Autoconfiguration: detects datastore + transport, wires the engine | `saga-forge-core` |
+| `saga-forge-spring-boot-starter` | Autoconfiguration. Today: the in-memory transport's wiring (Spring transactions, lifecycle, application-event bridge, Spring Modulith interop). Target: detects datastore + transport, wires the engine | `saga-forge-core`; transport, Postgres, engine (optional) |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
-| `saga-forge-transport-inmemory` | `EventDispatcher` over Spring `ApplicationEventPublisher` | `saga-forge-core` |
+| `saga-forge-transport-inmemory` | In-process transport with a durable message log (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
 | `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-engine` (test scope) |
 
@@ -223,8 +226,31 @@ historical planning artifacts, superseded by the docs above where they conflict.
 ```
 
 Add `saga-forge-transport-kafka` if you're on Kafka; omit it and the starter falls back to
-in-memory Spring application events. See [docs/architecture.md](docs/architecture.md) for the full
-detection matrix.
+the in-memory transport. See [docs/architecture.md](docs/architecture.md) for the full detection matrix.
+
+### The in-memory transport today (plain Java)
+
+```java
+PostgresMessageLog log = new PostgresMessageLog(dataSource, transactions);   // tables in schema.sql
+InMemoryTransport transport = InMemoryTransport.builder().log(log).transactions(transactions).build();
+SagaEngine engine = SagaEngine.builder()
+        .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
+        .storage(new PostgresStorageProvider(dataSource, transactions))
+        .contextStore(new PostgresSagaContextStore(dataSource))
+        .transactions(transactions)
+        .dispatcher(transport.dispatcher())
+        .outbox(transport.outbox())
+        .build();
+engine.start();
+transport.start(engine, engine.commandReceiver());
+```
+
+A command type can opt into the log, so it is handled after the sending step commits instead of inside it:
+
+```java
+@Command(delivery = CommandDelivery.LOGGED)
+public record ChargeCard(@AggregateIdentifier String invoiceId) { }
+```
 
 ## Vocabulary
 

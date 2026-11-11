@@ -5,9 +5,9 @@ package io.github.gkosharovdev.sagaforge.engine.internal;
  * "Reentrancy and threading").
  *
  * <p>A unit of work, saga-scoped or not, {@linkplain #enter() enters} right after its transaction began and
- * {@linkplain #exit() exits} once its commit or rollback has finished, before any {@code AFTER_COMMIT} handoff.
+ * {@linkplain #exit() exits} once its commit or rollback has finished, before any {@code AFTER_COMMIT} outbox.
  * {@code EventReceiver.receive} calls {@link #requireNotRunning()} first: a call from a step, a handler or an
- * {@code IN_TRANSACTION} handoff is rejected, while a call from inside an {@code AFTER_COMMIT} handoff (marker cleared,
+ * {@code IN_TRANSACTION} outbox is rejected, while a call from inside an {@code AFTER_COMMIT} outbox (marker cleared,
  * instance lock released) runs as a new unit of work.</p>
  *
  * <p>The marker is per thread and shared by every engine in the JVM: a unit of work of one engine also blocks
@@ -61,7 +61,7 @@ final class ReentrancyGuard {
         }
         IllegalStateException rejection = new IllegalStateException("EventReceiver.receive was called while a"
                 + " saga engine unit of work is running on thread " + Thread.currentThread().getName()
-                + "; deliver the event after the unit of work committed, for example from an AFTER_COMMIT handoff");
+                + "; deliver the event after the unit of work committed, for example from an AFTER_COMMIT outbox");
         UnitOfWork.bound().ifPresent(unitOfWork -> unitOfWork.failed(rejection));
         throw rejection;
     }

@@ -89,7 +89,7 @@ class FailurePositionTest {
     }
 
     @Test
-    @DisplayName("without a fault the unit of work commits COMPLETED and hands off LabelPrinted")
+    @DisplayName("without a fault the unit of work commits COMPLETED and passes to the outbox LabelPrinted")
     void withoutFault() {
         FailureFixture fixture = new FailureFixture();
 
@@ -101,7 +101,7 @@ class FailurePositionTest {
                 WEIGHT * FailureFixture.CENTS_PER_KILOGRAM);
         assertThat(fixture.slots().reservations()).hasSize(1);
         assertThat(fixture.labels().printed()).hasSize(1);
-        assertThat(fixture.handoff().received()).singleElement()
+        assertThat(fixture.outbox().received()).singleElement()
                 .satisfies(batch -> assertThat(batch.events()).singleElement().isInstanceOf(LabelPrinted.class));
     }
 
@@ -128,7 +128,7 @@ class FailurePositionTest {
         assertThat(instance.steps().values()).containsOnly(StepRecord.notRun());
 
         assertThat(fixture.noClientChanges()).isTrue();
-        assertThat(fixture.handoff().received()).isEmpty();
+        assertThat(fixture.outbox().received()).isEmpty();
         assertThat(fixture.dispatcher().dispatched()).isEmpty();
 
         assertThat(fixture.context(result.sagaId())).containsEntry(FailureSaga.CONTEXT_WEIGHT, WEIGHT);
@@ -157,7 +157,7 @@ class FailurePositionTest {
         assertThat(result.failure().message()).contains(FaultPoint.SLOT_HANDLER.name());
         assertThat(fixture.committed(result.sagaId()).status()).isEqualTo(SagaStatus.FAILED);
         assertThat(fixture.noClientChanges()).isTrue();
-        assertThat(fixture.handoff().received()).isEmpty();
+        assertThat(fixture.outbox().received()).isEmpty();
     }
 
     @Test

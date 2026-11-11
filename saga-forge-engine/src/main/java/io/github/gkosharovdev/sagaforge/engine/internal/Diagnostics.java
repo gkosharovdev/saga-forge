@@ -191,9 +191,14 @@ public final class Diagnostics {
         logger.log(Level.INFO, Line.of("saga.uow.notStarted").event(about).saga(about).instance(about).toString());
     }
 
-    void handoffFailed(Correlation about, int events, Throwable cause) {
-        logger.log(Level.ERROR, Line.of("saga.handoff.failed").unitOfWork(about).saga(about).instance(about)
+    void outboxFailed(Correlation about, int events, Throwable cause) {
+        logger.log(Level.ERROR, Line.of("saga.outbox.failed").unitOfWork(about).saga(about).instance(about)
                 .with("events", events).toString(), cause);
+    }
+
+    void outboxCommittedFailed(Correlation about, Throwable cause) {
+        logger.log(Level.WARNING, Line.of("saga.outbox.committedFailed").unitOfWork(about).saga(about)
+                .instance(about).toString(), cause);
     }
 
     void eventNotHandled(Object event, Throwable cause) {

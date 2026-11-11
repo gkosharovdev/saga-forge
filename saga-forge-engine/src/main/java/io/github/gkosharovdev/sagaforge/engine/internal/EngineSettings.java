@@ -6,7 +6,7 @@ import java.util.Optional;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
@@ -31,8 +31,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * @param aggregateResolvers host resolvers, first supporting wins
  * @param parameterResolvers host resolvers of non-command handler parameters, first supporting wins
  * @param sagaObjects        the host's saga-object provider, if any
- * @param handoff            receives committed units of work's buffered events
- * @param handoffTiming      {@code handoff.timing()}, read once when the engine was built
+ * @param outbox            receives committed units of work's buffered events
+ * @param outboxTiming      {@code outbox.timing()}, read once when the engine was built
  * @param sources            clock and id suppliers
  */
 public record EngineSettings(
@@ -44,8 +44,8 @@ public record EngineSettings(
         List<AggregateResolver> aggregateResolvers,
         List<HandlerParameterResolver> parameterResolvers,
         Optional<SagaObjectProvider> sagaObjects,
-        EventHandoff handoff,
-        EventHandoff.Timing handoffTiming,
+        Outbox outbox,
+        Outbox.Timing outboxTiming,
         TimeAndIdentity sources,
         RetrySettings retry) {
 
@@ -59,8 +59,8 @@ public record EngineSettings(
         requireNonNull(dispatcher, "dispatcher");
         requireNonNull(handlerInstances, "handlerInstances");
         requireNonNull(sagaObjects, "sagaObjects");
-        requireNonNull(handoff, "handoff");
-        requireNonNull(handoffTiming, "handoffTiming");
+        requireNonNull(outbox, "outbox");
+        requireNonNull(outboxTiming, "outboxTiming");
         requireNonNull(sources, "sources");
         requireNonNull(retry, "retry");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
@@ -75,10 +75,10 @@ public record EngineSettings(
     public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
             EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
             List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
-            Optional<SagaObjectProvider> sagaObjects, EventHandoff handoff, EventHandoff.Timing handoffTiming,
+            Optional<SagaObjectProvider> sagaObjects, Outbox outbox, Outbox.Timing outboxTiming,
             TimeAndIdentity sources) {
         this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
-                parameterResolvers, sagaObjects, handoff, handoffTiming, sources, RetrySettings.defaults());
+                parameterResolvers, sagaObjects, outbox, outboxTiming, sources, RetrySettings.defaults());
     }
 
     public static HandlerInstanceProvider noHandlerInstances() {

@@ -44,8 +44,8 @@ package io.github.gkosharovdev.sagaforge.core.command;
  *
  * <p>When {@code send} is called with no active unit of work (for example from a request handler), the
  * gateway opens a unit of work for the handler's own changes. That unit of work is not saga-scoped: events
- * raised in it are delivered after it commits through the after-commit handoff
- * ({@link io.github.gkosharovdev.sagaforge.core.spi.EventHandoff}; by default
+ * raised in it are delivered after it commits through the after-commit outbox
+ * ({@link io.github.gkosharovdev.sagaforge.core.spi.Outbox}; by default
  * {@link io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher#dispatch(Object)}).
  */
 public interface CommandGateway {

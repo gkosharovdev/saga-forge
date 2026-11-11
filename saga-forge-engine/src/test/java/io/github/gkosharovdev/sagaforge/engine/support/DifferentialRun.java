@@ -29,7 +29,7 @@ import java.util.function.Supplier;
  *
  * <p>The engine side runs over {@link InMemoryTransactionBoundary}, {@link TransactionalInMemoryStorageProvider},
  * an {@link InMemorySagaContextStore} and a {@link RecordingEventDispatcher} behind the default
- * {@code DispatchingEventHandoff}; every {@link Snapshottable} fixture object is a participant of the boundary, as it
+ * {@code ImmediateDispatchOutbox}; every {@link Snapshottable} fixture object is a participant of the boundary, as it
  * is snapshotted by the harness. Both sides receive the same event objects, in order; the harness through
  * {@code deliverAll}, the engine through {@code receive}. An exception from {@code receive} is kept in
  * {@link Side#failures()} and does not stop the sequence.</p>

@@ -36,7 +36,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *       association value, before anything runs; the message names the event type and, for a missing value, the
  *       saga type, step and property.</li>
  *   <li>{@link IllegalStateException} if the engine has not started (never started, or its start was refused), or
- *       if a unit of work is running on this thread (a step, handler or in-transaction handoff calling back in);
+ *       if a unit of work is running on this thread (a step, handler or in-transaction outbox calling back in);
  *       in the latter case the running unit of work fails like any other failure.</li>
  *   <li>{@link EventHandlingException} after every affected instance was attempted, if for at least one of them no
  *       outcome could be recorded (the store was unavailable, the creation write or the {@code FAILED} write
@@ -46,7 +46,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <h3>Reentrancy and threading</h3>
  * <ul>
- *   <li>Called from inside an {@link EventHandoff.Timing#AFTER_COMMIT} handoff (a synchronous transport looping a
+ *   <li>Called from inside an {@link Outbox.Timing#AFTER_COMMIT} outbox (a synchronous transport looping a
  *       dispatched event back): accepted. The previous unit of work has committed and released its locks, so this
  *       is a new unit of work.</li>
  *   <li>Called concurrently from several threads: units of work of the same instance serialize; different

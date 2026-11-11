@@ -7,6 +7,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -22,6 +23,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
+import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
@@ -77,6 +79,7 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  * Model rules across all hosts ({@code validateAll} only, reported as model errors):
  * <ul>
  *   <li>{@code validateUniqueCommandHandlers} — one @CommandHandler per @Command type</li>
+ *   <li>{@code validateLoggedCommands} — a passed-in @Command(delivery = LOGGED) type has a handler (R23)</li>
  *   <li>{@code validateUniqueAggregateMembers} — one @AggregateLoader and one @AggregateSaver per aggregate</li>
  *   <li>{@code validateInstanceHandlerCommandIdentifiers} — a command handled by an @Aggregate instance
  *       method declares an @AggregateIdentifier field</li>
@@ -231,6 +234,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateUniqueAggregateMembers(hosts, AggregateLoader.class, modelErrors);
         validateUniqueAggregateMembers(hosts, AggregateSaver.class, modelErrors);
         validateInstanceHandlerCommandIdentifiers(hosts, modelErrors);
+        validateLoggedCommands(passedIn, hosts, modelErrors);
 
         return new ValidationReport(classResults, modelErrors);
     }
@@ -392,6 +396,27 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
      * hosts (002 FR-011). Only handlers with exactly one {@code @Command} parameter take part; others are
      * reported by {@code validateCommandHandlerParameters}.
      */
+    /**
+     * Model rule R23: each {@code @Command(delivery = LOGGED)} type among the passed-in classes is handled by a
+     * {@code @CommandHandler} of a passed-in host ({@code specs/007-in-memory-transport} FR-010). A logged command
+     * would otherwise fail only at delivery, after its sender committed. Types in simple-name order.
+     */
+    private void validateLoggedCommands(Set<Class<?>> passedIn, List<Class<?>> hosts, List<String> modelErrors) {
+        Set<Class<?>> handled = new HashSet<>();
+        for (Class<?> host : hosts) {
+            for (Executable handler : handlerMembers(host)) {
+                handled.addAll(commandParameters(handler));
+            }
+        }
+        passedIn.stream()
+                .filter(type -> type.isAnnotationPresent(Command.class)
+                        && type.getAnnotation(Command.class).delivery() == CommandDelivery.LOGGED)
+                .filter(type -> !handled.contains(type))
+                .sorted(Comparator.comparing(Class::getSimpleName))
+                .forEach(type -> modelErrors.add("Command " + type.getSimpleName()
+                        + " is delivered LOGGED but has no @CommandHandler"));
+    }
+
     private void validateUniqueCommandHandlers(List<Class<?>> hosts, List<String> modelErrors) {
         Map<Class<?>, List<String>> handlersByCommand = bySimpleName();
         for (Class<?> host : hosts) {

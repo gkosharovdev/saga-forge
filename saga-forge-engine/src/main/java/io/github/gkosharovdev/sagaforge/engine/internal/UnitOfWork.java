@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.engine.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventRecorder;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import java.lang.reflect.UndeclaredThrowableException;
@@ -38,6 +39,12 @@ interface UnitOfWork extends DomainEventRecorder {
     /** Records that {@code id}'s handler returned in this unit of work; it commits with the running step. */
     default void commandHandled(CommandId id) {
     }
+
+    /**
+     * Buffers a {@code @Command(delivery = LOGGED)} command for this unit of work's outbox batch
+     * ({@code specs/007-in-memory-transport} research §3); it is discarded if the unit of work rolls back.
+     */
+    void recordLoggedCommand(OutgoingCommand command);
 
     /** The engine unit of work bound to the calling thread, if any; another recorder is not one. */
     static Optional<UnitOfWork> bound() {

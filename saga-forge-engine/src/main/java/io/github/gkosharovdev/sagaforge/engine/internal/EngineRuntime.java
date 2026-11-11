@@ -12,6 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
+import io.github.gkosharovdev.sagaforge.core.spi.LoggedCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 
 /**
@@ -27,10 +28,10 @@ public final class EngineRuntime {
 
     private final List<SagaModel> sagas;
     private final EventRouter router;
-    private final CommandGateway commandGateway;
+    private final EngineCommandGateway commandGateway;
     private final EventPublisher eventPublisher;
 
-    private EngineRuntime(List<SagaModel> sagas, EventRouter router, CommandGateway commandGateway,
+    private EngineRuntime(List<SagaModel> sagas, EventRouter router, EngineCommandGateway commandGateway,
             EventPublisher eventPublisher) {
         this.sagas = sagas;
         this.router = router;
@@ -92,6 +93,11 @@ public final class EngineRuntime {
     /** The engine's command gateway, also the one injected into saga objects. */
     public CommandGateway commandGateway() {
         return commandGateway;
+    }
+
+    /** Handles one logged command delivered by a transport ({@code CommandReceiver}, 007 research §3). */
+    public void receiveCommand(LoggedCommand delivery) {
+        commandGateway.receive(delivery);
     }
 
     /** The engine's event publisher. */

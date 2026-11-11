@@ -8,7 +8,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
-import io.github.gkosharovdev.sagaforge.engine.support.CapturingEventHandoff;
+import io.github.gkosharovdev.sagaforge.engine.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
@@ -30,7 +30,7 @@ public final class IdempotencyFixture {
     private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final RecordingLogger logger = new RecordingLogger();
-    private final CapturingEventHandoff handoff = CapturingEventHandoff.afterCommit();
+    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private final SagaEngine engine;
 
     public IdempotencyFixture() {
@@ -42,7 +42,7 @@ public final class IdempotencyFixture {
                 .contextStore(new InMemorySagaContextStore())
                 .transactions(boundary)
                 .dispatcher(new RecordingEventDispatcher())
-                .handoff(handoff)
+                .outbox(outbox)
                 .handlerInstances(new MapHandlerInstanceProvider().register(charges).register(notifications)
                         .register(shipments).register(new Repacker()))
                 .sagaObjects(new SagaObjectProvider() {
@@ -110,8 +110,8 @@ public final class IdempotencyFixture {
         return storage;
     }
 
-    public CapturingEventHandoff handoff() {
-        return handoff;
+    public CapturingOutbox outbox() {
+        return outbox;
     }
 
     public RecordingLogger logger() {

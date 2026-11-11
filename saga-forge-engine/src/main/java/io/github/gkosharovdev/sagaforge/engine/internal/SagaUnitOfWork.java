@@ -6,8 +6,9 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
-import io.github.gkosharovdev.sagaforge.core.spi.EventHandoff;
-import io.github.gkosharovdev.sagaforge.core.spi.HandedOffEvents;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
@@ -51,14 +52,14 @@ import java.util.Set;
  *       stop; at the first {@code @StartCompensation} step {@code startCompensation} and stop (006 FR-002, the
  *       committed result then carries {@code compensationStarted}); at an empty queue {@code advance} (row 5).</li>
  *   <li>Saves the instance with the entries the lifecycle produced, commits, and hands every event not run
- *       in-process to the {@code EventHandoff} as one batch, after the commit (rows 6, 8).</li>
+ *       in-process to the {@code Outbox} as one batch, after the commit (rows 6, 8).</li>
  * </ol>
  *
  * <h2>Recording ({@link #record(Object)})</h2>
  * <p>Each event adds {@code (@DomainEvent.aggregate, @AggregateIdentifier value)} to the running step's touched
  * aggregates. It is queued if it triggers a non-start step of this saga type and carries this instance's
  * association value for that step's property; otherwise it is buffered (FR-008, FR-017). Events still queued when
- * an {@code @EndSaga} step ends the run are handed off with the buffered ones, in recording order.</p>
+ * an {@code @EndSaga} step ends the run go to the outbox with the buffered ones, in recording order.</p>
  *
  * <h2>Failures (data-model.md row 9; 005 contracts/attempt-loop.md)</h2>
  * <p>Any exception from loading the context record, creating the saga object, a step, a handler (a failure
@@ -74,15 +75,15 @@ import java.util.Set;
  * <p>A {@link SagaConcurrencyConflictException} from the instance write or the commit is no saga failure: the run
  * rolls back and discards like a failure, writes no {@code FAILED}, logs {@code saga.uow.conflict} and reports
  * {@code NOT_HANDLED} with its {@code unitOfWorkId}. The in-process instance lock is the {@link AttemptLoop}'s: held
- * across all attempts of one handling call and released after the last commit (before the handoff), after the
+ * across all attempts of one handling call and released after the last commit (before the outbox), after the
  * {@code FAILED} write, or after a result that ran nothing.</p>
- * <h2>Handoff (contracts/event-handoff.md, FR-029 to FR-031) and reentrancy (FR-007)</h2>
+ * <h2>Outbox (contracts/event-handoff.md, FR-029 to FR-031) and reentrancy (FR-007)</h2>
  * <p>The thread is marked "unit of work running" ({@link ReentrancyGuard}) from {@code begin()} until the commit or
- * rollback (and any {@code FAILED} write) has finished. With an {@code IN_TRANSACTION} handoff the non-empty batch is
- * handed off after the instance write and before the commit, inside the transaction, and its failure fails the unit
- * of work naming the last step run. With {@code AFTER_COMMIT} it is handed off after the commit, the marker cleared and
- * the lock released; its failure is logged ({@code saga.handoff.failed}) and returned in the result's
- * {@code handoffFailures}, and the committed instance stays as it is.</p>
+ * rollback (and any {@code FAILED} write) has finished. With an {@code IN_TRANSACTION} outbox the non-empty batch is
+ * stored in the outbox after the instance write and before the commit, inside the transaction, and its failure fails the unit
+ * of work naming the last step run. With {@code AFTER_COMMIT} it goes to the outbox after the commit, the marker cleared and
+ * the lock released; its failure is logged ({@code saga.outbox.failed}) and returned in the result's
+ * {@code outboxFailures}, and the committed instance stays as it is.</p>
  *
  * <p>Not thread-safe: confined to the thread that called {@code receive}.</p>
  */
@@ -105,13 +106,13 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     /**
-     * The attempt committed. {@link #handOff()} runs the {@code AFTER_COMMIT} handoff and returns the result; the
+     * The attempt committed. {@link #store()} runs the {@code AFTER_COMMIT} outbox and returns the result; the
      * caller releases the instance lock first.
      */
     record Committed(java.util.function.Supplier<SagaHandlingResult> afterRelease, boolean compensationStarted,
             String unitOfWorkId) implements AttemptResult {
 
-        SagaHandlingResult handOff() {
+        SagaHandlingResult store() {
             return afterRelease.get();
         }
     }
@@ -156,6 +157,7 @@ final class SagaUnitOfWork implements UnitOfWork {
     private final Correlation correlation;
     private final EngineSagaLifecycle lifecycle;
     private final List<Recorded> recorded = new ArrayList<>();
+    private final List<OutgoingCommand> loggedCommands = new ArrayList<>();
     private final Deque<Queued> queue = new ArrayDeque<>();
     private final List<String> stepsRun = new ArrayList<>();
     private List<AggregateReference> touched = new ArrayList<>();
@@ -221,7 +223,7 @@ final class SagaUnitOfWork implements UnitOfWork {
         if (compensationStarted) {
             with.diagnostics().compensationStarted(correlation, lifecycleTrigger);
         }
-        return new Committed(() -> committedResult(handOffAfterCommit()), compensationStarted, unitOfWorkId);
+        return new Committed(() -> committedResult(storeAfterCommit()), compensationStarted, unitOfWorkId);
     }
 
     /** The id of this attempt's unit of work. */
@@ -258,6 +260,11 @@ final class SagaUnitOfWork implements UnitOfWork {
     @Override
     public void commandHandled(CommandId id) {
         handledInStep.add(id);
+    }
+
+    @Override
+    public void recordLoggedCommand(OutgoingCommand command) {
+        loggedCommands.add(command);
     }
 
     /** {@link #lockInstance}; a failure of the locked read rolls back and propagates, recording nothing. */
@@ -318,7 +325,7 @@ final class SagaUnitOfWork implements UnitOfWork {
         while (!queue.isEmpty()) {
             Queued next = queue.poll();
             if (completedSteps.contains(next.step().name())) {
-                // A repeated event for a step already completed: not run, handed off like any non-queued event.
+                // A repeated event for a step already completed: not run, stored in the outbox like any non-queued event.
                 with.diagnostics().eventDuplicate(correlation, next.step().name());
                 continue;
             }
@@ -363,7 +370,7 @@ final class SagaUnitOfWork implements UnitOfWork {
         writing = true;
         settings.storage().save(write.instance(), write.entries());
         writing = false;
-        handOffInTransaction();
+        storeInTransaction();
         writing = true;
         transaction.commit();
     }
@@ -399,6 +406,7 @@ final class SagaUnitOfWork implements UnitOfWork {
     private void discard(LocalTransaction transaction, Throwable cause) {
         queue.clear();
         recorded.clear();
+        loggedCommands.clear();
         LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
     }
 
@@ -406,43 +414,48 @@ final class SagaUnitOfWork implements UnitOfWork {
      * {@code IN_TRANSACTION}: hands the batch off after the instance write and before the commit, inside the unit of
      * work's transaction; a failure fails the unit of work like any other (contracts/event-handoff.md).
      */
-    private void handOffInTransaction() {
-        if (settings.handoffTiming() == EventHandoff.Timing.IN_TRANSACTION) {
-            buffered().ifPresent(settings.handoff()::handOff);
+    private void storeInTransaction() {
+        if (settings.outboxTiming() == Outbox.Timing.IN_TRANSACTION) {
+            buffered().ifPresent(settings.outbox()::store);
         }
     }
 
     /**
      * {@code AFTER_COMMIT}: hands the batch off after the commit and the lock release. A failure leaves the committed
-     * instance untouched: it is logged and returned, with its suppressed exceptions, as the result's handoff
+     * instance untouched: it is logged and returned, with its suppressed exceptions, as the result's outbox
      * failures (FR-031).
      */
-    private List<Throwable> handOffAfterCommit() {
-        if (settings.handoffTiming() != EventHandoff.Timing.AFTER_COMMIT) {
+    private List<Throwable> storeAfterCommit() {
+        if (settings.outboxTiming() != Outbox.Timing.AFTER_COMMIT) {
+            OutboxCommitted.notify(settings, buffered(), with.diagnostics(), correlation);
             return List.of();
         }
-        Optional<HandedOffEvents> batch = buffered();
+        Optional<OutgoingMessages> batch = buffered();
         if (batch.isEmpty()) {
             return List.of();
         }
         try {
-            settings.handoff().handOff(batch.get());
+            settings.outbox().store(batch.get());
             return List.of();
-        } catch (RuntimeException handoffFailure) {
-            with.diagnostics().handoffFailed(correlation, batch.get().events().size(), handoffFailure);
+        } catch (RuntimeException outboxFailure) {
+            with.diagnostics().outboxFailed(correlation, batch.get().events().size(), outboxFailure);
             List<Throwable> failures = new ArrayList<>();
-            failures.add(handoffFailure);
-            failures.addAll(List.of(handoffFailure.getSuppressed()));
+            failures.add(outboxFailure);
+            failures.addAll(List.of(outboxFailure.getSuppressed()));
             return failures;
         }
     }
 
-    /** Every recorded event no step of this instance ran, in recording order; empty if there is none. */
-    private Optional<HandedOffEvents> buffered() {
+    /**
+     * Every recorded event no step of this instance ran, in recording order, and every logged command sent, in send
+     * order; empty if there is neither.
+     */
+    private Optional<OutgoingMessages> buffered() {
         List<Object> events = recorded.stream().filter(entry -> !entry.ranInProcess).map(entry -> entry.event)
                 .toList();
-        return events.isEmpty() ? Optional.empty()
-                : Optional.of(new HandedOffEvents(unitOfWorkId, trigger.saga().typeName(), trigger.sagaId(), events));
+        return events.isEmpty() && loggedCommands.isEmpty() ? Optional.empty()
+                : Optional.of(new OutgoingMessages(unitOfWorkId, trigger.saga().typeName(), trigger.sagaId(), events,
+                        loggedCommands));
     }
 
     private Object newSagaObject() {
@@ -532,8 +545,8 @@ final class SagaUnitOfWork implements UnitOfWork {
         return ended ? HandlingOutcome.COMPLETED : HandlingOutcome.WAITING;
     }
 
-    private SagaHandlingResult committedResult(List<Throwable> handoffFailures) {
+    private SagaHandlingResult committedResult(List<Throwable> outboxFailures) {
         return new SagaHandlingResult(trigger.saga().typeName(), trigger.sagaId(), outcome(), trigger.started(),
-                ended ? currentStep : null, null, unitOfWorkId, handoffFailures);
+                ended ? currentStep : null, null, unitOfWorkId, outboxFailures);
     }
 }
