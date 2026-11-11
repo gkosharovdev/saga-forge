@@ -12,7 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
-import io.github.gkosharovdev.sagaforge.core.spi.LoggedCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 
 /**
@@ -95,8 +95,8 @@ public final class EngineRuntime {
         return commandGateway;
     }
 
-    /** Handles one logged command delivered by a transport ({@code CommandReceiver}, 007 research §3). */
-    public void receiveCommand(LoggedCommand delivery) {
+    /** Handles one outbox command delivered by a transport ({@code CommandReceiver}, 007 research §3). */
+    public void receiveCommand(OutboxCommand delivery) {
         commandGateway.receive(delivery);
     }
 

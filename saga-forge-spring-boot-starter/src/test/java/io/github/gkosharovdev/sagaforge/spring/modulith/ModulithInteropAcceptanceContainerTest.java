@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.spring.SpringSetup;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.OrderPlaced;
@@ -32,14 +32,14 @@ class ModulithInteropAcceptanceContainerTest extends TransportAcceptanceSuite {
     @DisplayName("FR-028a: one outbox - payloads in the registry, completed there; delivery records without payload")
     void oneOutbox() {
         SpringSetup spring = (SpringSetup) setup;
-        assertThat(spring.context().getBean(MessageLog.class)).isInstanceOf(ModulithMessageLog.class);
+        assertThat(spring.context().getBean(MessageStore.class)).isInstanceOf(ModulithMessageStore.class);
 
         setup.publish(new OrderPlaced("o-1"));
         await(() -> setup.hasInstance(FulfilmentSaga.class, "RUNNING"), WAIT, "the saga to start");
         awaitQuiet();
 
         List<Map<String, Object>> records = spring.jdbc().queryForList(
-                "SELECT payload, external_ref, status FROM saga_message_log");
+                "SELECT payload, external_ref, status FROM saga_message_store");
         assertThat(records).singleElement().satisfies(row -> {
             assertThat(row.get("payload")).isNull();
             assertThat(row.get("external_ref")).isNotNull();
@@ -49,7 +49,7 @@ class ModulithInteropAcceptanceContainerTest extends TransportAcceptanceSuite {
                 "SELECT id::text AS id, listener_id, completion_date FROM event_publication");
         assertThat(publications).singleElement().satisfies(row -> {
             assertThat(row.get("id")).isEqualTo(records.get(0).get("external_ref"));
-            assertThat(row.get("listener_id")).isEqualTo(ModulithMessageLog.TARGET.getValue());
+            assertThat(row.get("listener_id")).isEqualTo(ModulithMessageStore.TARGET.getValue());
             assertThat(row.get("completion_date")).isNotNull();
         });
     }

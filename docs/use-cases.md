@@ -326,13 +326,13 @@ A modulith runs the order, payment and shipping modules in one process. `OrderPl
 which asks the payment module to charge the customer and waits. The payment module confirms with
 `PaymentConfirmed`, recorded in its own unit of work.
 
-- The confirmation is appended to the message log in the same transaction as the payment module's changes. If that
+- The confirmation is appended to the message store in the same transaction as the payment module's changes. If that
   transaction rolls back, there is nothing to deliver.
 - The process is redeployed after the commit but before the relay delivered the confirmation. On start, the new
   process finds the confirmation unconsumed and delivers it; the saga completes as if nothing happened.
 - If the process stopped after the saga's step committed but before the message was marked consumed, the
   confirmation is delivered again and the engine reports the step as a `DUPLICATE` — no second shipment is booked.
-- A command marked `@Command(delivery = LOGGED)`, such as `ChargeCard`, is stored with the step that sent it and
+- A command marked `@Command(delivery = OUTBOX)`, such as `ChargeCard`, is stored with the step that sent it and
   handled after that step commits; its handler receives the same `CommandId` on every delivery and passes it to the
   payment provider as the idempotency key.
 - A message that keeps failing is set aside after ten attempts, without holding up other orders, and an operator can

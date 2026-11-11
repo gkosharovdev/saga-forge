@@ -356,7 +356,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Origin**: `specs/004-saga-engine/spec.md` FR-030, Edge Cases "Crash between commit and handoff",
   Assumptions "Delivery guarantee"; user decision, 2026-11-06.
 - **Status**: closed for hosts using the in-memory transport (specs/007: an `IN_TRANSACTION` outbox over a durable
-  message log, relayed at least once); still open with the default `ImmediateDispatchOutbox`, and for Kafka until that
+  message store, relayed at least once); still open with the default `ImmediateDispatchOutbox`, and for Kafka until that
   feature reuses the log.
 
 ### G-ENG-08: Concurrent duplicate starts across processes are not prevented
@@ -809,11 +809,11 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Status**: open (decide in the Kafka feature).
 
 ### G-007-07: Interop leasing reads every incomplete registry publication
-- **Description**: `ModulithMessageLog.lease` resolves payloads by calling `findIncompletePublications()` and
+- **Description**: `ModulithMessageStore.lease` resolves payloads by calling `findIncompletePublications()` and
   filtering by Saga Forge's target identifier, once per lease call. Fine for a modulith's volumes, but it reads every
   incomplete publication of the application (Saga Forge's and its listeners') each time; a backlog of many
   thousands would make leasing slow. Spring Modulith 2.1 has no lookup of several publications by id.
-- **Origin**: `saga-forge-spring-boot-starter/.../modulith/ModulithMessageLog.java`; specs/007 research §10.
+- **Origin**: `saga-forge-spring-boot-starter/.../modulith/ModulithMessageStore.java`; specs/007 research §10.
 - **Status**: open (accepted for 007; revisit if Modulith adds an id lookup or a host reports slow leasing).
 
 ### G-007-08: Plain-Java detail tests are not run through the acceptance suite
@@ -826,28 +826,31 @@ Noted only; nothing is bumped until the starter feature decides.
 ### In-memory transport (007), implementation notes
 - 2026-11-11: implemented from `specs/007-in-memory-transport/tasks.md` (82 tasks).
 - **Per module**: core — `Outbox` rename, `CommandDelivery`, `OutgoingCommand`, `OutgoingMessages.commands`,
-  `Outbox.supportsCommands`/`committed`, `CommandReceiver`/`LoggedCommand`, `core.spi.log` (12 types), scanner R23.
-  Engine — `OutboxCommitted` hook, logged commands in the gateway and all three unit-of-work kinds,
-  `SagaEngine.commandReceiver()`, startup refusal for a LOGGED handler with an outbox that cannot store commands.
-  Transport — `InMemoryTransport`, `TransportSettings`, `MessageLogQueries`, `Relay`, `KeyedWorkers`,
-  `OrderingKeys`, `LogAppender`, `Backoff`. Postgres — `PostgresMessageLog`, `PayloadCodec` (typed JSON, separate
+  `Outbox.supportsCommands`/`committed`, `CommandReceiver`/`OutboxCommand`, `core.spi.store` (12 types), scanner R23.
+  Engine — `OutboxCommitted` hook, outbox commands in the gateway and all three unit-of-work kinds,
+  `SagaEngine.commandReceiver()`, startup refusal for a OUTBOX handler with an outbox that cannot store commands.
+  Transport — `InMemoryTransport`, `TransportSettings`, `MessageStoreQueries`, `Relay`, `KeyedWorkers`,
+  `OrderingKeys`, `LogAppender`, `Backoff`. Postgres — `PostgresMessageStore`, `PayloadCodec` (typed JSON, separate
   from `JsonCodec`), schema plus `schema-upgrade-007.sql` with check constraints. Starter — `SpringTransactionBoundary`,
   `InMemoryTransportConfiguration`, `TransportProperties`, `TransportLifecycle`, `EventReceiverCustomizer`,
-  `ApplicationEventBridge`, `ModulithInteropConfiguration`, `ModulithMessageLog`, `SagaForgeEnvelope`; versions pinned
+  `ApplicationEventBridge`, `ModulithInteropConfiguration`, `ModulithMessageStore`, `SagaForgeEnvelope`; versions pinned
   to Boot 4.1.2 / Framework 7.0.10 / Jackson 3.1.7 without importing Boot's BOM (G-DEP-01).
 - **Tests** (full `-Pcontainer-tests` build, 2026-11-11): core 464, engine 675, transport 51, Postgres 212, starter 18,
   example 13 — all green, container suites included (run locally with Podman).
-- **Deviations from the contracts**: `MessageLog.lease` returns `LeasedMessages` (readable and unreadable messages)
+- **Deviations from the contracts**: `MessageStore.lease` returns `LeasedMessages` (readable and unreadable messages)
   instead of throwing `UnreadableMessageException`, so one bad payload does not abort a batch. R23 checks only the
-  LOGGED command types passed to `validateAll` (steps do not declare the commands they send); `send` also resolves the
+  OUTBOX command types passed to `validateAll` (steps do not declare the commands they send); `send` also resolves the
   handler first. `TransportLifecycle` applies optional `EventReceiverCustomizer` beans (added so tests, and hosts for
   tracing, can wrap deliveries). Interop goes through `EventPublicationRepository` by id rather than the registry's
   lookup by event (G-007-05 closed). The R1 spike (T067) was replaced by a `javap` check of the 2.1.1 API plus
   `ModulithInteropAcceptanceContainerTest.oneOutbox`. Plain-Java detail tests stay as they are (G-007-08).
-- **Naming** (2026-11-11, user decision): "claim" was replaced by "lease" throughout the message log, so the whole
-  lifecycle reads lease / renew / release: `MessageLog.lease`, `LeasedMessages`, `leasedBy`/`leasedUntil`
+- **Naming** (2026-11-11, user decision): "claim" was replaced by "lease" throughout the message store, so the whole
+  lifecycle reads lease / renew / release: `MessageStore.lease`, `LeasedMessages`, `leasedBy`/`leasedUntil`
   (`leased_by`/`leased_until`), `TransportSettings.leaseDuration`/`leaseBatchSize` (`saga-forge.transport.
   lease-duration`, `lease-batch-size`); the relay's loop is the "polling loop" (EIP Polling Consumer). Research §15.
+- **Naming, part 2** (2026-11-11, PR review): `MessageLog` became `MessageStore` (`core.spi.store`, `StoredMessage`,
+  `NewMessage`, `saga_message_store`), and `CommandDelivery.LOGGED` became `OUTBOX` (`OutboxCommand`, "outbox
+  commands"). Research §16.
 - **Gap status**: G-ENG-07 closed for hosts using the in-memory transport; G-007-01 to -04, -06 to -08 open or
   accepted as recorded above.
 

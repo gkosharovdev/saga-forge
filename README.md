@@ -189,8 +189,8 @@ in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is i
 command identities and duplicate-event detection are implemented in the engine and persisted by Postgres (feature
 005). Compensation (feature 006) runs `@SagaCompensation` methods after a `@StartCompensation` business failure or a
 final or exhausted step failure, in reverse completion order, and resumes after a crash. The in-memory transport
-(feature 007) delivers events — and commands marked `@Command(delivery = LOGGED)` — between the modules of one process,
-from a durable message log written in the same transaction as the saga state, so unconsumed messages survive a
+(feature 007) delivers events — and commands marked `@Command(delivery = OUTBOX)` — between the modules of one process,
+from a durable message store written in the same transaction as the saga state, so unconsumed messages survive a
 restart; the starter wires it into Spring Boot, with optional Spring Modulith interop. Not implemented yet: the
 Kafka transport, the starter's storage/transport detection, and MySQL and MongoDB storage. See
 [docs/architecture.md](docs/architecture.md) for the target design and
@@ -206,7 +206,7 @@ historical planning artifacts, superseded by the docs above where they conflict.
 | `saga-forge-engine` | Saga runtime over the core SPI: `SagaEngine` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
 | `saga-forge-spring-boot-starter` | Autoconfiguration. Today: the in-memory transport's wiring (Spring transactions, lifecycle, application-event bridge, Spring Modulith interop). Target: detects datastore + transport, wires the engine | `saga-forge-core`; transport, Postgres, engine (optional) |
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
-| `saga-forge-transport-inmemory` | In-process transport with a durable message log (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
+| `saga-forge-transport-inmemory` | In-process transport with a durable message store (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
 | `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-engine` (test scope) |
 
@@ -231,8 +231,8 @@ the in-memory transport. See [docs/architecture.md](docs/architecture.md) for th
 ### The in-memory transport today (plain Java)
 
 ```java
-PostgresMessageLog log = new PostgresMessageLog(dataSource, transactions);   // tables in schema.sql
-InMemoryTransport transport = InMemoryTransport.builder().log(log).transactions(transactions).build();
+PostgresMessageStore log = new PostgresMessageStore(dataSource, transactions);   // tables in schema.sql
+InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(transactions).build();
 SagaEngine engine = SagaEngine.builder()
         .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
         .storage(new PostgresStorageProvider(dataSource, transactions))
@@ -248,7 +248,7 @@ transport.start(engine, engine.commandReceiver());
 A command type can opt into the log, so it is handled after the sending step commits instead of inside it:
 
 ```java
-@Command(delivery = CommandDelivery.LOGGED)
+@Command(delivery = CommandDelivery.OUTBOX)
 public record ChargeCard(@AggregateIdentifier String invoiceId) { }
 ```
 

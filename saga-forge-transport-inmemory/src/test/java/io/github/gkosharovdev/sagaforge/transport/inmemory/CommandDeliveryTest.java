@@ -11,18 +11,18 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageKind;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardCharged;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssued;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 
-/** User Story 3 (spec.md, tasks.md T060): logged commands travel through the same log. */
+/** User Story 3 (spec.md, tasks.md T060): outbox commands travel through the same log. */
 class CommandDeliveryTest {
 
     private static final Duration WAIT = Duration.ofSeconds(5);
@@ -35,12 +35,12 @@ class CommandDeliveryTest {
         harness.close();
     }
 
-    private LoggedMessage charge() {
+    private StoredMessage charge() {
         return harness.messagesOf(ChargeCard.class).get(0);
     }
 
     @Test
-    @DisplayName("scenarios 1 and 4: a logged command is handled after the step commits; its events go through the log")
+    @DisplayName("scenarios 1 and 4: a outbox command is handled after the step commits; its events go through the store")
     void handledAfterCommit() {
         harness.start();
         harness.publish(new InvoiceIssued("i-1"));
@@ -95,7 +95,7 @@ class CommandDeliveryTest {
     @Test
     @DisplayName("a consumed mark failing inside the handler's transaction rolls the handler's effects back")
     void consumedMarkAtomicWithHandler() {
-        harness.log.failNext(InMemoryMessageLog.Operation.MARK_CONSUMED, new IllegalStateException("mark failed"));
+        harness.log.failNext(InMemoryMessageStore.Operation.MARK_CONSUMED, new IllegalStateException("mark failed"));
         harness.start();
         harness.publish(new InvoiceIssued("i-1"));
 

@@ -127,8 +127,8 @@ public final class SagaEngine implements EventReceiver {
     }
 
     /**
-     * The engine's {@code CommandReceiver}, through which a transport delivers {@code @Command(delivery = LOGGED)}
-     * commands from its message log ({@code specs/007-in-memory-transport}); {@code receive} throws
+     * The engine's {@code CommandReceiver}, through which a transport delivers {@code @Command(delivery = OUTBOX)}
+     * commands from its message store ({@code specs/007-in-memory-transport}); {@code receive} throws
      * {@link IllegalStateException} unless started.
      */
     public CommandReceiver commandReceiver() {

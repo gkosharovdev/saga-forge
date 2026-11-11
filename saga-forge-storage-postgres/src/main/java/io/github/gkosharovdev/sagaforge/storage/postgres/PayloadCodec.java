@@ -7,7 +7,7 @@ import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
-import io.github.gkosharovdev.sagaforge.core.spi.log.DeliveryFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;

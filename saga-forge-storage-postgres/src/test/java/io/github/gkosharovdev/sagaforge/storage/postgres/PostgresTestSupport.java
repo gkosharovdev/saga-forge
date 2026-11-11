@@ -45,7 +45,7 @@ final class PostgresTestSupport {
     private static final String FAULT_TRIGGER_PREFIX = "saga_forge_test_fault_";
     private static final Set<String> TABLES =
             Set.of("saga_instance", "saga_association", "saga_context", "saga_lifecycle_history",
-                    "saga_message_log");
+                    "saga_message_store");
     private static final Set<String> OPERATIONS = Set.of("INSERT", "UPDATE", "DELETE");
 
     private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
@@ -80,7 +80,7 @@ final class PostgresTestSupport {
         try (Connection connection = newDataSource().getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute("TRUNCATE saga_instance CASCADE");
-            statement.execute("TRUNCATE saga_message_log, saga_message_log_consumer RESTART IDENTITY");
+            statement.execute("TRUNCATE saga_message_store, saga_message_store_consumer RESTART IDENTITY");
         } catch (SQLException e) {
             throw new IllegalStateException("could not reset the test database", e);
         }
@@ -134,7 +134,7 @@ final class PostgresTestSupport {
     }
 
     /**
-     * Installs a trigger that fails the next {@code times} updates marking a {@code saga_message_log} row of
+     * Installs a trigger that fails the next {@code times} updates marking a {@code saga_message_store} row of
      * {@code payloadType} consumed, and nothing else (007): a crash between a delivery and its consumed mark. The count
      * lives in a sequence, which a failing transaction does not roll back. {@link #reset()} and {@link #dropFaults()}
      * drop the trigger.
@@ -150,8 +150,8 @@ final class PostgresTestSupport {
                     + payloadType.getName() + "' AND nextval('saga_forge_test_fault_seq') <= " + times + " THEN "
                     + "RAISE EXCEPTION 'injected test fault: consumed mark'; "
                     + "END IF; RETURN NEW; END $$");
-            statement.execute("DROP TRIGGER IF EXISTS " + FAULT_TRIGGER_PREFIX + "consume ON saga_message_log");
-            statement.execute("CREATE TRIGGER " + FAULT_TRIGGER_PREFIX + "consume BEFORE UPDATE ON saga_message_log"
+            statement.execute("DROP TRIGGER IF EXISTS " + FAULT_TRIGGER_PREFIX + "consume ON saga_message_store");
+            statement.execute("CREATE TRIGGER " + FAULT_TRIGGER_PREFIX + "consume BEFORE UPDATE ON saga_message_store"
                     + " FOR EACH ROW EXECUTE FUNCTION saga_forge_test_fault_consume_fn()");
         } catch (SQLException e) {
             throw new IllegalStateException("could not install the consume fault", e);

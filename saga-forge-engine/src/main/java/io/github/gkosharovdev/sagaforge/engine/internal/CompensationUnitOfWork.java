@@ -81,7 +81,7 @@ final class CompensationUnitOfWork implements UnitOfWork {
     private final EngineSagaLifecycle lifecycle;
     private final CommandIds commandIds;
     private final List<Object> recorded = new ArrayList<>();
-    private final List<OutgoingCommand> loggedCommands = new ArrayList<>();
+    private final List<OutgoingCommand> outboxCommands = new ArrayList<>();
     private String step;
     private boolean writing;
     private Throwable firstFailure;
@@ -175,8 +175,8 @@ final class CompensationUnitOfWork implements UnitOfWork {
     }
 
     @Override
-    public void recordLoggedCommand(OutgoingCommand command) {
-        loggedCommands.add(command);
+    public void recordOutboxCommand(OutgoingCommand command) {
+        outboxCommands.add(command);
     }
 
     private Optional<SagaInstance> lockOrRollBack(LocalTransaction transaction) {
@@ -229,7 +229,7 @@ final class CompensationUnitOfWork implements UnitOfWork {
 
     private void discard(LocalTransaction transaction, Throwable cause) {
         recorded.clear();
-        loggedCommands.clear();
+        outboxCommands.clear();
         LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
     }
 
@@ -255,9 +255,9 @@ final class CompensationUnitOfWork implements UnitOfWork {
     }
 
     private Optional<OutgoingMessages> buffered() {
-        return recorded.isEmpty() && loggedCommands.isEmpty() ? Optional.empty()
+        return recorded.isEmpty() && outboxCommands.isEmpty() ? Optional.empty()
                 : Optional.of(new OutgoingMessages(unitOfWorkId, saga.typeName(), sagaId, List.copyOf(recorded),
-                        loggedCommands));
+                        outboxCommands));
     }
 
     private Object newSagaObject() {

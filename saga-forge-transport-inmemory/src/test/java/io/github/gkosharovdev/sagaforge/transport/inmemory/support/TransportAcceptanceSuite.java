@@ -11,10 +11,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageQuery;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageLogQueries;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
@@ -57,7 +57,7 @@ public abstract class TransportAcceptanceSuite {
         /** Makes the next delivery of {@code type} fail {@code times} times before the receiver is reached. */
         void failDeliveriesOf(Class<?> type, int times);
 
-        MessageLogQueries queries();
+        MessageStoreQueries queries();
 
         PaymentService payments();
 
@@ -82,16 +82,16 @@ public abstract class TransportAcceptanceSuite {
         setup.close();
     }
 
-    protected List<LoggedMessage> messagesOf(Class<?> type) {
+    protected List<StoredMessage> messagesOf(Class<?> type) {
         return setup.queries().find(MessageQuery.builder().payloadType(type.getName()).build());
     }
 
     protected void awaitQuiet() {
         await(() -> {
-            List<LoggedMessage> all = setup.queries().find(MessageQuery.builder().limit(MessageQuery.MAX_LIMIT)
+            List<StoredMessage> all = setup.queries().find(MessageQuery.builder().limit(MessageQuery.MAX_LIMIT)
                     .build());
             return !all.isEmpty() && all.stream().allMatch(m -> m.status() != MessageStatus.UNCONSUMED);
-        }, WAIT, "the log to become quiet");
+        }, WAIT, "the store to become quiet");
     }
 
     @Test
@@ -125,8 +125,8 @@ public abstract class TransportAcceptanceSuite {
     }
 
     @Test
-    @DisplayName("US3: a logged command is handled after its step commits, with the identity assigned at send time")
-    void loggedCommand() {
+    @DisplayName("US3: a outbox command is handled after its step commits, with the identity assigned at send time")
+    void outboxCommand() {
         setup.publish(new InvoiceIssued("i-1"));
 
         await(() -> setup.hasInstance(BillingSaga.class, "COMPLETED"), WAIT, "billing to complete");
@@ -144,7 +144,7 @@ public abstract class TransportAcceptanceSuite {
         setup.publish(new OrderPlaced("o-1"));
         await(() -> messagesOf(OrderPlaced.class).stream().anyMatch(m -> m.status() == MessageStatus.SET_ASIDE),
                 WAIT, "the message to be set aside");
-        LoggedMessage setAside = messagesOf(OrderPlaced.class).get(0);
+        StoredMessage setAside = messagesOf(OrderPlaced.class).get(0);
         assertThat(setAside.lastFailure()).isNotNull();
         assertThat(setAside.setAsideReason()).isEqualTo("MAX_ATTEMPTS");
 

@@ -157,7 +157,7 @@ final class SagaUnitOfWork implements UnitOfWork {
     private final Correlation correlation;
     private final EngineSagaLifecycle lifecycle;
     private final List<Recorded> recorded = new ArrayList<>();
-    private final List<OutgoingCommand> loggedCommands = new ArrayList<>();
+    private final List<OutgoingCommand> outboxCommands = new ArrayList<>();
     private final Deque<Queued> queue = new ArrayDeque<>();
     private final List<String> stepsRun = new ArrayList<>();
     private List<AggregateReference> touched = new ArrayList<>();
@@ -263,8 +263,8 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     @Override
-    public void recordLoggedCommand(OutgoingCommand command) {
-        loggedCommands.add(command);
+    public void recordOutboxCommand(OutgoingCommand command) {
+        outboxCommands.add(command);
     }
 
     /** {@link #lockInstance}; a failure of the locked read rolls back and propagates, recording nothing. */
@@ -406,7 +406,7 @@ final class SagaUnitOfWork implements UnitOfWork {
     private void discard(LocalTransaction transaction, Throwable cause) {
         queue.clear();
         recorded.clear();
-        loggedCommands.clear();
+        outboxCommands.clear();
         LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
     }
 
@@ -447,15 +447,15 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     /**
-     * Every recorded event no step of this instance ran, in recording order, and every logged command sent, in send
+     * Every recorded event no step of this instance ran, in recording order, and every outbox command sent, in send
      * order; empty if there is neither.
      */
     private Optional<OutgoingMessages> buffered() {
         List<Object> events = recorded.stream().filter(entry -> !entry.ranInProcess).map(entry -> entry.event)
                 .toList();
-        return events.isEmpty() && loggedCommands.isEmpty() ? Optional.empty()
+        return events.isEmpty() && outboxCommands.isEmpty() ? Optional.empty()
                 : Optional.of(new OutgoingMessages(unitOfWorkId, trigger.saga().typeName(), trigger.sagaId(), events,
-                        loggedCommands));
+                        outboxCommands));
     }
 
     private Object newSagaObject() {

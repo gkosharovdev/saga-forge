@@ -17,10 +17,10 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LogEntry;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageKind;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageQuery;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
@@ -41,17 +41,17 @@ class RestartBacklogContainerTest {
     void backlogDeliveredWithinAMinute() {
         DataSource dataSource = PostgresTestSupport.newDataSource();
         JdbcTransactionBoundary boundary = new JdbcTransactionBoundary(dataSource);
-        PostgresMessageLog log = new PostgresMessageLog(dataSource, boundary);
+        PostgresMessageStore log = new PostgresMessageStore(dataSource, boundary);
         LocalTransaction tx = boundary.begin();
-        List<LogEntry> entries = new ArrayList<>();
+        List<NewMessage> entries = new ArrayList<>();
         for (int i = 0; i < BACKLOG; i++) {
-            entries.add(new LogEntry("m-" + i, MessageKind.EVENT, Unrouted.class.getName(), new Unrouted("o-" + i),
+            entries.add(new NewMessage("m-" + i, MessageKind.EVENT, Unrouted.class.getName(), new Unrouted("o-" + i),
                     null, Unrouted.class.getName() + "#o-" + (i % 500), null, null, java.time.Instant.now()));
         }
         log.append(tx, entries);
         tx.commit();
         AtomicInteger delivered = new AtomicInteger();
-        InMemoryTransport transport = InMemoryTransport.builder().log(log).transactions(boundary)
+        InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(boundary)
                 .settings(TransportSettings.defaults().withWorkers(8)).build();
 
         long started = System.nanoTime();

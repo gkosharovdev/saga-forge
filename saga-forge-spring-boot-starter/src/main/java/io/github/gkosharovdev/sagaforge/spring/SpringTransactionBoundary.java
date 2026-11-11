@@ -27,7 +27,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  *       rollback-only.</li>
  *   <li>{@link #current()} is the innermost transaction this boundary began on the calling thread.</li>
  *   <li>{@code resource(Connection.class)} is the connection Spring bound to the transaction for the configured
- *       {@link DataSource}, so {@code PostgresStorageProvider} and {@code PostgresMessageLog} write in it.</li>
+ *       {@link DataSource}, so {@code PostgresStorageProvider} and {@code PostgresMessageStore} write in it.</li>
  * </ul>
  *
  * <p>Thread-safe: transactions are confined to the thread that began them.</p>

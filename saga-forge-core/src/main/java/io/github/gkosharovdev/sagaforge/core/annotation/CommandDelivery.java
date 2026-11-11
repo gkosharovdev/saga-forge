@@ -18,5 +18,5 @@ public enum CommandDelivery {
      * in a unit of work of its own, through {@code CommandReceiver}; it is never handled if the sender rolls back.
      * Needs an {@code Outbox} that {@code supportsCommands()}, such as the in-memory transport's.
      */
-    LOGGED
+    OUTBOX
 }

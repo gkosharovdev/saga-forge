@@ -18,10 +18,10 @@ events are lost and nothing redelivers them (G-ENG-07).
 The first transport targets the **modulith**: one deployable application, several Java modules running in the same
 process, one running instance. Delivery between modules happens in memory — no broker, no network hop — but a
 restart must not lose a message. Every event (and command, see FR-010) that leaves a unit of work is therefore
-first written to a **durable message log** in the same transaction as the saga state that produced it, and only
+first written to a **durable message store** in the same transaction as the saga state that produced it, and only
 then delivered in memory. After a restart, every message not yet consumed is delivered again.
 
-The Kafka transport will come later and replace only the delivery path. The log's vocabulary — message
+The Kafka transport will come later and replace only the delivery path. The store's vocabulary — message
 identity, recording order, consumed/unconsumed, redelivery — is defined here so that both transports share it and
 the saga model, the annotations and application code stay unchanged when a host switches from one to the other.
 
@@ -33,15 +33,15 @@ asks for payment; the saga waits for `PaymentProcessedEvent`.
 
 ### Session 2026-11-11
 
-- Q: Which commands go through the log? → A: Commands stay synchronous by default; a command type opts into the log
+- Q: Which commands go through the store? → A: Commands stay synchronous by default; a command type opts into the store
   through a framework-owned declaration, and only those are handled asynchronously after the sender commits
   (FR-010, FR-010a).
 - Q: How long are consumed messages kept? → A: For a configurable period, default 7 days, then removed
   automatically (FR-019).
-- Q: How should the in-memory transport relate to Spring and Quarkus? → A: Saga Forge owns the log and the
+- Q: How should the in-memory transport relate to Spring and Quarkus? → A: Saga Forge owns the store and the
   in-process relay with no framework dependency; Spring and Quarkus get thin optional adapters that only wire the
   host's transaction manager, executor and lifecycle; when Spring Modulith is present, its event publication
-  registry serves as the log instead of Saga Forge's own (FR-026, FR-027, FR-028).
+  registry serves as the store instead of Saga Forge's own (FR-026, FR-027, FR-028).
 - Q: In Spring Modulith interop mode, what happens with guarantees the registry cannot provide? → A: The registry
   holds the messages; Saga Forge keeps its own delivery bookkeeping (attempts, last failure, set-aside, per-instance
   order) in a side record keyed by the registry's publication id, so every guarantee holds unchanged (FR-028a).
@@ -90,7 +90,7 @@ yet delivered, others were being handled when the process stopped. When the appl
 message that had not been consumed is delivered, in its original order, and the affected sagas continue as if
 there had been no restart.
 
-**Why this priority**: this is the user's explicit requirement and the reason the log exists. Without it an
+**Why this priority**: this is the user's explicit requirement and the reason the store exists. Without it an
 in-memory transport silently loses saga progress on every restart (G-ENG-07).
 
 **Independent Test**: commit a unit of work that records `PaymentProcessedEvent`, stop the process before the
@@ -106,7 +106,7 @@ delivered and the saga ends `COMPLETED` exactly once.
 3. **Given** an event whose handling committed but whose consumption was not yet recorded when the process
    stopped, **When** the process restarts and delivers it again, **Then** the saga does not run the step a
    second time (the engine reports it as a duplicate, 005) and the message is marked consumed.
-4. **Given** the log contains no unconsumed message, **When** the process restarts, **Then** nothing is
+4. **Given** the store contains no unconsumed message, **When** the process restarts, **Then** nothing is
    delivered and startup is not delayed.
 
 ---
@@ -123,45 +123,45 @@ survive restarts.
 
 A command type that has not opted in keeps today's synchronous handling inside the step's unit of work.
 
-**Independent Test**: a step sends a command whose type opted into the log (FR-010), the process stops after the
+**Independent Test**: a step sends a command whose type opted into the store (FR-010), the process stops after the
 step's unit of work commits and before the handler runs; after restart the handler runs once, receiving the same
 `CommandId` as before.
 
 **Acceptance Scenarios**:
 
-1. **Given** a step sends a logged command and its unit of work commits, **When** the commit returns, **Then**
+1. **Given** a step sends a outbox command and its unit of work commits, **When** the commit returns, **Then**
    the command is handled by its single `@CommandHandler`.
-2. **Given** a step sends a logged command and its unit of work rolls back, **When** the rollback completes,
+2. **Given** a step sends a outbox command and its unit of work rolls back, **When** the rollback completes,
    **Then** the command is never handled.
-3. **Given** a logged command is redelivered after a restart, **When** its handler runs, **Then** it receives the
+3. **Given** a outbox command is redelivered after a restart, **When** its handler runs, **Then** it receives the
    same `CommandId` as on the first delivery, so it can pass it on as an idempotency key.
-4. **Given** the handler of a logged command records domain events, **When** its unit of work commits, **Then**
-   those events go through the log like any other event.
+4. **Given** the handler of a outbox command records domain events, **When** its unit of work commits, **Then**
+   those events go through the store like any other event.
 5. **Given** a step sends a command whose type has not opted in, **When** the handler throws, **Then** the step's
-   unit of work rolls back and retry or compensation applies as today (005, 006); nothing is written to the log.
+   unit of work rolls back and retry or compensation applies as today (005, 006); nothing is written to the store.
 
 ---
 
-### User Story 4 - The operator can see what the log holds (Priority: P3)
+### User Story 4 - The operator can see what the store holds (Priority: P3)
 
-When a saga seems stuck, the operator can find out whether its next message is still waiting in the log, was
+When a saga seems stuck, the operator can find out whether its next message is still waiting in the store, was
 consumed, or keeps failing and has been set aside — without reading storage tables directly.
 
 **Why this priority**: diagnostics, not correctness; useful once the transport runs in production.
 
-**Independent Test**: produce one consumed, one unconsumed and one set-aside message and query the log; each is
+**Independent Test**: produce one consumed, one unconsumed and one set-aside message and query the store; each is
 reported with its status, type, attempt count and, for the set-aside one, the last failure.
 
 **Acceptance Scenarios**:
 
-1. **Given** messages in every status, **When** the operator queries the log, **Then** each message is reported
+1. **Given** messages in every status, **When** the operator queries the store, **Then** each message is reported
    with its identity, kind (event or command), type, status, recording time, delivery attempts and last failure.
 2. **Given** a message was set aside after repeated failures, **When** the operator asks for it to be delivered
    again, **Then** it is delivered again and its status updated by the result.
 
 ### Edge Cases
 
-- **Crash between commit and delivery**: the message is in the log as unconsumed; delivered after restart
+- **Crash between commit and delivery**: the message is in the store as unconsumed; delivered after restart
   (User Story 2). This closes G-ENG-07 for hosts using this transport.
 - **Crash after the handling unit of work committed, before consumption is recorded**: redelivered; the engine's
   duplicate detection (005, `HandlingOutcome.DUPLICATE`) keeps the step from running twice. For an event
@@ -173,7 +173,7 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 - **A message keeps failing**: after the bounded number of delivery attempts it is set aside, not retried
   forever, and stops blocking the messages behind it (FR-015, FR-016).
 - **A message type no longer exists** (the class was renamed or removed between releases): the message cannot be
-  read back; it is set aside with that reason and the rest of the log continues.
+  read back; it is set aside with that reason and the rest of the store continues.
 - **A saga instance waits for an event that arrives while it is compensating**: delivered like any other event;
   the engine resumes compensation (006). A `COMPENSATING` instance with no further event still never resumes
   (G-006-05) — not addressed here.
@@ -185,7 +185,7 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 - **A second instance of the application is started by mistake** against the same log: see FR-021.
 - **Graceful shutdown**: delivery stops taking new messages; a message being handled either finishes or stays
   unconsumed, so nothing is lost.
-- **The log grows without bound**: consumed messages are removed according to the retention rule (FR-019).
+- **The store grows without bound**: consumed messages are removed according to the retention rule (FR-019).
 
 ## Requirements *(mandatory)*
 
@@ -194,19 +194,19 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 **Recording messages**
 
 - **FR-001**: Every event a committed unit of work passes to its outbox (the 004 outgoing set: events no step of the owning
-  instance ran in-process) MUST be written to the message log inside that unit of work's transaction, so the log
+  instance ran in-process) MUST be written to the message store inside that unit of work's transaction, so the store
   entry exists if and only if the unit of work committed.
-- **FR-002**: An event published through `EventPublisher` outside any unit of work MUST be written to the log
+- **FR-002**: An event published through `EventPublisher` outside any unit of work MUST be written to the store
   before it is delivered, in a transaction of its own; if the write fails, the failure MUST reach the caller and
   the event MUST NOT be delivered.
-- **FR-003**: Each logged message MUST carry a stable identity, unique across the log, derived from the unit of
+- **FR-003**: Each logged message MUST carry a stable identity, unique across the store, derived from the unit of
   work that recorded it and its position in that unit of work (the 004 `(unitOfWorkId, index)` key), plus its
   kind (event or command), its type, its payload, the recording time and, for a saga-scoped unit of work, the
   saga type and id that produced it.
-- **FR-004**: A message's payload MUST round-trip through the log: after a restart, the delivered object MUST be
+- **FR-004**: A message's payload MUST round-trip through the store: after a restart, the delivered object MUST be
   equal in content to the recorded one for every event and command type the canonical example and the existing
   test models use.
-- **FR-005**: The message log MUST live in the same datastore as the saga's state (the configured
+- **FR-005**: The message store MUST live in the same datastore as the saga's state (the configured
   `StorageProvider`), so that FR-001 needs no distributed transaction. In Spring Modulith interop mode (FR-028) the
   registry MUST be in that same datastore and transaction.
 
@@ -227,19 +227,19 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 **Commands**
 
 - **FR-010**: Commands sent through `CommandGateway` MUST stay synchronous by default, handled inside the
-  sender's unit of work exactly as today (002, 005, 006 unchanged). A command type MUST be able to opt into the log
+  sender's unit of work exactly as today (002, 005, 006 unchanged). A command type MUST be able to opt into the store
   through a framework-owned declaration on the command or its handler (Constitution Principle II); a command that
-  opted in is a **logged command**: `send` writes it to the log in the sender's transaction (FR-001) and returns,
+  opted in is a **outbox command**: `send` writes it to the store in the sender's transaction (FR-001) and returns,
   and the command is handled after that transaction commits. Opting in is a model property: the scanner MUST
   validate it, and the rule MUST be added to `.kiro/specs/saga-forge-framework/design.md` with its correctness
   property before implementation (Constitution Principle III).
-- **FR-010a**: A logged command sent outside any unit of work MUST be written to the log in a transaction of its
+- **FR-010a**: A outbox command sent outside any unit of work MUST be written to the store in a transaction of its
   own before `send` returns, as FR-002 does for events.
-- **FR-011**: A logged command MUST be handled by exactly the single `@CommandHandler` for its type (Properties
+- **FR-011**: A outbox command MUST be handled by exactly the single `@CommandHandler` for its type (Properties
   14–15) in a unit of work of its own; events that handler records MUST be logged as in FR-001.
-- **FR-012**: A logged command MUST keep the `CommandId` assigned when it was sent (005) across redelivery and
+- **FR-012**: A outbox command MUST keep the `CommandId` assigned when it was sent (005) across redelivery and
   restart, and its handler MUST receive that same identity.
-- **FR-013**: A failure of a logged command's handler MUST NOT fail or roll back the saga step that sent it (that
+- **FR-013**: A failure of a outbox command's handler MUST NOT fail or roll back the saga step that sent it (that
   unit of work has already committed); it is a delivery failure handled by FR-014 to FR-016.
 
 **Failure handling**
@@ -270,7 +270,7 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 
 **Operations**
 
-- **FR-022**: The transport MUST offer a read-only query of the log by status (unconsumed, consumed, set aside) and
+- **FR-022**: The transport MUST offer a read-only query of the store by status (unconsumed, consumed, set aside) and
   by saga instance, reporting the attributes in FR-003 plus status, attempt count and last failure.
 - **FR-023**: An operator MUST be able to request that a set-aside message be delivered again; it then follows
   FR-008 and FR-014 to FR-016 like a new message.
@@ -278,13 +278,13 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 **Fit with the existing model**
 
 - **FR-024**: Using the transport MUST NOT require any change to saga, aggregate, command handler or event classes;
-  the only annotation-model change is the opt-in declaration of FR-010, which is needed only for logged commands.
+  the only annotation-model change is the opt-in declaration of FR-010, which is needed only for outbox commands.
 - **FR-025**: The transport MUST plug into the engine only through SPI contracts in `saga-forge-core`
   (`EventDispatcher`, `Outbox` with `IN_TRANSACTION` timing, `EventReceiver`, `TransactionBoundary`, and those
   this feature adds); existing contracts MAY only be extended additively (research §2, §3). Any new contract it needs
-  (the log itself) MUST be transport- and storage-agnostic and live in `saga-forge-core`, so that the Kafka
+  (the store itself) MUST be transport- and storage-agnostic and live in `saga-forge-core`, so that the Kafka
   transport can reuse it.
-- **FR-026**: The log and the in-process relay MUST depend on no application framework (no Spring, no CDI, no
+- **FR-026**: The store and the in-process relay MUST depend on no application framework (no Spring, no CDI, no
   Quarkus) and MUST be usable from plain Java by supplying a `TransactionBoundary`, a `DataSource`-backed log and an
   executor. Framework adapters (the Spring Boot starter; a later Quarkus extension) MUST only supply those from the
   host — its transaction manager, managed executor and start/stop lifecycle — and MUST NOT change delivery
@@ -292,10 +292,10 @@ reported with its status, type, attempt count and, for the set-aside one, the la
   Spring and Quarkus.
 - **FR-027**: A framework adapter MAY additionally re-publish each delivered event on the host's own event
   mechanism (Spring application events; CDI events in Quarkus) so that non-saga listeners can observe it. Such
-  re-publication MUST happen only after the event was delivered from the log, and a listener's failure MUST NOT
+  re-publication MUST happen only after the event was delivered from the store, and a listener's failure MUST NOT
   affect the message's status.
 - **FR-028**: When Spring Modulith's event publication registry is present in a Spring host, the transport MUST be
-  able to use that registry as its message log instead of Saga Forge's own (interop mode), so the application has
+  able to use that registry as its message store instead of Saga Forge's own (interop mode), so the application has
   one outbox, not two. Interop mode MUST be chosen explicitly or by detection in the starter, never by
   `saga-forge-core` or the in-memory transport module itself, which stay unaware of Spring (Constitution
   Principle I). In interop mode, FR-001 to FR-023 MUST still hold.
@@ -321,7 +321,7 @@ reported with its status, type, attempt count and, for the set-aside one, the la
   unreadable; needs an operator).
 - **Delivery attempt**: one try to hand a message to its consumer; its result (consumed, failed with a reason)
   updates the message.
-- **Message log**: the ordered, durable collection of logged messages behind a storage-agnostic contract, stored
+- **Message store**: the ordered, durable collection of logged messages behind a storage-agnostic contract, stored
   alongside saga state by the configured storage provider — or, in Spring Modulith interop mode, by its event
   publication registry.
 - **Delivery record** (interop mode only): Saga Forge's bookkeeping for one registry publication — publication
@@ -351,11 +351,11 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 
 - **Single instance**: the modulith runs one instance at a time against its datastore. Multi-instance delivery,
   partitioning and consumer groups belong to the Kafka transport.
-- **Storage**: the log is implemented for Postgres in this feature (the only storage implemented today, 003), in
+- **Storage**: the store is implemented for Postgres in this feature (the only storage implemented today, 003), in
   the same database as saga state; MySQL and MongoDB implement it when those storage modules are built. The host
   applies the schema, as for 003 (G-003-25).
 - **Outbox shape**: FR-001 is the transactional outbox G-ENG-07 anticipates: an `IN_TRANSACTION` `Outbox` writes
-  the log entries, and an in-process relay delivers committed entries. The engine itself does not change.
+  the store entries, and an in-process relay delivers committed entries. The engine itself does not change.
 - **Consumers**: the only event consumer is the saga engine (`EventReceiver`); non-saga event listeners (policies,
   projections) are out of scope.
 - **Payload encoding**: messages are encoded by the storage module (as the Postgres module already does for JSONB
@@ -366,7 +366,7 @@ reported with its status, type, attempt count and, for the set-aside one, the la
 - **Start-event recovery**: a redelivered start event of an instance whose first unit of work never committed stays
   a duplicate start (G-ENG-05, G-005-06); fixing that rule is a separate decision.
 - **Scope boundary** (Constitution Principle IV): this is the in-memory transport; no broker or other transport is
-  added. The Kafka transport is a later feature that reuses the log vocabulary. Quarkus becomes an in-scope host
+  added. The Kafka transport is a later feature that reuses the store vocabulary. Quarkus becomes an in-scope host
   framework by user decision (2026-11-11); the constitution (Principle IV, Technical Constraints) is amended through
   `/speckit-constitution` before planning, and the Quarkus extension itself is a later feature.
 - **Spring and Quarkus**: most hosts will be Spring applications, and Quarkus must work too (FR-026).

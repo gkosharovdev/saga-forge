@@ -12,7 +12,7 @@
 
     <artifactId>saga-forge-transport-inmemory</artifactId>
     <name>Saga Forge Transport - In-Memory</name>
-    <description>In-process transport with a durable message log for single-instance deployments</description>
+    <description>In-process transport with a durable message store for single-instance deployments</description>
 
     <dependencies>
         <!-- The only non-test dependency (Constitution Principle I, 007 FR-026) -->
@@ -62,7 +62,7 @@
 
     <build>
         <plugins>
-            <!-- Publishes InMemoryMessageLog, MessageLogContract and TransportAcceptanceSuite for other modules -->
+            <!-- Publishes InMemoryMessageStore, MessageStoreContract and TransportAcceptanceSuite for other modules -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>

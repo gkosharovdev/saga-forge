@@ -39,7 +39,7 @@ final class NonSagaUnitOfWork implements UnitOfWork {
     private final Diagnostics diagnostics;
     private final String unitOfWorkId;
     private final List<Object> recorded = new ArrayList<>();
-    private final List<OutgoingCommand> loggedCommands = new ArrayList<>();
+    private final List<OutgoingCommand> outboxCommands = new ArrayList<>();
     private Throwable firstFailure;
 
     /**
@@ -64,7 +64,7 @@ final class NonSagaUnitOfWork implements UnitOfWork {
         } catch (RuntimeException | Error failure) {
             Throwable reported = firstFailure != null ? firstFailure : failure;
             recorded.clear();
-            loggedCommands.clear();
+            outboxCommands.clear();
             LocalTransactions.rollBackAfter(transactions, transaction, reported);
             throw UnitOfWork.propagate(reported);
         } finally {
@@ -82,8 +82,8 @@ final class NonSagaUnitOfWork implements UnitOfWork {
     }
 
     @Override
-    public void recordLoggedCommand(OutgoingCommand command) {
-        loggedCommands.add(command);
+    public void recordOutboxCommand(OutgoingCommand command) {
+        outboxCommands.add(command);
     }
 
     @Override
@@ -122,7 +122,7 @@ final class NonSagaUnitOfWork implements UnitOfWork {
     }
 
     private Optional<OutgoingMessages> batch() {
-        return recorded.isEmpty() && loggedCommands.isEmpty() ? Optional.empty()
-                : Optional.of(new OutgoingMessages(unitOfWorkId, null, null, recorded, loggedCommands));
+        return recorded.isEmpty() && outboxCommands.isEmpty() ? Optional.empty()
+                : Optional.of(new OutgoingMessages(unitOfWorkId, null, null, recorded, outboxCommands));
     }
 }

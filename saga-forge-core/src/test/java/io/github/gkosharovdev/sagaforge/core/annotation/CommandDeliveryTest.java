@@ -12,8 +12,8 @@ class CommandDeliveryTest {
     record PlainCommand(String id) {
     }
 
-    @Command(delivery = CommandDelivery.LOGGED)
-    record LoggedCommandType(String id) {
+    @Command(delivery = CommandDelivery.OUTBOX)
+    record OutboxCommandType(String id) {
     }
 
     @Test
@@ -21,6 +21,6 @@ class CommandDeliveryTest {
     void defaultAndOptIn() {
         assertThat(PlainCommand.class.getAnnotation(Command.class).delivery())
                 .isEqualTo(CommandDelivery.IN_UNIT_OF_WORK);
-        assertThat(LoggedCommandType.class.getAnnotation(Command.class).delivery()).isEqualTo(CommandDelivery.LOGGED);
+        assertThat(OutboxCommandType.class.getAnnotation(Command.class).delivery()).isEqualTo(CommandDelivery.OUTBOX);
     }
 }

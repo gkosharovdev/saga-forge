@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 
 /**
  * SC-003 (tasks.md T032): on an idle transport with the default 500 ms poll, a committed message is delivered within
@@ -27,7 +27,7 @@ class DeliveryLatencyTest {
     @DisplayName("SC-003: 99% of messages are delivered within 100 ms of commit")
     void deliveredPromptlyAfterCommit() {
         InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
-        InMemoryTransport transport = InMemoryTransport.builder().log(new InMemoryMessageLog()).transactions(boundary)
+        InMemoryTransport transport = InMemoryTransport.builder().messageStore(new InMemoryMessageStore()).transactions(boundary)
                 .build();
         AtomicLong delivered = new AtomicLong();
         List<Long> latenciesMillis = Collections.synchronizedList(new ArrayList<>());

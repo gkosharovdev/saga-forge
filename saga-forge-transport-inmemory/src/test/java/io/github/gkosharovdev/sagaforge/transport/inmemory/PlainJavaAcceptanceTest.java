@@ -12,7 +12,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.FlakyReceiver;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportAcceptanceSuite;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 
@@ -29,7 +29,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
         private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
         private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
         private final InMemorySagaContextStore contexts = new InMemorySagaContextStore();
-        private final InMemoryMessageLog log = new InMemoryMessageLog();
+        private final InMemoryMessageStore log = new InMemoryMessageStore();
         private final PaymentService payments = new PaymentService();
         private final ShippingService shipping = new ShippingService();
         private final CardService cards = new CardService();
@@ -42,7 +42,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
         }
 
         private void assembleAndStart() {
-            transport = InMemoryTransport.builder().log(log).transactions(boundary).settings(TransportHarness.FAST
+            transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).settings(TransportHarness.FAST
                     .withMaxAttempts(3)).build();
             engine = SagaEngine.builder().register(MODEL).storage(storage).contextStore(contexts)
                     .transactions(boundary).dispatcher(transport.dispatcher()).outbox(transport.outbox())
@@ -83,7 +83,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
         }
 
         @Override
-        public MessageLogQueries queries() {
+        public MessageStoreQueries queries() {
             return transport.queries();
         }
 

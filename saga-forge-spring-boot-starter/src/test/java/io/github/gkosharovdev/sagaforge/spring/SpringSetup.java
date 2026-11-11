@@ -22,7 +22,7 @@ import io.github.gkosharovdev.sagaforge.spring.transport.EventReceiverCustomizer
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresSagaContextStore;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresStorageProvider;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageLogQueries;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
@@ -106,7 +106,7 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
     }
 
     @Override
-    public MessageLogQueries queries() {
+    public MessageStoreQueries queries() {
         return context.getBean(InMemoryTransport.class).queries();
     }
 

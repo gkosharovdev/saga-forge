@@ -20,12 +20,12 @@ mvn -Pcontainer-tests -pl saga-forge-storage-postgres,saga-forge-spring-boot-sta
 
 | # | Scenario | Setup | Expected | Covers |
 |---|---|---|---|---|
-| 1 | Canonical order saga end to end | Plain Java: Postgres log, engine, transport ([contracts/in-memory-transport.md](contracts/in-memory-transport.md)); publish `OrderCreatedEvent` outside a unit of work | Saga `COMPLETED`; every log entry `CONSUMED`; no broker | US1, SC-004 |
-| 2 | Rolled-back unit of work | A step throws after recording an event | No log entry for that unit of work | US1-3, SC-002 |
+| 1 | Canonical order saga end to end | Plain Java: Postgres log, engine, transport ([contracts/in-memory-transport.md](contracts/in-memory-transport.md)); publish `OrderCreatedEvent` outside a unit of work | Saga `COMPLETED`; every store entry `CONSUMED`; no broker | US1, SC-004 |
+| 2 | Rolled-back unit of work | A step throws after recording an event | No store entry for that unit of work | US1-3, SC-002 |
 | 3 | Crash before delivery | Stop the transport (no `stop`, kill relay) right after commit; start a new transport on the same database | Entry delivered once, saga continues | US2-1, SC-001 |
 | 4 | Crash after handling, before consumed mark | Fault-inject between `receive` returning and `markConsumed` | Redelivery reported `DUPLICATE`; step ran once; entry `CONSUMED` | US2-3 |
-| 5 | Logged command across restart | `ProcessPaymentCommand` with `delivery = LOGGED`; stop after the step commits | After restart the handler runs once with the original `CommandId` | US3, Property 35 |
-| 6 | Non-logged command failure | Default command whose handler throws | Step rolls back; retry/compensation as 005/006; no log entry | US3-5 |
+| 5 | Outbox command across restart | `ProcessPaymentCommand` with `delivery = OUTBOX`; stop after the step commits | After restart the handler runs once with the original `CommandId` | US3, Property 35 |
+| 6 | Non-outbox command failure | Default command whose handler throws | Step rolls back; retry/compensation as 005/006; no store entry | US3-5 |
 | 7 | Poison message | Consumer always throws | `SET_ASIDE` after 10 attempts; other aggregates keep flowing | FR-015/016, SC-006 |
 | 8 | Operator view | Query by status and by source saga; redeliver a set-aside entry | Attributes per [data-model.md](data-model.md); redelivered entry consumed | US4, SC-007 |
 | 9 | Restart with backlog | 10,000 unconsumed entries | All consumed and new work accepted within 60 s | SC-005 |

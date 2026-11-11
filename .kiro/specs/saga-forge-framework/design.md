@@ -243,11 +243,11 @@ public @interface Command {
     CommandDelivery delivery() default CommandDelivery.IN_UNIT_OF_WORK;
 }
 
-public enum CommandDelivery { IN_UNIT_OF_WORK, LOGGED }
+public enum CommandDelivery { IN_UNIT_OF_WORK, OUTBOX }
 ```
 Marker annotation for command classes. A step dispatches a command through the `CommandGateway` (`void send(Object command)`), which routes it to the single `@CommandHandler` for its type; steps do not return commands. A command type declares at most one `@AggregateIdentifier` field, and exactly one when it is handled by an `@Aggregate` instance method (`specs/002-transactional-step-sequence` FR-006, FR-007, FR-011, FR-014).
 
-`delivery` (`specs/007-in-memory-transport` FR-010): `IN_UNIT_OF_WORK` (default) runs the handler synchronously inside the sender's unit of work, as above. `LOGGED` makes `send` store the command in the unit of work's `Outbox` instead, with the `CommandId` assigned at send time; it is handled after that unit of work commits, in a unit of work of its own, through `CommandReceiver` (Property 35). A logged command whose type has no handler fails at `send` (`NoCommandHandlerException`) and, for types visible to `validateAll`, at validation (R23).
+`delivery` (`specs/007-in-memory-transport` FR-010): `IN_UNIT_OF_WORK` (default) runs the handler synchronously inside the sender's unit of work, as above. `OUTBOX` makes `send` store the command in the unit of work's `Outbox` instead, with the `CommandId` assigned at send time; it is handled after that unit of work commits, in a unit of work of its own, through `CommandReceiver` (Property 35). A outbox command whose type has no handler fails at `send` (`NoCommandHandlerException`) and, for types visible to `validateAll`, at validation (R23).
 
 #### @CommandHandler
 ```java
@@ -419,7 +419,7 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R20 | — (`specs/006-saga-compensation` FR-001a) | `@StartCompensation` methods also carry `@SagaStep` and carry neither `@StartSaga` nor `@EndSaga` |
 | R21 | — (`specs/006-saga-compensation` FR-009, FR-010) | `@SagaCompensation` methods return `void`, declare no parameter or exactly one parameter of type `CompensationTrigger`, and are not `@SagaStep` methods |
 | R22 | — (`specs/006-saga-compensation` FR-008) | At most one `@SagaCompensation` targets a given step, and none targets a `@StartCompensation` step |
-| R23 | — (`specs/007-in-memory-transport` FR-010) | Each `@Command(delivery = LOGGED)` type among the classes passed to `validateAll` is handled by a `@CommandHandler` of a passed-in host (model rule, `validateAll` only; R13 already rejects more than one) |
+| R23 | — (`specs/007-in-memory-transport` FR-010) | Each `@Command(delivery = OUTBOX)` type among the classes passed to `validateAll` is handled by a `@CommandHandler` of a passed-in host (model rule, `validateAll` only; R13 already rejects more than one) |
 
 R1 to R11 and R19 to R22 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 and R23 run only in `validateAll`.
 
@@ -463,7 +463,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         //   validateEventAggregate (R16).
         // Model errors over the passed-in hosts:
         //   validateUniqueCommandHandlers (R13), validateUniqueAggregateMembers for loaders and savers (R18),
-        //   validateInstanceHandlerCommandIdentifiers (R15), validateLoggedCommands (R23).
+        //   validateInstanceHandlerCommandIdentifiers (R15), validateOutboxCommands (R23).
         return new ValidationReport(classResults, modelErrors);
     }
 
@@ -847,11 +847,11 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/006-saga-compensation` FR-004, FR-012, SC-003** (tests: `CompensationResumePropertyTest`, `CompensationFaultInjectionTest`)
 
-### Property 35: Logged commands
+### Property 35: Outbox commands
 
-*For any* `@Command(delivery = LOGGED)` command sent through the `CommandGateway` inside a unit of work, its handler shall not run before that unit of work commits, shall never run if it rolls back (the command reaches the `Outbox` only with a committed batch), and, when run through `CommandReceiver`, shall receive the `CommandId` assigned at send time; a step re-run after a retry or redelivery shall not store the same command again.
+*For any* `@Command(delivery = OUTBOX)` command sent through the `CommandGateway` inside a unit of work, its handler shall not run before that unit of work commits, shall never run if it rolls back (the command reaches the `Outbox` only with a committed batch), and, when run through `CommandReceiver`, shall receive the `CommandId` assigned at send time; a step re-run after a retry or redelivery shall not store the same command again.
 
-**Validates: Feature spec `specs/007-in-memory-transport` FR-010 to FR-012** (tests: `LoggedCommandPropertyTest`, `LoggedCommandTest`)
+**Validates: Feature spec `specs/007-in-memory-transport` FR-010 to FR-012** (tests: `OutboxCommandPropertyTest`, `OutboxCommandTest`)
 
 ### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
 
@@ -901,7 +901,7 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Compensation parameters (R21) | Parameters other than none or one `CompensationTrigger` | `"@SagaCompensation method {methodName} in {className} must declare no parameter or one CompensationTrigger parameter"` |
 | Compensation is a step (R21) | `@SagaCompensation` method also `@SagaStep` | `"@SagaCompensation method {methodName} in {className} cannot also be annotated with @SagaStep"` |
 | Duplicate compensation (R22) | >1 `@SagaCompensation` for one step | `"@SagaCompensation methods {methodName}, {methodName} in {className} both compensate step {stepName}"` |
-| Logged command without handler (R23, model error) | `@Command(delivery = LOGGED)` type passed to `validateAll` with no `@CommandHandler` among the passed-in hosts | `"Command {commandType} is delivered LOGGED but has no @CommandHandler"` |
+| Outbox command without handler (R23, model error) | `@Command(delivery = OUTBOX)` type passed to `validateAll` with no `@CommandHandler` among the passed-in hosts | `"Command {commandType} is delivered through the outbox but has no @CommandHandler"` |
 | Compensation of a trigger step (R22) | `forStep` names a `@StartCompensation` step | `"@SagaCompensation method {methodName} in {className} compensates step {stepName}, which is a @StartCompensation step"` |
 
 All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, R18 and R22 messages are sorted in ascending lexicographic order (method names for R9 and R22, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.

@@ -7,10 +7,10 @@ import java.util.Map;
 import javax.sql.DataSource;
 
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageQuery;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
@@ -22,7 +22,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarn
 
 /**
  * Engine + {@link InMemoryTransport} over PostgreSQL: {@link PostgresStorageProvider}, {@link PostgresSagaContextStore}
- * and {@link PostgresMessageLog} on one database (specs/007-in-memory-transport tasks.md T049). Each
+ * and {@link PostgresMessageStore} on one database (specs/007-in-memory-transport tasks.md T049). Each
  * {@link #assemble()} opens a new {@link DataSource}, as a restarted process would.
  */
 final class PostgresTransportHarness implements AutoCloseable {
@@ -33,10 +33,10 @@ final class PostgresTransportHarness implements AutoCloseable {
 
     private final Class<?>[] model;
     private final TransportSettings settings;
-    private MessageLog logOverride;
+    private MessageStore logOverride;
     private DataSource dataSource;
     private JdbcTransactionBoundary boundary;
-    private PostgresMessageLog log;
+    private PostgresMessageStore log;
     private SagaEngine engine;
     private InMemoryTransport transport;
     private RecordingReceiver receiver;
@@ -51,9 +51,9 @@ final class PostgresTransportHarness implements AutoCloseable {
     PostgresTransportHarness assemble() {
         dataSource = PostgresTestSupport.newDataSource();
         boundary = new JdbcTransactionBoundary(dataSource);
-        log = new PostgresMessageLog(dataSource, boundary);
-        MessageLog used = logOverride != null ? logOverride : log;
-        transport = InMemoryTransport.builder().log(used).transactions(boundary).settings(settings).build();
+        log = new PostgresMessageStore(dataSource, boundary);
+        MessageStore used = logOverride != null ? logOverride : log;
+        transport = InMemoryTransport.builder().messageStore(used).transactions(boundary).settings(settings).build();
         engine = SagaEngine.builder()
                 .register(model)
                 .storage(new PostgresStorageProvider(dataSource, boundary))
@@ -70,8 +70,8 @@ final class PostgresTransportHarness implements AutoCloseable {
     }
 
     /** Uses {@code override} instead of the plain Postgres log from the next {@link #assemble()} on. */
-    PostgresTransportHarness withLog(java.util.function.Function<PostgresMessageLog, MessageLog> override) {
-        this.logOverride = override.apply(new PostgresMessageLog(PostgresTestSupport.newDataSource(),
+    PostgresTransportHarness withLog(java.util.function.Function<PostgresMessageStore, MessageStore> override) {
+        this.logOverride = override.apply(new PostgresMessageStore(PostgresTestSupport.newDataSource(),
                 new JdbcTransactionBoundary(PostgresTestSupport.newDataSource())));
         return this;
     }
@@ -87,7 +87,7 @@ final class PostgresTransportHarness implements AutoCloseable {
         return start();
     }
 
-    PostgresMessageLog log() {
+    PostgresMessageStore log() {
         return log;
     }
 
@@ -103,11 +103,11 @@ final class PostgresTransportHarness implements AutoCloseable {
         engine.eventPublisher().publish(event);
     }
 
-    List<LoggedMessage> messages() {
+    List<StoredMessage> messages() {
         return log.query(MessageQuery.builder().limit(MessageQuery.MAX_LIMIT).build());
     }
 
-    List<LoggedMessage> messagesOf(Class<?> type) {
+    List<StoredMessage> messagesOf(Class<?> type) {
         return log.query(MessageQuery.builder().payloadType(type.getName()).limit(MessageQuery.MAX_LIMIT).build());
     }
 
@@ -123,9 +123,9 @@ final class PostgresTransportHarness implements AutoCloseable {
 
     void awaitQuiet(Duration timeout) {
         TransportHarness.await(() -> {
-            List<LoggedMessage> all = messages();
+            List<StoredMessage> all = messages();
             return !all.isEmpty() && all.stream().allMatch(m -> m.status() != MessageStatus.UNCONSUMED);
-        }, timeout, "the message log to become quiet");
+        }, timeout, "the message store to become quiet");
     }
 
     @Override

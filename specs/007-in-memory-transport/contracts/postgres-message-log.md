@@ -1,11 +1,11 @@
-# Contract: `PostgresMessageLog` (`saga-forge-storage-postgres`)
+# Contract: `PostgresMessageStore` (`saga-forge-storage-postgres`)
 
 ```java
-public PostgresMessageLog(DataSource dataSource, TransactionBoundary transactions)
-public PostgresMessageLog(DataSource dataSource, TransactionBoundary transactions, ClassLoader payloadClassLoader)
+public PostgresMessageStore(DataSource dataSource, TransactionBoundary transactions)
+public PostgresMessageStore(DataSource dataSource, TransactionBoundary transactions, ClassLoader payloadClassLoader)
 ```
 
-- Implements `core.spi.log.MessageLog` (contracts/core-spi.md) over `saga_message_log` and `saga_message_log_consumer`
+- Implements `core.spi.store.MessageStore` (contracts/core-spi.md) over `saga_message_store` and `saga_message_store_consumer`
   (data-model.md). Uses the connection of the passed `LocalTransaction` (`tx.resource(Connection.class)`), as
   `PostgresStorageProvider` does (004); methods without a transaction open one through `transactions`.
 - `append`: one batched `INSERT`; payload via the module's Jackson 3 `JsonCodec` with `payload_type` as the class name;
@@ -17,8 +17,8 @@ public PostgresMessageLog(DataSource dataSource, TransactionBoundary transaction
 - Leaseholder writes are `UPDATE ... WHERE message_id = ? AND leased_by = ?`; zero rows → `LeaseLostException`.
 - `purgeConsumed`: `DELETE ... WHERE position IN (SELECT position ... WHERE status = 'CONSUMED' AND consumed_at < ? LIMIT ?)`.
 - SQL failures → `UncheckedSqlException`, as elsewhere in the module.
-- Interop support: `appendDeliveryRecord(LocalTransaction, LogEntry withoutPayload, String externalRef)` (public, used by
-  the starter's `ModulithMessageLog`); leases return such rows with `payload` absent and `externalRef` set.
+- Interop support: `appendDeliveryRecord(LocalTransaction, NewMessage withoutPayload, String externalRef)` (public, used by
+  the starter's `ModulithMessageStore`); leases return such rows with `payload` absent and `externalRef` set.
 
 ## Schema delivery
 

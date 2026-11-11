@@ -41,10 +41,10 @@ interface UnitOfWork extends DomainEventRecorder {
     }
 
     /**
-     * Buffers a {@code @Command(delivery = LOGGED)} command for this unit of work's outbox batch
+     * Buffers a {@code @Command(delivery = OUTBOX)} command for this unit of work's outbox batch
      * ({@code specs/007-in-memory-transport} research §3); it is discarded if the unit of work rolls back.
      */
-    void recordLoggedCommand(OutgoingCommand command);
+    void recordOutboxCommand(OutgoingCommand command);
 
     /** The engine unit of work bound to the calling thread, if any; another recorder is not one. */
     static Optional<UnitOfWork> bound() {

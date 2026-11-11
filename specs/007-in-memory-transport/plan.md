@@ -8,11 +8,11 @@
 
 Deliver the first `EventDispatcher` implementation: an in-process transport for single-instance moduliths whose
 messages survive a restart. Every event a committed unit of work hands off, every event published outside a unit of
-work, and every command whose type opts in with `@Command(delivery = LOGGED)` is appended to a durable **message log**
+work, and every command whose type opts in with `@Command(delivery = OUTBOX)` is appended to a durable **message store**
 in the same transaction as the saga state (a transactional outbox behind the 004 `IN_TRANSACTION` `Outbox`, called `EventHandoff` until this feature renames it). A relay in
 the same process leases committed entries with a lease, delivers them to the engine's `EventReceiver` or the new
 `CommandReceiver` in per-aggregate order on a small worker pool, marks them consumed, retries failures with bounded
-backoff and sets aside entries that keep failing. The log contract lives in `saga-forge-core`; Postgres implements it.
+backoff and sets aside entries that keep failing. The store contract lives in `saga-forge-core`; Postgres implements it.
 The transport is framework-free; the Spring Boot starter gains only this transport's wiring, including an interop mode
 that keeps the messages in Spring Modulith's event publication registry with Saga Forge's bookkeeping beside them.
 Design detail: [research.md](research.md).
@@ -25,7 +25,7 @@ Design detail: [research.md](research.md).
 Jackson 3 (`tools.jackson.core:jackson-databind`), as today. Starter: Spring Boot 4.1.2 (`spring-boot-autoconfigure`,
 `spring-jdbc`/`spring-tx`), Spring Modulith 2.1.x `spring-modulith-events-core` as an optional dependency.
 
-**Storage**: PostgreSQL — new table `saga_message_log` plus `saga_message_log_consumer` in `schema.sql`, with
+**Storage**: PostgreSQL — new table `saga_message_store` plus `saga_message_store_consumer` in `schema.sql`, with
 `schema-upgrade-007.sql` for existing databases. Interop mode: Spring Modulith's publication table in the same database.
 
 **Testing**: JUnit 5, AssertJ, jqwik (Property 35), Testcontainers Postgres for container suites (`@Tag("container")`,
@@ -49,8 +49,8 @@ long/scheduled backoff beyond 1 min (G-005-01 style); single running instance (F
 
 | Principle | Check | Result |
 |---|---|---|
-| I. Zero-Dependency Core | Core gains only an enum attribute, the `MessageLog` contract and records, `CommandReceiver`, and additive changes to `Outbox`/`OutgoingMessages`; JDK only. The transport module depends on core only. Spring and Modulith types stay in the starter. | Pass |
-| II. Annotation-Driven Declarative Style | Opt-in is a framework-owned attribute `@Command(delivery = LOGGED)`, not a third-party annotation or orchestration code. | Pass |
+| I. Zero-Dependency Core | Core gains only an enum attribute, the `MessageStore` contract and records, `CommandReceiver`, and additive changes to `Outbox`/`OutgoingMessages`; JDK only. The transport module depends on core only. Spring and Modulith types stay in the starter. | Pass |
+| II. Annotation-Driven Declarative Style | Opt-in is a framework-owned attribute `@Command(delivery = OUTBOX)`, not a third-party annotation or orchestration code. | Pass |
 | III. Formal Spec Conformance | R23 and Property 35 are added to `.kiro/specs/saga-forge-framework/design.md` before the scanner and engine change; Speckit flow followed. | Pass (task ordering) |
 | IV. Explicit, Narrow Scope | Transport is in-memory (in scope); storage is Postgres (in scope). Spring Modulith interop is neither a storage nor a transport — the registry lives in the same Postgres database — see Complexity Tracking. Quarkus is not delivered here; listing it as an in-scope host awaits a constitution amendment (G-007-01). | Pass, justified |
 | V. Documentation Hierarchy | `docs/architecture.md` (module responsibilities, transport row) is updated: the in-memory transport no longer wraps `ApplicationEventPublisher`. AGENTS.md "Current Status" updated at the end. | Pass (task) |
@@ -70,9 +70,9 @@ specs/007-in-memory-transport/
 ├── data-model.md        # Phase 1: entities, table, state machine
 ├── quickstart.md        # Phase 1: validation scenarios
 ├── contracts/
-│   ├── core-spi.md              # MessageLog, CommandReceiver, Outbox.committed, OutgoingMessages, @Command
+│   ├── core-spi.md              # MessageStore, CommandReceiver, Outbox.committed, OutgoingMessages, @Command
 │   ├── in-memory-transport.md   # InMemoryTransport public surface and behaviour
-│   ├── postgres-message-log.md  # PostgresMessageLog and schema
+│   ├── postgres-message-log.md  # PostgresMessageStore and schema
 │   └── spring-wiring.md         # Starter: SpringTransactionBoundary, lifecycle, bridge, Modulith interop
 └── tasks.md             # Phase 2 (/speckit-tasks)
 ```
@@ -83,29 +83,29 @@ specs/007-in-memory-transport/
 saga-forge-core/src/main/java/io/github/gkosharovdev/sagaforge/core/
 ├── annotation/Command.java, CommandDelivery.java          # delivery attribute (R23)
 ├── spi/Outbox.java, OutgoingMessages.java,
-│   OutgoingCommand.java, CommandReceiver.java, LoggedCommand.java
-├── spi/log/                                               # new: MessageLog, LogEntry, LoggedMessage, MessageKind,
+│   OutgoingCommand.java, CommandReceiver.java, OutboxCommand.java
+├── spi/log/                                               # new: MessageStore, NewMessage, StoredMessage, MessageKind,
 │                                                          #      MessageStatus, MessageQuery, DeliveryFailure, ...
 └── scanner/ReflectiveAnnotationScanner.java               # R23 in validateAll
 
 saga-forge-engine/src/main/java/io/github/gkosharovdev/sagaforge/engine/
 ├── SagaEngine.java                                        # commandReceiver()
-└── internal/EngineCommandGateway.java, UnitOfWork.java,   # buffer LOGGED commands, outgoing batch, committed hook,
+└── internal/EngineCommandGateway.java, UnitOfWork.java,   # buffer OUTBOX commands, outgoing batch, committed hook,
     NonSagaUnitOfWork.java, SagaUnitOfWork.java, ...       # CommandReceiver implementation
 
 saga-forge-transport-inmemory/src/main/java/io/github/gkosharovdev/sagaforge/transport/inmemory/
-├── InMemoryTransport.java (+ Builder), TransportSettings.java, MessageLogQueries.java
+├── InMemoryTransport.java (+ Builder), TransportSettings.java, MessageStoreQueries.java
 └── internal/ Relay.java, Worker pool, OrderingKeys.java, Backoff.java, RetentionSweeper.java, Heartbeat.java
-saga-forge-transport-inmemory/src/test/...                 # test-jar: InMemoryMessageLog double
+saga-forge-transport-inmemory/src/test/...                 # test-jar: InMemoryMessageStore double
 
 saga-forge-storage-postgres/src/main/java/.../storage/postgres/
-├── PostgresMessageLog.java, MessageLogRows.java
+├── PostgresMessageStore.java, PostgresMessageStore.java
 └── resources: schema.sql (extended), schema-upgrade-007.sql
 
 saga-forge-spring-boot-starter/src/main/java/io/github/gkosharovdev/sagaforge/spring/
 ├── SpringTransactionBoundary.java
 ├── transport/InMemoryTransportConfiguration.java, TransportLifecycle.java, ApplicationEventBridge.java
-└── modulith/ModulithMessageLog.java, SagaForgeEnvelope.java, ModulithInteropConfiguration.java
+└── modulith/ModulithMessageStore.java, SagaForgeEnvelope.java, ModulithInteropConfiguration.java
 
 saga-forge-example/                                         # canonical saga run end to end over the transport (SC-004)
 ```
@@ -120,11 +120,11 @@ Postgres module. Package names follow the existing `io.github.gkosharovdev.sagaf
    docs, plus a mapping note in `specs/004-saga-engine`. Pure rename; all existing tests stay green.
 1. **Formal spec first**: R23 and Property 35 in `.kiro/specs/saga-forge-framework/design.md`.
 2. **Core contracts**: `CommandDelivery`, `OutgoingCommand`, `OutgoingMessages.commands`, `Outbox.committed`,
-   `CommandReceiver`/`LoggedCommand`, `core.spi.log` (contracts/core-spi.md); R23 in the scanner.
-3. **Engine**: logged commands buffered and passed to the outbox; `CommandReceiver`; `committed` hook; Property 35 tests.
+   `CommandReceiver`/`OutboxCommand`, `core.spi.store` (contracts/core-spi.md); R23 in the scanner.
+3. **Engine**: outbox commands buffered and passed to the outbox; `CommandReceiver`; `committed` hook; Property 35 tests.
 4. **Transport** over the in-memory log double: append paths, relay, ordering, retries, set-aside, restart, shutdown,
    retention, heartbeat, queries (User Stories 1–4 at unit level).
-5. **Postgres log**: `PostgresMessageLog`, schema and upgrade script, container contract suite, fault injection
+5. **Postgres log**: `PostgresMessageStore`, schema and upgrade script, container contract suite, fault injection
    (SC-001/002), 10k restart (SC-005).
 6. **Spring wiring**: boundary, lifecycle, executor, event bridge; Modulith interop starting with the R1 spike; SC-008
    three-setup acceptance suite.
@@ -136,4 +136,4 @@ Postgres module. Package names follow the existing `io.github.gkosharovdev.sagaf
 |---|---|---|
 | Spring Modulith interop (new optional dependency in the starter) | User decision (Clarifications): a Spring Modulith application must have one outbox, not two (FR-028). It adds no storage or transport technology — the registry is a table in the same Postgres database. | Ignoring Modulith leaves two outboxes; delivering through Modulith listeners cannot meet FR-009/FR-016 (research §10). |
 | Renaming the 004 handoff SPI (`EventHandoff` → `Outbox`, research §14) | User decision, 2026-11-11: "handoff" is not recognisable messaging vocabulary, and the SPI now carries commands. | An alias keeps two names for one SPI. |
-| Additive changes to `Outbox` and `OutgoingMessages` | Logged commands and a post-commit signal need them (research §2, §3); FR-025 reworded accordingly. | `LocalTransaction.afterCommit` touches every boundary implementation; a second outbox SPI doubles the call sites. |
+| Additive changes to `Outbox` and `OutgoingMessages` | Outbox commands and a post-commit signal need them (research §2, §3); FR-025 reworded accordingly. | `LocalTransaction.afterCommit` touches every boundary implementation; a second outbox SPI doubles the call sites. |

@@ -10,8 +10,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportUnderTest;
 
@@ -29,7 +29,7 @@ class FailureHandlingTest {
         return new HandlingReport(event, List.of());
     }
 
-    private static LoggedMessage only(TransportUnderTest t, String orderId) {
+    private static StoredMessage only(TransportUnderTest t, String orderId) {
         return t.log.all().stream().filter(m -> ((Unrouted) m.payload()).orderId().equals(orderId)).findFirst()
                 .orElseThrow();
     }
@@ -41,7 +41,7 @@ class FailureHandlingTest {
             t.publish(new Unrouted("poison"));
 
             await(() -> only(t, "poison").status() == MessageStatus.SET_ASIDE, WAIT, "the message to be set aside");
-            LoggedMessage poison = only(t, "poison");
+            StoredMessage poison = only(t, "poison");
             assertThat(poison.attempts()).isEqualTo(10);
             assertThat(poison.setAsideReason()).isEqualTo("MAX_ATTEMPTS");
             assertThat(poison.lastFailure().message()).isEqualTo("poison poison");

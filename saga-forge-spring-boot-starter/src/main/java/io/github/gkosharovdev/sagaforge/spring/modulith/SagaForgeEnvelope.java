@@ -6,7 +6,7 @@ package io.github.gkosharovdev.sagaforge.spring.modulith;
  * serialized by the registry's own {@code EventSerializer}. Saga Forge's delivery record beside it holds everything
  * else.
  *
- * @param messageId   the log's message identity
+ * @param messageId   the store's message identity
  * @param kind        {@code EVENT} or {@code COMMAND}
  * @param payloadType fully qualified class name of the payload
  * @param payload     the payload in the registry serializer's form

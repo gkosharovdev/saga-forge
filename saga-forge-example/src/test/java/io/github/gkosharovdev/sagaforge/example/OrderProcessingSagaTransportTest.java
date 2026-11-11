@@ -13,26 +13,26 @@ import org.junit.jupiter.api.Test;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.example.events.OrderCreatedEvent;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 
 /**
  * SC-004 (specs/007-in-memory-transport, tasks.md T076): the canonical {@link OrderProcessingSaga} runs end to end in
- * one process over the in-memory transport, with no broker and no change to its source. The message log here is the
- * test double; {@code PostgresMessageLog} takes its place in a real application.
+ * one process over the in-memory transport, with no broker and no change to its source. The message store here is the
+ * test double; {@code PostgresMessageStore} takes its place in a real application.
  */
 class OrderProcessingSagaTransportTest {
 
     private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
-    private final InMemoryMessageLog log = new InMemoryMessageLog();
+    private final InMemoryMessageStore log = new InMemoryMessageStore();
     private final OrderRepository orders = new OrderRepository();
-    private final InMemoryTransport transport = InMemoryTransport.builder().log(log).transactions(boundary).build();
+    private final InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).build();
 
     @AfterEach
     void stop() {

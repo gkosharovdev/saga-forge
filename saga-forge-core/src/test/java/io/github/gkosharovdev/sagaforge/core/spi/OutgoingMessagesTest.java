@@ -84,7 +84,7 @@ class OutgoingMessagesTest {
     }
 
     @Test
-    @DisplayName("a batch may carry logged commands, with or without events, in send order")
+    @DisplayName("a batch may carry outbox commands, with or without events, in send order")
     void commandsCarried() {
         var first = new OutgoingCommand(CommandId.of(SAGA_ID, "step", "com.example.Pay", 1), "pay-1");
         var second = new OutgoingCommand(CommandId.of(SAGA_ID, "step", "com.example.Pay", 2), "pay-2");

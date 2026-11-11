@@ -35,5 +35,5 @@
   spec names existing framework contracts (`EventReceiver`, `EventHandoff`, `CommandGateway`, `CommandId`) because
   they are the user-facing surface the feature must fit; it prescribes no new class, schema or library. Postgres
   appears only in Assumptions, as the scope of the first log implementation.
-- Resolved 2026-11-11: FR-010 (opt-in logged commands, synchronous by default) and FR-019 (7-day default retention). All items pass.
+- Resolved 2026-11-11: FR-010 (opt-in outbox commands, synchronous by default) and FR-019 (7-day default retention). All items pass.
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`

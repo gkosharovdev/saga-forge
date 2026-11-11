@@ -12,18 +12,18 @@ import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.Relay;
 
 /**
  * An in-process transport whose messages survive a restart: a transactional outbox over a durable
- * {@link MessageLog}, and a relay that delivers committed messages in the same process
+ * {@link MessageStore}, and a relay that delivers committed messages in the same process
  * ({@code specs/007-in-memory-transport}, contracts/in-memory-transport.md).
  *
  * <pre>{@code
  * InMemoryTransport transport = InMemoryTransport.builder()
- *         .log(messageLog)
+ *         .messageStore(messageStore)
  *         .transactions(transactionBoundary)
  *         .build();
  * SagaEngine engine = SagaEngine.builder()
@@ -38,8 +38,8 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.Relay;
  * }</pre>
  *
  * <p>Delivery is at least once: a message is marked consumed only after its consumer returned. A redelivered event
- * finds its step already completed (the engine reports it as a duplicate); a logged command is marked consumed in the
- * handler's own transaction. For one running instance per message log (FR-021).</p>
+ * finds its step already completed (the engine reports it as a duplicate); a outbox command is marked consumed in the
+ * handler's own transaction. For one running instance per message store (FR-021).</p>
  *
  * <p>Thread-safe.</p>
  */
@@ -48,23 +48,23 @@ public final class InMemoryTransport {
     private final Relay relay;
     private final EventDispatcher dispatcher;
     private final Outbox outbox;
-    private final MessageLogQueries queries;
+    private final MessageStoreQueries queries;
 
     private InMemoryTransport(Builder builder) {
-        this.relay = new Relay(builder.log, builder.transactions, builder.settings, builder.clock, builder.logger,
+        this.relay = new Relay(builder.messageStore, builder.transactions, builder.settings, builder.clock, builder.logger,
                 builder.executor);
         this.dispatcher = new TransportDispatcher(relay);
         this.outbox = new TransportOutbox(relay);
-        this.queries = new MessageLogQueries(builder.log, relay, builder.clock);
+        this.queries = new MessageStoreQueries(builder.messageStore, relay, builder.clock);
     }
 
-    /** @return a builder; {@code log} and {@code transactions} are required */
+    /** @return a builder; {@code messageStore} and {@code transactions} are required */
     public static Builder builder() {
         return new Builder();
     }
 
     /**
-     * The engine's {@code EventDispatcher}: an event published outside any unit of work is appended to the log (in
+     * The engine's {@code EventDispatcher}: an event published outside any unit of work is appended to the store (in
      * the host's active transaction, or in one of its own) and delivered after commit.
      *
      * @return the dispatcher to pass to {@code SagaEngine.Builder.dispatcher}
@@ -74,7 +74,7 @@ public final class InMemoryTransport {
     }
 
     /**
-     * The engine's {@code Outbox}: {@code IN_TRANSACTION}, supports logged commands, wakes the relay after commit.
+     * The engine's {@code Outbox}: {@code IN_TRANSACTION}, supports outbox commands, wakes the relay after commit.
      *
      * @return the outbox to pass to {@code SagaEngine.Builder.outbox}
      */
@@ -86,8 +86,8 @@ public final class InMemoryTransport {
      * Starts delivering: unconsumed messages first (in per-key order), then new ones.
      *
      * @param events   where events go, normally the started {@code SagaEngine}; non-null
-     * @param commands where logged commands go, normally {@code engine.commandReceiver()}; may be {@code null} if the
-     *                 model sends no logged command
+     * @param commands where outbox commands go, normally {@code engine.commandReceiver()}; may be {@code null} if the
+     *                 model sends no outbox command
      * @throws IllegalStateException if called twice
      */
     public void start(EventReceiver events, CommandReceiver commands) {
@@ -111,7 +111,7 @@ public final class InMemoryTransport {
     }
 
     /** @return the read and redelivery operations for operators (FR-022, FR-023) */
-    public MessageLogQueries queries() {
+    public MessageStoreQueries queries() {
         return queries;
     }
 
@@ -119,7 +119,7 @@ public final class InMemoryTransport {
      * Registers a listener called after each event message was delivered and marked consumed, for example to
      * re-publish it on the host's own event mechanism (FR-027). A throwing listener is logged and ignored.
      */
-    public void onDelivered(Consumer<LoggedMessage> listener) {
+    public void onDelivered(Consumer<StoredMessage> listener) {
         relay.onDelivered(listener);
     }
 
@@ -174,7 +174,7 @@ public final class InMemoryTransport {
     /** Assembles an {@link InMemoryTransport}. */
     public static final class Builder {
 
-        private MessageLog log;
+        private MessageStore messageStore;
         private TransactionBoundary transactions;
         private Executor executor;
         private TransportSettings settings = TransportSettings.defaults();
@@ -184,13 +184,13 @@ public final class InMemoryTransport {
         private Builder() {
         }
 
-        /** Required: the durable log, normally in the same datastore as saga state (FR-005). */
-        public Builder log(MessageLog value) {
-            this.log = requireNonNull(value, "log");
+        /** Required: the durable message store, normally in the same datastore as saga state (FR-005). */
+        public Builder messageStore(MessageStore value) {
+            this.messageStore = requireNonNull(value, "log");
             return this;
         }
 
-        /** Required: the boundary the engine and the log share. */
+        /** Required: the boundary the engine and the store share. */
         public Builder transactions(TransactionBoundary value) {
             this.transactions = requireNonNull(value, "transactions");
             return this;
@@ -222,11 +222,11 @@ public final class InMemoryTransport {
 
         /**
          * @return the transport, not yet started
-         * @throws IllegalArgumentException if {@code log} or {@code transactions} is missing
+         * @throws IllegalArgumentException if {@code messageStore} or {@code transactions} is missing
          */
         public InMemoryTransport build() {
-            if (log == null) {
-                throw new IllegalArgumentException("log is required");
+            if (messageStore == null) {
+                throw new IllegalArgumentException("messageStore is required");
             }
             if (transactions == null) {
                 throw new IllegalArgumentException("transactions is required");

@@ -65,13 +65,13 @@
 - Implemented and tested, added by `specs/007-in-memory-transport`: the in-memory transport. The 004 handoff SPI is
   renamed to outbox vocabulary (`EventHandoff` → `Outbox`, `handOff` → `store`, `HandedOffEvents` →
   `OutgoingMessages`, `DispatchingEventHandoff` → `ImmediateDispatchOutbox`, `Builder.handoff` → `outbox`,
-  `handoffFailures` → `outboxFailures`). Core gains the storage-agnostic `core.spi.log.MessageLog` (append in the
+  `handoffFailures` → `outboxFailures`). Core gains the storage-agnostic `core.spi.store.MessageStore` (append in the
   unit of work's transaction, leases with expiry, consumed/set-aside, queries, retention), `Outbox.committed` and
-  `supportsCommands`, `OutgoingMessages.commands`, and logged commands: `@Command(delivery = CommandDelivery.LOGGED)`
+  `supportsCommands`, `OutgoingMessages.commands`, and outbox commands: `@Command(delivery = CommandDelivery.OUTBOX)`
   (rule R23, Property 35) stored with the sending unit of work and handled after it commits through the engine's
   `CommandReceiver`, with the `CommandId` assigned at send time. `saga-forge-transport-inmemory` (core-only) is an
   `IN_TRANSACTION` outbox plus an in-process relay: at least once, per-aggregate order, backoff and set-aside,
-  restart recovery, operator queries. `PostgresMessageLog` stores the log (`saga_message_log`; existing databases
+  restart recovery, operator queries. `PostgresMessageStore` stores the log (`saga_message_store`; existing databases
   apply `schema-upgrade-007.sql`). The starter carries only this transport's Spring wiring, including Spring
   Modulith interop (one outbox: messages in Modulith's registry, Saga Forge's delivery records beside them).
 - Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; they all passed on
@@ -96,7 +96,7 @@
   `TransactionalInMemoryStorageProvider`, `TestTransport`, ...).
 - `saga-forge-spring-boot-starter` — today: the in-memory transport's wiring (`SpringTransactionBoundary`,
   `InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`, `ApplicationEventBridge`,
-  `ModulithInteropConfiguration`/`ModulithMessageLog`). Target: autoconfiguration that detects an available datastore
+  `ModulithInteropConfiguration`/`ModulithMessageStore`). Target: autoconfiguration that detects an available datastore
   and transport on the classpath and wires the engine. No `SagaEngineConfig` for users to hand-assemble.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
   (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
@@ -104,8 +104,8 @@
 - `saga-forge-storage-mysql` / `-mongodb` — target: `StorageProvider` + `SagaContextStore` implementations, one
   per backend.
 - `saga-forge-transport-inmemory` — `InMemoryTransport`: `EventDispatcher` and `IN_TRANSACTION` `Outbox` over a
-  `MessageLog`, plus the in-process relay; depends on `saga-forge-core` only (no Spring, no CDI). Its test-jar ships
-  `InMemoryMessageLog`, `MessageLogContract` and `TransportAcceptanceSuite`.
+  `MessageStore`, plus the in-process relay; depends on `saga-forge-core` only (no Spring, no CDI). Its test-jar ships
+  `InMemoryMessageStore`, `MessageStoreContract` and `TransportAcceptanceSuite`.
 - `saga-forge-transport-kafka` — target: `EventDispatcher` over Kafka. These two transports are the only ones
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
@@ -120,7 +120,7 @@
   (Property 11). Steps run in event order, not declaration order.
 - Steps dispatch zero or more commands via `commandGateway.send(...)` on an optional `CommandGateway` field
   (recognized by type, no annotation, at most one — Property 13), like the `SagaContext` field. A command runs in
-  the sender's unit of work unless its type is `@Command(delivery = CommandDelivery.LOGGED)` (007): then it is stored
+  the sender's unit of work unless its type is `@Command(delivery = CommandDelivery.OUTBOX)` (007): then it is stored
   in the outbox and handled after the sender commits, so its failure no longer rolls the step back.
 - Lifecycle boundaries: exactly one `@StartSaga`, one or more `@EndSaga` steps (each a named outcome; the
   instance records which one ended it); both must co-occur with `@SagaStep` on the same method.

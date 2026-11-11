@@ -13,9 +13,9 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageKind;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
@@ -29,12 +29,12 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Shipment;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShipmentBooked;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 
 /**
  * User Story 1 (specs/007-in-memory-transport spec.md, tasks.md T030): events between modules are delivered in memory,
- * after commit, from the log.
+ * after commit, from the store.
  */
 class EventDeliveryTest {
 
@@ -77,7 +77,7 @@ class EventDeliveryTest {
                 "the delivery saga to start");
         assertThat(harness.instance(FulfilmentSaga.class, SagaStatus.COMPLETED)).isPresent();
         harness.awaitQuiet(WAIT);
-        LoggedMessage booked = harness.messagesOf(ShipmentBooked.class).get(0);
+        StoredMessage booked = harness.messagesOf(ShipmentBooked.class).get(0);
         assertThat(booked.sourceSagaType()).isEqualTo(FulfilmentSaga.class.getName());
         assertThat(booked.status()).isEqualTo(MessageStatus.CONSUMED);
         assertThat(harness.log.all()).allSatisfy(m -> assertThat(m.status()).isEqualTo(MessageStatus.CONSUMED));
@@ -146,7 +146,7 @@ class EventDeliveryTest {
     @DisplayName("FR-002: a failed append reaches the publisher and nothing is delivered")
     void failedAppendReachesCaller() {
         IllegalStateException failure = new IllegalStateException("log down");
-        harness.log.failNext(InMemoryMessageLog.Operation.APPEND, failure);
+        harness.log.failNext(InMemoryMessageStore.Operation.APPEND, failure);
 
         assertThatThrownBy(() -> harness.publish(new OrderPlaced("o-1"))).isSameAs(failure);
         assertThat(harness.log.all()).isEmpty();

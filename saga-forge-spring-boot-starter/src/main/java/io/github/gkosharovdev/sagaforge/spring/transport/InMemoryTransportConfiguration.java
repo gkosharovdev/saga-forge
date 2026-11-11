@@ -19,16 +19,16 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageLog;
+import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
 /**
  * Spring wiring of the in-memory transport only ({@code specs/007-in-memory-transport} FR-029,
  * contracts/spring-wiring.md): the host's transaction manager as {@link TransactionBoundary}, a Postgres
- * {@link MessageLog}, a Spring-managed executor, start and stop with the application context, and the optional
+ * {@link MessageStore}, a Spring-managed executor, start and stop with the application context, and the optional
  * application-event bridge. The host still builds its {@code SagaEngine} bean, passing
  * {@code transport.dispatcher()} and {@code transport.outbox()}.
  */
@@ -61,9 +61,9 @@ public class InMemoryTransportConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public InMemoryTransport sagaForgeInMemoryTransport(MessageLog log, TransactionBoundary transactions,
+    public InMemoryTransport sagaForgeInMemoryTransport(MessageStore messageStore, TransactionBoundary transactions,
             TransportProperties properties, ThreadPoolTaskExecutor sagaForgeTransportExecutor) {
-        return InMemoryTransport.builder().log(log).transactions(transactions).settings(properties.toSettings())
+        return InMemoryTransport.builder().messageStore(messageStore).transactions(transactions).settings(properties.toSettings())
                 .executor(sagaForgeTransportExecutor).build();
     }
 
@@ -85,15 +85,15 @@ public class InMemoryTransportConfiguration {
         return new ApplicationEventBridge(transport, publisher);
     }
 
-    /** The Postgres message log, when the Postgres module is present and no other log is defined. */
+    /** The Postgres message store, when the Postgres module is present and no other log is defined. */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(PostgresMessageLog.class)
+    @ConditionalOnClass(PostgresMessageStore.class)
     static class PostgresLogConfiguration {
 
         @Bean
-        @ConditionalOnMissingBean(MessageLog.class)
-        public PostgresMessageLog sagaForgeMessageLog(DataSource dataSource, TransactionBoundary transactions) {
-            return new PostgresMessageLog(dataSource, transactions, InMemoryTransportConfiguration.class
+        @ConditionalOnMissingBean(MessageStore.class)
+        public PostgresMessageStore sagaForgeMessageStore(DataSource dataSource, TransactionBoundary transactions) {
+            return new PostgresMessageStore(dataSource, transactions, InMemoryTransportConfiguration.class
                     .getClassLoader());
         }
     }

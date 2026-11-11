@@ -1,12 +1,12 @@
 # Data Model: In-Memory Transport with a Durable Message Log
 
-Storage-agnostic entities first (they live in `saga-forge-core`, `core.spi.log`), then the Postgres table.
+Storage-agnostic entities first (they live in `saga-forge-core`, `core.spi.store`), then the Postgres table.
 
-## LogEntry (written by the transport through `MessageLog.append`)
+## NewMessage (written by the transport through `MessageStore.append`)
 
 | Field | Type | Rules |
 |---|---|---|
-| `messageId` | String | Unique in the log. Event: `unitOfWorkId + ":" + index` (004 key). Logged command: `CommandId.value()` (005, deterministic for saga-scoped commands). Event published outside a unit of work: random UUID. |
+| `messageId` | String | Unique in the store. Event: `unitOfWorkId + ":" + index` (004 key). Outbox command: `CommandId.value()` (005, deterministic for saga-scoped commands). Event published outside a unit of work: random UUID. |
 | `kind` | `MessageKind` | `EVENT` or `COMMAND`. |
 | `payloadType` | String | Fully qualified class name; non-blank. |
 | `payload` | Object | The event or command; non-null. Encoded by the storage module (research §7). |
@@ -15,13 +15,13 @@ Storage-agnostic entities first (they live in `saga-forge-core`, `core.spi.log`)
 | `sourceSagaType`, `sourceSagaId` | String, nullable | Both present for a saga-scoped unit of work, both absent otherwise (as `OutgoingMessages`). |
 | `recordedAt` | Instant | Transport clock at append. |
 
-## LoggedMessage (returned by leases and queries)
+## StoredMessage (returned by leases and queries)
 
-`LogEntry` fields plus:
+`NewMessage` fields plus:
 
 | Field | Type | Rules |
 |---|---|---|
-| `position` | long | Assigned by the log at append; strictly increasing per log. |
+| `position` | long | Assigned by the store at append; strictly increasing per log. |
 | `status` | `MessageStatus` | See state machine. |
 | `attempts` | int | ≥ 0; incremented when an entry is leased (research §6). |
 | `nextAttemptAt` | Instant | ≤ `recordedAt` for a fresh entry; backoff target after a failure. |
@@ -68,7 +68,7 @@ Invariants:
 
 ## Delivery record (interop mode)
 
-The same `LoggedMessage` row with `payload` null and `externalRef` set; the payload is the Spring Modulith publication's
+The same `StoredMessage` row with `payload` null and `externalRef` set; the payload is the Spring Modulith publication's
 event (`SagaForgeEnvelope`). One row per publication; written in the same transaction (FR-028a).
 
 ## Consumer heartbeat
@@ -82,7 +82,7 @@ event (`SagaForgeEnvelope`). One row per publication; written in the same transa
 ## Postgres schema (added to `schema.sql`; `schema-upgrade-007.sql` for existing databases)
 
 ```sql
-CREATE TABLE saga_message_log (
+CREATE TABLE saga_message_store (
     position          BIGSERIAL    PRIMARY KEY,
     message_id        VARCHAR(255) NOT NULL UNIQUE,
     kind              VARCHAR(16)  NOT NULL CHECK (kind IN ('EVENT', 'COMMAND')),
@@ -103,12 +103,12 @@ CREATE TABLE saga_message_log (
     set_aside_reason  VARCHAR(4096),
     external_ref      VARCHAR(255)
 );
-CREATE INDEX saga_message_log_head ON saga_message_log (ordering_key, position) WHERE status = 'UNCONSUMED';
-CREATE INDEX saga_message_log_due ON saga_message_log (next_attempt_at, position) WHERE status = 'UNCONSUMED';
-CREATE INDEX saga_message_log_consumed ON saga_message_log (consumed_at) WHERE status = 'CONSUMED';
-CREATE INDEX saga_message_log_source ON saga_message_log (source_saga_type, source_saga_id);
+CREATE INDEX saga_message_store_head ON saga_message_store (ordering_key, position) WHERE status = 'UNCONSUMED';
+CREATE INDEX saga_message_store_due ON saga_message_store (next_attempt_at, position) WHERE status = 'UNCONSUMED';
+CREATE INDEX saga_message_store_consumed ON saga_message_store (consumed_at) WHERE status = 'CONSUMED';
+CREATE INDEX saga_message_store_source ON saga_message_store (source_saga_type, source_saga_id);
 
-CREATE TABLE saga_message_log_consumer (
+CREATE TABLE saga_message_store_consumer (
     consumer_id   VARCHAR(64)  PRIMARY KEY,
     host          VARCHAR(255) NOT NULL,
     started_at    TIMESTAMPTZ  NOT NULL,
@@ -121,8 +121,8 @@ gone.
 
 ## Relationship to existing entities
 
-- `OutgoingMessages` (004) → one `LogEntry` per event and per `OutgoingCommand`, in batch order.
-- `StepRecord.handledCommands` (005) lists a logged command's `CommandId` once the sending unit of work commits
+- `OutgoingMessages` (004) → one `NewMessage` per event and per `OutgoingCommand`, in batch order.
+- `StepRecord.handledCommands` (005) lists a outbox command's `CommandId` once the sending unit of work commits
   (research §3).
 - `SagaInstance` is unchanged; queries by saga instance (FR-022) match `source_saga_type`/`source_saga_id` (messages a
   saga produced). Messages a saga *received* are found by ordering key — recorded as part of G-007-04.

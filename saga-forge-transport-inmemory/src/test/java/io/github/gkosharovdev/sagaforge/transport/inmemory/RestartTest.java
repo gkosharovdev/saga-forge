@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
@@ -22,12 +22,12 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentConfi
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RequestPayment;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 
 /**
  * User Story 2 (spec.md, tasks.md T038): unconsumed messages survive a restart. A restart is a new engine and
- * transport over the same saga storage and message log.
+ * transport over the same saga storage and message store.
  */
 class RestartTest {
 
@@ -90,7 +90,7 @@ class RestartTest {
         startOrder();
         harness.log.pauseLeasing(true);
         harness.publish(new PaymentAuthorized("o-1"));
-        harness.log.failNext(InMemoryMessageLog.Operation.MARK_CONSUMED,
+        harness.log.failNext(InMemoryMessageStore.Operation.MARK_CONSUMED,
                 new IllegalStateException("process stopped before the consumed mark"));
         harness.log.pauseLeasing(false);
 

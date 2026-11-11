@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
@@ -128,8 +128,8 @@ class TransportFaultInjectionContainerTest {
     }
 
     @Test
-    @DisplayName("logged command: a handler whose consumed mark fails rolls back and runs again with the same id")
-    void loggedCommandAtomicWithConsumption() {
+    @DisplayName("outbox command: a handler whose consumed mark fails rolls back and runs again with the same id")
+    void outboxCommandAtomicWithConsumption() {
         harness.start();
         PostgresTestSupport.failOnConsume(ChargeCard.class, 1);
 

@@ -5,16 +5,16 @@
 Each section records a decision, why, and what else was considered. Section numbers are cited from `plan.md`,
 `data-model.md` and `contracts/`.
 
-## §1 Where the log sits: a transactional outbox behind the 004 outbox
+## §1 Where the store sits: a transactional outbox behind the 004 outbox
 
 - **Decision**: The transport supplies the engine's `Outbox` with `Timing.IN_TRANSACTION`. `store(batch)` appends
-  one log entry per event (and per logged command, §3) through `MessageLog.append` in the unit of work's transaction.
+  one store entry per event (and per outbox command, §3) through `MessageStore.append` in the unit of work's transaction.
   A relay inside the transport (§5) delivers committed entries. `EventDispatcher.dispatch` (the path for
   `EventPublisher.publish` outside any unit of work) appends in a transaction of its own, then signals the relay.
 - **Rationale**: this is the shape G-ENG-07 and the `Outbox` Javadoc already anticipate; FR-001/FR-002 follow
   directly, and the entry exists if and only if the unit of work committed.
-- **Alternatives**: `AFTER_COMMIT` outbox writing to the log after commit — leaves the G-ENG-07 window open. Writing
-  the log from storage (`StorageProvider.save`) — couples saga storage to the transport.
+- **Alternatives**: `AFTER_COMMIT` outbox writing to the store after commit — leaves the G-ENG-07 window open. Writing
+  the store from storage (`StorageProvider.save`) — couples saga storage to the transport.
 
 ## §2 Waking the relay after commit: `Outbox.committed`
 
@@ -31,27 +31,27 @@ Each section records a decision, why, and what else was considered. Section numb
 - **Spec impact**: this is an additive SPI change, so FR-025 is reworded from "existing SPI contracts only" to "SPI
   contracts in `saga-forge-core`, extended additively" (applied to `spec.md`).
 
-## §3 Logged commands (FR-010 to FR-013)
+## §3 Outbox commands (FR-010 to FR-013)
 
 - **Decision**:
-  - Opt-in attribute on the command type: `@Command(delivery = CommandDelivery.LOGGED)`; the default
+  - Opt-in attribute on the command type: `@Command(delivery = CommandDelivery.OUTBOX)`; the default
     `CommandDelivery.IN_UNIT_OF_WORK` is today's behaviour. On the command type, not the handler, because the sender
     must know at `send` time without resolving a handler and because "one handler per command type" (Property 15) makes
     the two equivalent.
-  - `EngineCommandGateway.send` of a `LOGGED` command inside a unit of work assigns the `CommandId` exactly as today
+  - `EngineCommandGateway.send` of a `OUTBOX` command inside a unit of work assigns the `CommandId` exactly as today
     (005: saga, step, type, ordinal), skips it if the step record already lists it handled, and otherwise buffers it in
     the unit of work instead of running the handler. Outside a unit of work it opens the non-saga unit of work and
     buffers it there (FR-010a). Nothing runs before commit.
   - The buffered commands travel with the events in the outgoing batch: `OutgoingMessages` gains
     `List<OutgoingCommand> commands` (each a `CommandId` plus the command); a batch may now have no events if it has
     commands. The existing 4-argument constructor stays (no commands).
-  - The engine implements a new core SPI `CommandReceiver`: `receive(LoggedCommand delivery)` runs the single handler
+  - The engine implements a new core SPI `CommandReceiver`: `receive(OutboxCommand delivery)` runs the single handler
     in a non-saga unit of work with the delivery's `CommandId` bound (so a `CommandId` parameter gets the original
     identity, FR-012) and calls `delivery.inTransaction()` before the commit. The transport passes a callback that
     marks the entry consumed in that same transaction.
-  - A sent `LOGGED` command counts as "handled" for the sending step's `StepRecord.handledCommands` when the step's unit
+  - A sent `OUTBOX` command counts as "handled" for the sending step's `StepRecord.handledCommands` when the step's unit
     of work commits (it has been durably stored in the outbox), so a retried or redelivered step does not log it twice.
-- **Rationale**: the consumed mark inside the handler's transaction makes a logged command's effects and its
+- **Rationale**: the consumed mark inside the handler's transaction makes a outbox command's effects and its
   consumption atomic in the shared datastore: a redelivery after a crash either finds it consumed or finds the
   handler's effects rolled back. Events cannot get the same treatment because one event may open several units of work
   (one per instance); they rely on the engine's `DUPLICATE` detection instead (§6).
@@ -61,10 +61,10 @@ Each section records a decision, why, and what else was considered. Section numb
 
 ## §4 Scanner rule R23 and Property 35
 
-- **Decision**: R23 (cross-class, `validateAll`): a `@Command(delivery = LOGGED)` type must have exactly one
-  `@CommandHandler` in the validated model. Today a missing handler surfaces only when `send` runs; for a logged command
+- **Decision**: R23 (cross-class, `validateAll`): a `@Command(delivery = OUTBOX)` type must have exactly one
+  `@CommandHandler` in the validated model. Today a missing handler surfaces only when `send` runs; for a outbox command
   it would surface only at delivery, after the sender committed, so it must be caught at startup. Property 35
-  (runtime): a `LOGGED` command sent inside a unit of work is never handled before that unit of work commits, is never
+  (runtime): a `OUTBOX` command sent inside a unit of work is never handled before that unit of work commits, is never
   handled if it rolls back, and its handler receives the `CommandId` assigned at send time. Both are added to
   `.kiro/specs/saga-forge-framework/design.md` before implementation (Constitution Principle III).
 - **Alternatives**: no rule — leaves a silent set-aside at runtime for a model error.
@@ -96,7 +96,7 @@ Each section records a decision, why, and what else was considered. Section numb
 
 - **Decision**: an event entry is marked consumed in a short transaction after `EventReceiver.receive` returned a
   `HandlingReport` (any outcome, including `FAILED`, `COMPENSATED`, `REQUIRES_INTERVENTION`, `DUPLICATE`,
-  `DUPLICATE_START`, ignored: FR-017). A logged command entry is marked consumed inside the handler's transaction (§3).
+  `DUPLICATE_START`, ignored: FR-017). A outbox command entry is marked consumed inside the handler's transaction (§3).
   A crash between an event's handling commit and its consumed mark redelivers it, and the engine reports the step as
   `DUPLICATE` (005).
 - **Failures**: an exception from the receiver (including `EventHandlingException`) increments `attempts`, stores the
@@ -113,7 +113,7 @@ Each section records a decision, why, and what else was considered. Section numb
 
 ## §7 Payload encoding
 
-- **Decision**: the log stores the payload as JSON plus the fully qualified class name, encoded by the storage module
+- **Decision**: the store stores the payload as JSON plus the fully qualified class name, encoded by the storage module
   (Postgres: the existing Jackson 3 `JsonCodec`). `saga-forge-core` carries only `Object`. The class is loaded with a
   configurable `ClassLoader` (default: the thread context class loader at transport start) for hosts with restart class
   loaders (Spring DevTools, Quarkus dev mode).
@@ -122,11 +122,11 @@ Each section records a decision, why, and what else was considered. Section numb
 
 ## §8 Postgres implementation
 
-- **Decision**: `PostgresMessageLog` in `saga-forge-storage-postgres`, joining the engine's transaction through the
-  same `TransactionBoundary` as `PostgresStorageProvider` (004). One table `saga_message_log` (data-model.md) with a
+- **Decision**: `PostgresMessageStore` in `saga-forge-storage-postgres`, joining the engine's transaction through the
+  same `TransactionBoundary` as `PostgresStorageProvider` (004). One table `saga_message_store` (data-model.md) with a
   `bigserial` position, a partial index on `(ordering_key, position) WHERE status = 'UNCONSUMED'` for the head-of-key
   check, and an index on `(status, next_attempt_at)`. Shipped in `schema.sql`; existing databases apply
-  `schema-upgrade-007.sql`. A consumer heartbeat table `saga_message_log_consumer` backs FR-021.
+  `schema-upgrade-007.sql`. A consumer heartbeat table `saga_message_store_consumer` backs FR-021.
 - **Interop mode** reuses the same table as the side record with `payload` null and `external_ref` holding the Spring
   Modulith publication identity (§10), so there is one schema and one bookkeeping implementation.
 
@@ -150,7 +150,7 @@ Each section records a decision, why, and what else was considered. Section numb
   `SmartLifecycle` that starts the transport after the engine and stops it first. Optional bridge (FR-027): after an
   event entry is consumed, re-publish the event through `ApplicationEventPublisher`, outside any transaction, swallowing
   and logging listener failures.
-- **Interop mode** (`ModulithMessageLog`, a `MessageLog` decorator): `append` stores each message in the registry with
+- **Interop mode** (`ModulithMessageStore`, a `MessageStore` decorator): `append` stores each message in the registry with
   one fixed target identifier (`io.github.gkosharovdev.sagaforge.transport`) by calling `registry.store(envelope, …)`
   directly — not by publishing an application event — inside the unit of work's Spring transaction, and inserts the
   side record (§8) in the same transaction. The relay reads due side records, fetches payloads from
@@ -177,7 +177,7 @@ Each section records a decision, why, and what else was considered. Section numb
   transactional observers (`@Observes(during = TransactionPhase.AFTER_SUCCESS)`), the Vert.x event bus
   (`@ConsumeEvent`) and SmallRye Reactive Messaging with an in-memory connector — but no persisted publication registry
   like Spring Modulith's. A Quarkus host therefore always uses Saga Forge's own log.
-- **Decision**: nothing in core, engine, transport or the Postgres log may use Spring types; the contracts `MessageLog`,
+- **Decision**: nothing in core, engine, transport or the Postgres log may use Spring types; the contracts `MessageStore`,
   `TransactionBoundary` and an injectable `Executor` are all a Quarkus extension needs (Narayana `TransactionManager` as
   boundary, Agroal `DataSource`, `ManagedExecutor`, `StartupEvent`/`ShutdownEvent`). Deferred: G-007-01.
 
@@ -189,12 +189,12 @@ Each section records a decision, why, and what else was considered. Section numb
 
 ## §13 Testing strategy
 
-- Unit tests of the relay and transport against an in-memory `MessageLog` double (test-jar), with a fake clock, covering
+- Unit tests of the relay and transport against an in-memory `MessageStore` double (test-jar), with a fake clock, covering
   ordering per key, backoff, set-aside, non-blocking of other keys, shutdown and restart (a new transport over the same
   double).
-- Engine tests for logged commands (buffering, rollback, `CommandId` preserved, `committed` hook) over the existing
+- Engine tests for outbox commands (buffering, rollback, `CommandId` preserved, `committed` hook) over the existing
   in-memory doubles, plus property tests for Property 35 (jqwik).
-- Postgres container suites (`@Tag("container")`): `PostgresMessageLog` contract tests; fault injection (SC-001/SC-002) by
+- Postgres container suites (`@Tag("container")`): `PostgresMessageStore` contract tests; fault injection (SC-001/SC-002) by
   stopping the transport at each step boundary and starting a new one on the same database; 10,000-entry restart (SC-005).
 - Starter tests with Spring Boot test slices; interop suite with Spring Modulith JDBC on Testcontainers Postgres.
 - SC-008: one abstract acceptance suite with three concrete setups.
@@ -230,8 +230,8 @@ Each section records a decision, why, and what else was considered. Section numb
 
 ## §15 "Lease" instead of "claim"
 
-- **Decision** (user, 2026-11-11, before the first commit): the message log's reservation vocabulary is *lease*
-  throughout: `MessageLog.lease(consumerId, now, leaseDuration, limit)` returns `LeasedMessages`; rows carry
+- **Decision** (user, 2026-11-11, before the first commit): the message store's reservation vocabulary is *lease*
+  throughout: `MessageStore.lease(consumerId, now, leaseDuration, limit)` returns `LeasedMessages`; rows carry
   `leasedBy`/`leasedUntil` (`leased_by`/`leased_until`); `renew` and `release` complete the lifecycle; settings are
   `leaseDuration` and `leaseBatchSize`. The relay's loop is called the polling loop, after the Enterprise Integration
   Patterns' Polling Consumer; the relay keeps the outbox pattern's name *Message Relay*.
@@ -239,6 +239,19 @@ Each section records a decision, why, and what else was considered. Section numb
   established distributed-systems term (also Google Pub/Sub's client "lease management") and makes reservation,
   expiry, renewal and release one concept. `poll`/`fetch`/`receive` were rejected because in Kafka, `java.util.Queue`,
   SQS and Pub/Sub they do not convey the reservation.
+
+## §16 `MessageStore` and `CommandDelivery.OUTBOX`
+
+- **Decision** (user, 2026-11-11, during PR review): the log contract is `MessageStore` (package `core.spi.store`),
+  after the *Enterprise Integration Patterns* Message Store; a stored message is `StoredMessage`, a message handed to
+  `append` is `NewMessage`; implementations are `PostgresMessageStore`, `ModulithMessageStore` and the test double
+  `InMemoryMessageStore`; operator access is `MessageStoreQueries`; the tables are `saga_message_store` and
+  `saga_message_store_consumer`. Commands that travel through the store are `@Command(delivery =
+  CommandDelivery.OUTBOX)`, delivered to `CommandReceiver` as an `OutboxCommand`; prose says "outbox command".
+- **Rationale**: "log" suggested an append-only audit trail or a logger; "Message Store" is the pattern's own name and
+  already headed the architecture's pattern table. `OUTBOX` tells a developer what to expect (sent with the
+  transaction, handled after commit, at least once) and matches the `Outbox` SPI; `STORED` named an internal
+  mechanism, and `ASYNCHRONOUS` suggests fire-and-forget.
 
 ## Risks
 

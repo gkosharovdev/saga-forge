@@ -210,7 +210,7 @@ class EngineCommandGatewayTest {
         private final List<io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand> logged = new ArrayList<>();
 
         @Override
-        public void recordLoggedCommand(io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand command) {
+        public void recordOutboxCommand(io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand command) {
             logged.add(command);
         }
 

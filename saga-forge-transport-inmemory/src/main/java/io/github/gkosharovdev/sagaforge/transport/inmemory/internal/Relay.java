@@ -21,32 +21,32 @@ import java.util.function.Consumer;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.core.spi.LoggedCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LeasedMessages;
-import io.github.gkosharovdev.sagaforge.core.spi.log.ConsumerHeartbeat;
-import io.github.gkosharovdev.sagaforge.core.spi.log.DeliveryFailure;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LeaseLostException;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LogEntry;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageKind;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
-import io.github.gkosharovdev.sagaforge.core.spi.log.UnreadableMessageException;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
+import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
+import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaseLostException;
+import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
+import io.github.gkosharovdev.sagaforge.core.spi.store.UnreadableMessageException;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 
 /**
- * The transport's runtime: appends outgoing messages to the {@link MessageLog} and delivers committed ones in
+ * The transport's runtime: appends outgoing messages to the {@link MessageStore} and delivers committed ones in
  * process ({@code specs/007-in-memory-transport} research §1, §5, §6, §9, §12).
  *
  * <p><strong>Not API.</strong> Public only because {@code InMemoryTransport} lives in another package.</p>
  *
  * <ul>
  *   <li>A coordinator thread leases due messages when signalled or every poll interval, and hands each to a keyed
- *       worker lane; the log lets only the head of each ordering key be leased, so at most one message per key is
+ *       worker lane; the store lets only the head of each ordering key be leased, so at most one message per key is
  *       in flight.</li>
  *   <li>An event is delivered to {@link EventReceiver#receive(Object)} and then marked consumed in a transaction of
- *       its own; a command goes to {@link CommandReceiver#receive(LoggedCommand)} and is marked consumed inside the
+ *       its own; a command goes to {@link CommandReceiver#receive(OutboxCommand)} and is marked consumed inside the
  *       handler's transaction.</li>
  *   <li>A failure records the attempt and makes the message due again after a growing backoff; at
  *       {@code maxAttempts} it is set aside. An unreadable payload is set aside at once.</li>
@@ -58,15 +58,15 @@ public final class Relay {
 
     private static final long NANOS_PER_MILLI = 1_000_000L;
 
-    private final MessageLog log;
+    private final MessageStore messageStore;
     private final TransactionBoundary transactions;
     private final TransportSettings settings;
     private final Clock clock;
     private final Logger logger;
     private final Executor hostExecutor;
     private final String consumerId = UUID.randomUUID().toString();
-    private final Map<String, LoggedMessage> inFlight = new ConcurrentHashMap<>();
-    private final List<Consumer<LoggedMessage>> deliveredListeners = new CopyOnWriteArrayList<>();
+    private final Map<String, StoredMessage> inFlight = new ConcurrentHashMap<>();
+    private final List<Consumer<StoredMessage>> deliveredListeners = new CopyOnWriteArrayList<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition wakeUp = lock.newCondition();
 
@@ -83,9 +83,9 @@ public final class Relay {
 
     private enum State { CREATED, RUNNING, STOPPING, STOPPED }
 
-    public Relay(MessageLog log, TransactionBoundary transactions, TransportSettings settings, Clock clock,
+    public Relay(MessageStore messageStore, TransactionBoundary transactions, TransportSettings settings, Clock clock,
             Logger logger, Executor hostExecutor) {
-        this.log = log;
+        this.messageStore = messageStore;
         this.transactions = transactions;
         this.settings = settings;
         this.clock = clock;
@@ -99,7 +99,7 @@ public final class Relay {
     public void store(OutgoingMessages batch) {
         LocalTransaction tx = transactions.current().orElseThrow(() -> new IllegalStateException(
                 "the in-memory transport's outbox needs the unit of work's transaction to be active"));
-        log.append(tx, LogAppender.entries(batch, clock.instant()));
+        messageStore.append(tx, LogAppender.entries(batch, clock.instant()));
     }
 
     /**
@@ -110,15 +110,15 @@ public final class Relay {
         if (event == null) {
             throw new IllegalArgumentException("domainEvent must not be null");
         }
-        LogEntry entry = LogAppender.published(event, clock.instant());
+        NewMessage entry = LogAppender.published(event, clock.instant());
         var active = transactions.current();
         if (active.isPresent()) {
-            log.append(active.get(), List.of(entry));
+            messageStore.append(active.get(), List.of(entry));
             return;
         }
         LocalTransaction tx = transactions.begin();
         try {
-            log.append(tx, List.of(entry));
+            messageStore.append(tx, List.of(entry));
             tx.commit();
         } catch (RuntimeException | Error failure) {
             rollBackQuietly(tx, failure);
@@ -188,7 +188,7 @@ public final class Relay {
             Thread.currentThread().interrupt();
         }
         try {
-            log.release(consumerId);
+            messageStore.release(consumerId);
         } catch (RuntimeException failure) {
             logger.log(Level.WARNING, "saga.transport.releaseFailed consumer=" + consumerId, failure);
         }
@@ -207,7 +207,7 @@ public final class Relay {
         return consumerId;
     }
 
-    public void onDelivered(Consumer<LoggedMessage> listener) {
+    public void onDelivered(Consumer<StoredMessage> listener) {
         if (listener == null) {
             throw new IllegalArgumentException("listener must not be null");
         }
@@ -220,7 +220,7 @@ public final class Relay {
         int total = 0;
         int deleted;
         do {
-            deleted = log.purgeConsumed(cutoff, 1_000);
+            deleted = messageStore.purgeConsumed(cutoff, 1_000);
             total += deleted;
         } while (deleted == 1_000);
         return total;
@@ -248,11 +248,11 @@ public final class Relay {
         if (room <= 0) {
             return 0;
         }
-        LeasedMessages leased = log.lease(consumerId, clock.instant(), settings.leaseDuration(), room);
+        LeasedMessages leased = messageStore.lease(consumerId, clock.instant(), settings.leaseDuration(), room);
         for (UnreadableMessageException unreadable : leased.unreadable()) {
             setAside(unreadable.leased(), unreadable, "UNREADABLE: " + unreadable.getMessage());
         }
-        for (LoggedMessage message : leased.readable()) {
+        for (StoredMessage message : leased.readable()) {
             inFlight.put(message.messageId(), message);
             workers.submit(message.orderingKey(), () -> deliver(message));
         }
@@ -298,13 +298,13 @@ public final class Relay {
         if (inFlight.isEmpty()) {
             return;
         }
-        Set<String> lost = log.renew(consumerId, Set.copyOf(inFlight.keySet()), now.plus(settings.leaseDuration()));
+        Set<String> lost = messageStore.renew(consumerId, Set.copyOf(inFlight.keySet()), now.plus(settings.leaseDuration()));
         lost.forEach(id -> logger.log(Level.WARNING, () -> "saga.transport.leaseLost message=" + id));
     }
 
     private void beat(Instant now) {
         try {
-            log.heartbeat(new ConsumerHeartbeat(consumerId, hostName(), startedAt, now));
+            messageStore.heartbeat(new ConsumerHeartbeat(consumerId, hostName(), startedAt, now));
         } catch (RuntimeException failure) {
             logger.log(Level.WARNING, "saga.transport.heartbeatFailed consumer=" + consumerId, failure);
         }
@@ -313,12 +313,12 @@ public final class Relay {
     private void warnAboutOtherConsumers(Instant now) {
         try {
             Duration window = settings.heartbeatInterval().multipliedBy(3);
-            List<ConsumerHeartbeat> others = log.liveConsumers(now.minus(window)).stream()
+            List<ConsumerHeartbeat> others = messageStore.liveConsumers(now.minus(window)).stream()
                     .filter(beat -> !beat.consumerId().equals(consumerId)).toList();
             if (!others.isEmpty()) {
                 logger.log(Level.WARNING, () -> "saga.transport.secondInstance consumer=" + consumerId
                         + " others=" + others.stream().map(b -> b.consumerId() + "@" + b.host()).toList()
-                        + " - the in-memory transport supports one running instance per message log");
+                        + " - the in-memory transport supports one running instance per message store");
             }
         } catch (RuntimeException failure) {
             logger.log(Level.WARNING, "saga.transport.heartbeatFailed consumer=" + consumerId, failure);
@@ -327,19 +327,19 @@ public final class Relay {
 
     // ----- delivery ------------------------------------------------------------------------------------------
 
-    private void deliver(LoggedMessage message) {
+    private void deliver(StoredMessage message) {
         try {
             if (message.kind() == MessageKind.EVENT) {
                 events.receive(message.payload());
-                log.markConsumed(consumerId, message.messageId(), clock.instant());
+                messageStore.markConsumed(consumerId, message.messageId(), clock.instant());
                 notifyDelivered(message);
             } else {
                 if (commands == null) {
                     throw new IllegalStateException("no CommandReceiver was given to the transport, but message "
-                            + message.messageId() + " is a logged command");
+                            + message.messageId() + " is a outbox command");
                 }
-                commands.receive(new LoggedCommand(message.commandId(), message.payload(),
-                        tx -> log.markConsumed(tx, consumerId, message.messageId(), clock.instant())));
+                commands.receive(new OutboxCommand(message.commandId(), message.payload(),
+                        tx -> messageStore.markConsumed(tx, consumerId, message.messageId(), clock.instant())));
             }
             logger.log(Level.DEBUG, () -> "saga.transport.delivered message=" + message.messageId());
         } catch (LeaseLostException lost) {
@@ -352,7 +352,7 @@ public final class Relay {
         }
     }
 
-    private void failed(LoggedMessage message, Throwable failure) {
+    private void failed(StoredMessage message, Throwable failure) {
         Instant now = clock.instant();
         DeliveryFailure recorded = DeliveryFailure.of(failure, now);
         if (message.attempts() >= settings.maxAttempts()) {
@@ -361,7 +361,7 @@ public final class Relay {
         }
         Duration wait = Backoff.after(message.attempts(), settings.initialBackoff(), settings.maxBackoff());
         try {
-            log.recordFailure(consumerId, message.messageId(), recorded, now.plus(wait));
+            messageStore.recordFailure(consumerId, message.messageId(), recorded, now.plus(wait));
             logger.log(Level.DEBUG, () -> "saga.transport.deliveryFailed message=" + message.messageId()
                     + " attempts=" + message.attempts() + " retryIn=" + wait);
         } catch (RuntimeException writeFailure) {
@@ -370,9 +370,9 @@ public final class Relay {
         }
     }
 
-    private void setAside(LoggedMessage message, Throwable failure, String reason) {
+    private void setAside(StoredMessage message, Throwable failure, String reason) {
         try {
-            log.setAside(consumerId, message.messageId(), DeliveryFailure.of(failure, clock.instant()), reason);
+            messageStore.setAside(consumerId, message.messageId(), DeliveryFailure.of(failure, clock.instant()), reason);
             logger.log(Level.WARNING, () -> "saga.transport.setAside message=" + message.messageId() + " type="
                     + message.payloadType() + " attempts=" + message.attempts() + " reason=" + reason, failure);
         } catch (RuntimeException writeFailure) {
@@ -380,8 +380,8 @@ public final class Relay {
         }
     }
 
-    private void notifyDelivered(LoggedMessage message) {
-        for (Consumer<LoggedMessage> listener : deliveredListeners) {
+    private void notifyDelivered(StoredMessage message) {
+        for (Consumer<StoredMessage> listener : deliveredListeners) {
             try {
                 listener.accept(message);
             } catch (RuntimeException failure) {

@@ -11,13 +11,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageQuery;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportUnderTest;
 
-/** User Story 4 (FR-022, FR-023, SC-007, tasks.md T065): what the log holds, and redelivery of set-aside messages. */
+/** User Story 4 (FR-022, FR-023, SC-007, tasks.md T065): what the store holds, and redelivery of set-aside messages. */
 class OperatorQueriesTest {
 
     private static final Duration WAIT = Duration.ofSeconds(5);
@@ -39,9 +39,9 @@ class OperatorQueriesTest {
             await(() -> t.log.all().stream().allMatch(m -> m.status() != MessageStatus.UNCONSUMED), WAIT, "settled");
             t.log.pauseLeasing(true);
             t.publish(new Unrouted("waiting"));
-            MessageLogQueries queries = t.transport.queries();
+            MessageStoreQueries queries = t.transport.queries();
 
-            List<LoggedMessage> setAside = queries.find(MessageQuery.builder().statuses(MessageStatus.SET_ASIDE)
+            List<StoredMessage> setAside = queries.find(MessageQuery.builder().statuses(MessageStatus.SET_ASIDE)
                     .build());
             assertThat(setAside).singleElement().satisfies(m -> {
                 assertThat(m.payloadType()).isEqualTo(Unrouted.class.getName());
@@ -52,7 +52,7 @@ class OperatorQueriesTest {
             });
             assertThat(queries.find(MessageQuery.builder().statuses(MessageStatus.CONSUMED).build())).hasSize(1);
             assertThat(queries.find(MessageQuery.builder().statuses(MessageStatus.UNCONSUMED).build())).hasSize(1);
-            MessageLogQueries.Status status = queries.status();
+            MessageStoreQueries.Status status = queries.status();
             assertThat(status.counts()).containsEntry(MessageStatus.CONSUMED, 1)
                     .containsEntry(MessageStatus.SET_ASIDE, 1).containsEntry(MessageStatus.UNCONSUMED, 1);
             assertThat(status.oldestUnconsumed()).isPresent();

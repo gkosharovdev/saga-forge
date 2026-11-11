@@ -38,7 +38,7 @@
         </dependency>
 
         <!-- Test dependencies -->
-        <!-- 007: the MessageLog contract suite, the transport fixtures and the engine for fault injection -->
+        <!-- 007: the MessageStore contract suite, the transport fixtures and the engine for fault injection -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
             <artifactId>saga-forge-transport-inmemory</artifactId>

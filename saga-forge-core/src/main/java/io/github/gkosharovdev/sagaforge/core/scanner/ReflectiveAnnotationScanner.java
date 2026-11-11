@@ -79,7 +79,7 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  * Model rules across all hosts ({@code validateAll} only, reported as model errors):
  * <ul>
  *   <li>{@code validateUniqueCommandHandlers} — one @CommandHandler per @Command type</li>
- *   <li>{@code validateLoggedCommands} — a passed-in @Command(delivery = LOGGED) type has a handler (R23)</li>
+ *   <li>{@code validateOutboxCommands} — a passed-in @Command(delivery = OUTBOX) type has a handler (R23)</li>
  *   <li>{@code validateUniqueAggregateMembers} — one @AggregateLoader and one @AggregateSaver per aggregate</li>
  *   <li>{@code validateInstanceHandlerCommandIdentifiers} — a command handled by an @Aggregate instance
  *       method declares an @AggregateIdentifier field</li>
@@ -234,7 +234,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateUniqueAggregateMembers(hosts, AggregateLoader.class, modelErrors);
         validateUniqueAggregateMembers(hosts, AggregateSaver.class, modelErrors);
         validateInstanceHandlerCommandIdentifiers(hosts, modelErrors);
-        validateLoggedCommands(passedIn, hosts, modelErrors);
+        validateOutboxCommands(passedIn, hosts, modelErrors);
 
         return new ValidationReport(classResults, modelErrors);
     }
@@ -397,11 +397,11 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
      * reported by {@code validateCommandHandlerParameters}.
      */
     /**
-     * Model rule R23: each {@code @Command(delivery = LOGGED)} type among the passed-in classes is handled by a
-     * {@code @CommandHandler} of a passed-in host ({@code specs/007-in-memory-transport} FR-010). A logged command
+     * Model rule R23: each {@code @Command(delivery = OUTBOX)} type among the passed-in classes is handled by a
+     * {@code @CommandHandler} of a passed-in host ({@code specs/007-in-memory-transport} FR-010). A outbox command
      * would otherwise fail only at delivery, after its sender committed. Types in simple-name order.
      */
-    private void validateLoggedCommands(Set<Class<?>> passedIn, List<Class<?>> hosts, List<String> modelErrors) {
+    private void validateOutboxCommands(Set<Class<?>> passedIn, List<Class<?>> hosts, List<String> modelErrors) {
         Set<Class<?>> handled = new HashSet<>();
         for (Class<?> host : hosts) {
             for (Executable handler : handlerMembers(host)) {
@@ -410,11 +410,11 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         }
         passedIn.stream()
                 .filter(type -> type.isAnnotationPresent(Command.class)
-                        && type.getAnnotation(Command.class).delivery() == CommandDelivery.LOGGED)
+                        && type.getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX)
                 .filter(type -> !handled.contains(type))
                 .sorted(Comparator.comparing(Class::getSimpleName))
                 .forEach(type -> modelErrors.add("Command " + type.getSimpleName()
-                        + " is delivered LOGGED but has no @CommandHandler"));
+                        + " is delivered through the outbox but has no @CommandHandler"));
     }
 
     private void validateUniqueCommandHandlers(List<Class<?>> hosts, List<String> modelErrors) {

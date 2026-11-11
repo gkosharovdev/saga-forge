@@ -4,7 +4,7 @@ import java.lang.System.Logger.Level;
 
 import org.springframework.context.ApplicationEventPublisher;
 
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
 /**
@@ -23,7 +23,7 @@ public final class ApplicationEventBridge {
         transport.onDelivered(this::publish);
     }
 
-    private void publish(LoggedMessage message) {
+    private void publish(StoredMessage message) {
         try {
             publisher.publishEvent(message.payload());
         } catch (RuntimeException failure) {

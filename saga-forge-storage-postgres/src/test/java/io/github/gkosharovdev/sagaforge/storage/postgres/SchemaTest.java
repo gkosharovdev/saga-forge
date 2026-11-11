@@ -47,8 +47,8 @@ class SchemaTest {
                 "SELECT indexdef FROM pg_indexes WHERE indexname = ?", "idx_saga_association_lookup");
 
         assertThat(tables).extracting(row -> row.get("table_name")).containsExactly(
-                "saga_association", "saga_context", "saga_instance", "saga_lifecycle_history", "saga_message_log",
-                "saga_message_log_consumer");
+                "saga_association", "saga_context", "saga_instance", "saga_lifecycle_history", "saga_message_store",
+                "saga_message_store_consumer");
         assertThat(index).singleElement()
                 .extracting(row -> (String) row.get("indexdef"))
                 .asString()
@@ -254,30 +254,30 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("007: the message log has its columns, checks and partial indexes")
+    @DisplayName("007: the message store has its columns, checks and partial indexes")
     void messageLogShape() throws SQLException {
         assertThat(PostgresTestSupport.queryRows("SELECT indexname FROM pg_indexes WHERE tablename = ?"
-                + " ORDER BY indexname", "saga_message_log")).extracting(row -> row.get("indexname")).contains(
-                        "saga_message_log_consumed", "saga_message_log_due", "saga_message_log_head",
-                        "saga_message_log_source");
-        execute("INSERT INTO saga_message_log (message_id, kind, payload_type, payload, recorded_at, status,"
+                + " ORDER BY indexname", "saga_message_store")).extracting(row -> row.get("indexname")).contains(
+                        "saga_message_store_consumed", "saga_message_store_due", "saga_message_store_head",
+                        "saga_message_store_source");
+        execute("INSERT INTO saga_message_store (message_id, kind, payload_type, payload, recorded_at, status,"
                 + " next_attempt_at) VALUES ('m-1', 'EVENT', 'T', '{}'::jsonb, now(), 'UNCONSUMED', now())");
-        assertThatThrownBy(() -> execute("INSERT INTO saga_message_log (message_id, kind, payload_type,"
+        assertThatThrownBy(() -> execute("INSERT INTO saga_message_store (message_id, kind, payload_type,"
                 + " recorded_at, status, next_attempt_at) VALUES ('m-2', 'COMMAND', 'T', now(), 'UNCONSUMED', now())"))
                 .as("a command needs a command id").isInstanceOf(SQLException.class);
-        assertThatThrownBy(() -> execute("INSERT INTO saga_message_log (message_id, kind, payload_type,"
+        assertThatThrownBy(() -> execute("INSERT INTO saga_message_store (message_id, kind, payload_type,"
                 + " recorded_at, status, next_attempt_at) VALUES ('m-3', 'EVENT', 'T', now(), 'CONSUMED', now())"))
                 .as("consumed needs consumed_at").isInstanceOf(SQLException.class);
-        assertThatThrownBy(() -> execute("INSERT INTO saga_message_log (message_id, kind, payload_type,"
+        assertThatThrownBy(() -> execute("INSERT INTO saga_message_store (message_id, kind, payload_type,"
                 + " recorded_at, status, next_attempt_at) VALUES ('m-4', 'EVENT', 'T', now(), 'SET_ASIDE', now())"))
                 .as("set aside needs a reason").isInstanceOf(SQLException.class);
-        assertThatThrownBy(() -> execute("INSERT INTO saga_message_log (message_id, kind, payload_type,"
+        assertThatThrownBy(() -> execute("INSERT INTO saga_message_store (message_id, kind, payload_type,"
                 + " recorded_at, status, next_attempt_at) VALUES ('m-1', 'EVENT', 'T', now(), 'UNCONSUMED', now())"))
                 .as("message ids are unique").isInstanceOf(SQLException.class);
     }
 
     @Test
-    @DisplayName("007: schema-upgrade-007.sql adds the message log to a 006 database and is idempotent")
+    @DisplayName("007: schema-upgrade-007.sql adds the message store to a 006 database and is idempotent")
     void upgradeScript007Applies() throws SQLException {
         try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
              Statement statement = connection.createStatement()) {
@@ -297,7 +297,7 @@ class SchemaTest {
                     }
                 }
                 try (ResultSet tables = statement.executeQuery("SELECT count(*) FROM information_schema.tables"
-                        + " WHERE table_schema = 'pre007' AND table_name LIKE 'saga_message_log%'")) {
+                        + " WHERE table_schema = 'pre007' AND table_name LIKE 'saga_message_store%'")) {
                     assertThat(tables.next()).isTrue();
                     assertThat(tables.getInt(1)).isEqualTo(2);
                 }

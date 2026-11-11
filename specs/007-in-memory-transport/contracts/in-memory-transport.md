@@ -6,8 +6,8 @@ Package `io.github.gkosharovdev.sagaforge.transport.inmemory`. Depends on `saga-
 
 ```java
 InMemoryTransport transport = InMemoryTransport.builder()
-        .log(messageLog)                     // required: a core.spi.log.MessageLog
-        .transactions(transactionBoundary)   // required: same boundary the engine and the log use
+        .messageStore(messageStore)                     // required: a core.spi.store.MessageStore
+        .transactions(transactionBoundary)   // required: same boundary the engine and the store use
         .executor(executor)                  // optional: host-managed; default an internal pool of `workers` threads
         .workers(4)                          // default 4
         .maxAttempts(10)                     // FR-015
@@ -44,8 +44,8 @@ transport.stop(Duration.ofSeconds(30));               // FR-020
 | `start(EventReceiver, CommandReceiver)` | Once only (`IllegalStateException` otherwise). Writes heartbeat, warns about other live consumers (FR-021), starts relay and retention sweeper. |
 | Relay | Leases (signal or poll), dispatches entries to workers keyed by ordering key; an event goes to `EventReceiver.receive` then `markConsumed`; a command goes to `CommandReceiver.receive` with an `inTransaction` that marks it consumed in the handler's transaction. Exception → `recordFailure` with backoff, or `setAside` at `maxAttempts`; `UnreadableMessageException` → `setAside(UNREADABLE)`. |
 | `stop(timeout)` | Stops leasing, waits up to `timeout` for running deliveries, releases remaining leases, stops sweeper and heartbeat. Idempotent. |
-| `queries()` (`MessageLogQueries`) | `find(MessageQuery)`, `redeliver(messageId)` (FR-022, FR-023), `status()` (counts per status, oldest unconsumed age). |
-| Listener hook | `onDelivered(Consumer<LoggedMessage>)` — called after an event entry is consumed; used by the Spring bridge (FR-027). Exceptions are logged and ignored. |
+| `queries()` (`MessageStoreQueries`) | `find(MessageQuery)`, `redeliver(messageId)` (FR-022, FR-023), `status()` (counts per status, oldest unconsumed age). |
+| Listener hook | `onDelivered(Consumer<StoredMessage>)` — called after an event entry is consumed; used by the Spring bridge (FR-027). Exceptions are logged and ignored. |
 
 ## Logging (System.Logger, as the engine)
 

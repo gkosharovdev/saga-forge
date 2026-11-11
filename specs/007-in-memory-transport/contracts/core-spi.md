@@ -18,17 +18,17 @@ public @interface Command {
 public enum CommandDelivery {
     /** Handled synchronously inside the sender's unit of work (002 behaviour). */
     IN_UNIT_OF_WORK,
-    /** Appended to the message log with the sender's unit of work; handled after it commits, in its own unit of work. */
-    LOGGED
+    /** Appended to the message store with the sender's unit of work; handled after it commits, in its own unit of work. */
+    OUTBOX
 }
 ```
 
-- **R23** (`validateAll`): each `LOGGED` command type among the classes passed to `validateAll` is handled by a
-  `@CommandHandler` of a passed-in host; message `"Command {commandType} is delivered LOGGED but has no @CommandHandler"`.
-  Steps do not declare the commands they send, so a `LOGGED` type not passed in is not seen here; `send` therefore
-  also resolves the handler before storing a logged command and throws `NoCommandHandlerException` (unit of work
+- **R23** (`validateAll`): each `OUTBOX` command type among the classes passed to `validateAll` is handled by a
+  `@CommandHandler` of a passed-in host; message `"Command {commandType} is delivered through the outbox but has no @CommandHandler"`.
+  Steps do not declare the commands they send, so a `OUTBOX` type not passed in is not seen here; `send` therefore
+  also resolves the handler before storing a outbox command and throws `NoCommandHandlerException` (unit of work
   rolled back) if there is none.
-- **Property 35**: a `LOGGED` command sent inside a unit of work is not handled before that unit of work commits, is never
+- **Property 35**: a `OUTBOX` command sent inside a unit of work is not handled before that unit of work commits, is never
   handled if it rolls back, and its handler receives the `CommandId` assigned at send time.
 
 ## `OutgoingCommand` and `OutgoingMessages.commands`
@@ -47,8 +47,8 @@ public record OutgoingMessages(String unitOfWorkId, String sagaType, String saga
 - `events` and `commands` are unmodifiable copies without null elements; **at least one of them is non-empty** (was:
   `events` non-empty).
 - Commands are in send order. With the default `ImmediateDispatchOutbox` (`AFTER_COMMIT`), a batch containing commands
-  is a configuration error reported at engine `start()` (`SagaEngineStartupException`): logged commands need an outbox
-  that can store them. Detection: R23 found `LOGGED` types and the outbox does not declare `supportsCommands()`.
+  is a configuration error reported at engine `start()` (`SagaEngineStartupException`): outbox commands need an outbox
+  that can store them. Detection: R23 found `OUTBOX` types and the outbox does not declare `supportsCommands()`.
 
 ## `Outbox` additions (on the renamed `EventHandoff`)
 
@@ -63,7 +63,7 @@ default boolean supportsCommands() { return false; }
 default void committed(OutgoingMessages batch) { }
 ```
 
-## `CommandReceiver` and `LoggedCommand`
+## `CommandReceiver` and `OutboxCommand`
 
 ```java
 public interface CommandReceiver {
@@ -76,23 +76,23 @@ public interface CommandReceiver {
      * @throws NoCommandHandlerException no handler (only possible if R23 was bypassed)
      * @throws RuntimeException          anything the handler, loader, saver or inTransaction threw; rolled back
      */
-    void receive(LoggedCommand delivery);
+    void receive(OutboxCommand delivery);
 }
 
-public record LoggedCommand(CommandId commandId, Object command, Consumer<LocalTransaction> inTransaction) { }
+public record OutboxCommand(CommandId commandId, Object command, Consumer<LocalTransaction> inTransaction) { }
 ```
 
 Implemented by the engine (`SagaEngine.commandReceiver()`).
 
-## `core.spi.log.MessageLog`
+## `core.spi.store.MessageStore`
 
 Storage-agnostic; implemented by storage modules (and the interop decorator in the starter). All methods that take no
 `LocalTransaction` run in a transaction of their own through the implementation's `TransactionBoundary`.
 
 ```java
-public interface MessageLog {
+public interface MessageStore {
     /** Appends in tx (FR-001/FR-002); assigns positions in list order. Duplicate messageId → DuplicateMessageException. */
-    void append(LocalTransaction tx, List<LogEntry> entries);
+    void append(LocalTransaction tx, List<NewMessage> entries);
 
     /** Leases up to limit leasable entries (data-model invariants), ordered by position; sets lease and attempts+1. */
     LeasedMessages lease(String consumerId, Instant now, Duration leaseDuration, int limit);
@@ -108,7 +108,7 @@ public interface MessageLog {
     /** Releases every lease held by consumerId (shutdown) — entries become leasable again. */
     void release(String consumerId);
 
-    List<LoggedMessage> query(MessageQuery query);
+    List<StoredMessage> query(MessageQuery query);
     /** SET_ASIDE → UNCONSUMED, attempts 0 (FR-023); false if not set aside. */
     boolean redeliver(String messageId, Instant now);
     /** Deletes CONSUMED entries consumed before cutoff, at most batchSize; returns the number deleted. */
@@ -121,8 +121,8 @@ public interface MessageLog {
 
 - A leaseholder write by a consumer that no longer holds the lease throws `LeaseLostException`; the relay logs it and
   drops the result (the entry is redelivered — at-least-once).
-- `LoggedMessage.payload()` decoding failure surfaces as `UnreadableMessageException` (carrying the entry without
+- `StoredMessage.payload()` decoding failure surfaces as `UnreadableMessageException` (carrying the entry without
   payload) from `lease`, so the relay can set it aside (research §6).
-- Records: `LogEntry`, `LoggedMessage`, `DeliveryFailure`, `MessageQuery` (status set, source saga type/id, ordering key,
+- Records: `NewMessage`, `StoredMessage`, `DeliveryFailure`, `MessageQuery` (status set, source saga type/id, ordering key,
   payload type, limit ≤ 1,000, `includePayload`), `ConsumerHeartbeat`; enums `MessageKind`, `MessageStatus` — fields per
   data-model.md.

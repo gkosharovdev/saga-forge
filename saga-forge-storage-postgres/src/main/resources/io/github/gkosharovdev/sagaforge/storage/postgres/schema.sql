@@ -67,8 +67,8 @@ CREATE TABLE saga_lifecycle_history (
     PRIMARY KEY (saga_id, sequence_number)
 );
 
--- Message log of the in-memory transport (specs/007-in-memory-transport data-model.md): a transactional outbox.
-CREATE TABLE IF NOT EXISTS saga_message_log (
+-- Message store of the in-memory transport (specs/007-in-memory-transport data-model.md): a transactional outbox.
+CREATE TABLE IF NOT EXISTS saga_message_store (
     position          BIGSERIAL    PRIMARY KEY,
     message_id        VARCHAR(255) NOT NULL UNIQUE,
     kind              VARCHAR(16)  NOT NULL CHECK (kind IN ('EVENT', 'COMMAND')),
@@ -94,16 +94,16 @@ CREATE TABLE IF NOT EXISTS saga_message_log (
     CONSTRAINT reason_iff_set_aside CHECK ((status = 'SET_ASIDE') = (set_aside_reason IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS saga_message_log_head
-    ON saga_message_log (ordering_key, position) WHERE status = 'UNCONSUMED';
-CREATE INDEX IF NOT EXISTS saga_message_log_due
-    ON saga_message_log (next_attempt_at, position) WHERE status = 'UNCONSUMED';
-CREATE INDEX IF NOT EXISTS saga_message_log_consumed
-    ON saga_message_log (consumed_at) WHERE status = 'CONSUMED';
-CREATE INDEX IF NOT EXISTS saga_message_log_source
-    ON saga_message_log (source_saga_type, source_saga_id);
+CREATE INDEX IF NOT EXISTS saga_message_store_head
+    ON saga_message_store (ordering_key, position) WHERE status = 'UNCONSUMED';
+CREATE INDEX IF NOT EXISTS saga_message_store_due
+    ON saga_message_store (next_attempt_at, position) WHERE status = 'UNCONSUMED';
+CREATE INDEX IF NOT EXISTS saga_message_store_consumed
+    ON saga_message_store (consumed_at) WHERE status = 'CONSUMED';
+CREATE INDEX IF NOT EXISTS saga_message_store_source
+    ON saga_message_store (source_saga_type, source_saga_id);
 
-CREATE TABLE IF NOT EXISTS saga_message_log_consumer (
+CREATE TABLE IF NOT EXISTS saga_message_store_consumer (
     consumer_id   VARCHAR(64)  PRIMARY KEY,
     host          VARCHAR(255) NOT NULL,
     started_at    TIMESTAMPTZ  NOT NULL,

@@ -10,9 +10,9 @@ engine assembly stay in the later starter feature (G-007-02); the host still bui
 - `current()`: the transaction started by this boundary on this thread, if any; `resource(Connection.class)` returns the
   connection bound by `DataSourceUtils` for the configured `DataSource`.
 
-## `InMemoryTransportConfiguration` (`@AutoConfiguration`, conditional on `InMemoryTransport` and a `MessageLog` bean or a `DataSource`)
+## `InMemoryTransportConfiguration` (`@AutoConfiguration`, conditional on `InMemoryTransport` and a `MessageStore` bean or a `DataSource`)
 
-- Beans: `SpringTransactionBoundary` (if none), `PostgresMessageLog` (if none and Postgres module present),
+- Beans: `SpringTransactionBoundary` (if none), `PostgresMessageStore` (if none and Postgres module present),
   `InMemoryTransport` with settings from `saga-forge.transport.*` (`workers`, `max-attempts`, `backoff.initial`,
   `backoff.max`, `lease-duration`, `poll-interval`, `retention`, ...) and Boot's `ThreadPoolTaskExecutor` builder
   (`saga-forge-transport-` thread prefix), class loader = application class loader.
@@ -25,17 +25,17 @@ engine assembly stay in the later starter feature (G-007-02); the host still bui
 
 ## Spring Modulith interop (`ModulithInteropConfiguration`, conditional on an `EventPublicationRegistry` bean and `saga-forge.transport.modulith-interop != false`)
 
-- Replaces the `MessageLog` bean with `ModulithMessageLog(registry, postgresMessageLog)`:
+- Replaces the `MessageStore` bean with `ModulithMessageStore(registry, postgresMessageStore)`:
   - `append(tx, entries)`: for each entry, `registry.store(new SagaForgeEnvelope(entry), Stream.of(TARGET))` and
-    `postgresMessageLog.appendDeliveryRecord(tx, entryWithoutPayload, publicationId)` — both in the active Spring
+    `postgresMessageStore.appendDeliveryRecord(tx, entryWithoutPayload, publicationId)` — both in the active Spring
     transaction (`TARGET = PublicationTargetIdentifier.of("io.github.gkosharovdev.sagaforge.transport")`).
-  - `lease(...)`: leases delivery records through `postgresMessageLog`, then resolves payloads from
+  - `lease(...)`: leases delivery records through `postgresMessageStore`, then resolves payloads from
     `registry.findIncompletePublications()` filtered by `TARGET` and matched by envelope message id; a missing
     publication → `UnreadableMessageException` (set aside with reason `PUBLICATION_MISSING`).
   - `markConsumed`: delivery record consumed, then `registry.markCompleted(envelope, TARGET)` in the same transaction.
   - `setAside`: delivery record set aside, then `registry.markFailed(envelope, TARGET)`.
   - `purgeConsumed`: delivery records purged; `registry.deleteCompletedPublicationsOlderThan(retention)`.
-  - Everything else delegates to `postgresMessageLog`.
+  - Everything else delegates to `postgresMessageStore`.
 - `SagaForgeEnvelope`: record `(String messageId, MessageKind kind, String payloadType, Object payload, ...)` serialized by
   the registry's `EventSerializer` (Boot's Jackson mapper). Must round-trip deterministically (risk R1, spike first).
 - Startup check: if `spring.modulith.events.republish-outstanding-events-on-restart=true`, log INFO that Saga Forge

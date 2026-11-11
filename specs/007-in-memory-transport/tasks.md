@@ -13,14 +13,14 @@ description: "Task list for In-Memory Transport with a Durable Message Log"
 - **Rename first** (§14): `EventHandoff` → `Outbox` (`handOff` → `store`), `HandedOffEvents` → `OutgoingMessages`,
   `DispatchingEventHandoff` → `ImmediateDispatchOutbox`, `SagaEngine.Builder.handoff` → `outbox`,
   `SagaHandlingResult.handoffFailures` → `outboxFailures`. Pure rename, no behaviour change.
-- **Outbox** (§1, §2): the transport is an `IN_TRANSACTION` `Outbox` that appends to a `MessageLog` in the unit of work's
+- **Outbox** (§1, §2): the transport is an `IN_TRANSACTION` `Outbox` that appends to a `MessageStore` in the unit of work's
   transaction; the new `Outbox.committed(batch)` wakes the relay; a 500 ms poll is the fallback.
-- **Logged commands** (§3, §4): `@Command(delivery = CommandDelivery.LOGGED)`; buffered in the unit of work, carried in
+- **Outbox commands** (§3, §4): `@Command(delivery = CommandDelivery.OUTBOX)`; buffered in the unit of work, carried in
   `OutgoingMessages.commands`, handled through the new `CommandReceiver`, marked consumed inside the handler's transaction.
   Scanner rule R23, Property 35.
 - **Relay** (§5, §6): leased leases, one in-flight entry per ordering key (aggregate), 4 workers, backoff 1 s → 1 min,
   `SET_ASIDE` after 10 attempts or an unreadable payload; events marked consumed after `receive` returns.
-- **Postgres** (§8): `PostgresMessageLog`, tables `saga_message_log` and `saga_message_log_consumer`.
+- **Postgres** (§8): `PostgresMessageStore`, tables `saga_message_store` and `saga_message_store_consumer`.
 - **Spring** (§10): `SpringTransactionBoundary`, lifecycle, executor, event bridge; Spring Modulith interop through
   `EventPublicationRegistry` with Saga Forge's delivery records beside it. Risk R1 spiked first.
 
@@ -73,13 +73,13 @@ phases without a story label, as Postgres was in 006.
 
 - [X] T001 Update `.kiro/specs/saga-forge-framework/design.md`:
   - **Annotations**: extend the `@Command` section with the `delivery` attribute and the `CommandDelivery` enum
-    (`IN_UNIT_OF_WORK` default, `LOGGED`), per [contracts/core-spi.md](./contracts/core-spi.md).
-  - **Rules table**: add R23 ("every `@Command(delivery = LOGGED)` type has exactly one `@CommandHandler` in the
+    (`IN_UNIT_OF_WORK` default, `OUTBOX`), per [contracts/core-spi.md](./contracts/core-spi.md).
+  - **Rules table**: add R23 ("every `@Command(delivery = OUTBOX)` type has exactly one `@CommandHandler` in the
     validated model"; message names the command type). State that R23 runs in `validateAll` only, next to Properties
-    14 to 20; add `validateLoggedCommands` to the scanner pseudo-code.
-  - **Property 35**: a `LOGGED` command sent inside a unit of work is not handled before that unit of work commits, is
+    14 to 20; add `validateOutboxCommands` to the scanner pseudo-code.
+  - **Property 35**: a `OUTBOX` command sent inside a unit of work is not handled before that unit of work commits, is
     never handled if it rolls back, and its handler receives the `CommandId` assigned at send time (test
-    `LoggedCommandPropertyTest`).
+    `OutboxCommandPropertyTest`).
   - **Vocabulary**: replace `EventHandoff`/`HandedOffEvents`/`DispatchingEventHandoff` with `Outbox`/`OutgoingMessages`/
     `ImmediateDispatchOutbox` wherever the document names them (research §14).
   - **Error-message table**: add the R23 message.
@@ -88,7 +88,7 @@ phases without a story label, as Postgres was in 006.
   G-007-06, holding a dated note pointing to this tasks.md; T081 fills it in.
 - [X] T003 [P] Update `saga-forge-transport-inmemory/pom.xml`: keep `saga-forge-core` as the only compile dependency;
   add test dependencies `saga-forge-engine` and its `test-jar` (classifier `tests`), JUnit, AssertJ, jqwik; configure
-  `maven-jar-plugin` to build a `test-jar` (it ships `InMemoryMessageLog` and the abstract acceptance suite).
+  `maven-jar-plugin` to build a `test-jar` (it ships `InMemoryMessageStore` and the abstract acceptance suite).
 - [X] T004 [P] Update `saga-forge-spring-boot-starter/pom.xml`: add `spring-jdbc` and `spring-tx` (versions from the
   Boot 4.1.2 BOM imported in `dependencyManagement`), optional `saga-forge-transport-inmemory`,
   `saga-forge-storage-postgres`, and `org.springframework.modulith:spring-modulith-events-core` 2.1.1; test
@@ -138,7 +138,7 @@ compiling and every existing test green.
 
 ### Core contracts ([contracts/core-spi.md](./contracts/core-spi.md))
 
-- [X] T010 [P] Create `core/annotation/CommandDelivery.java` (`IN_UNIT_OF_WORK`, `LOGGED`, Javadoc per contract) and add
+- [X] T010 [P] Create `core/annotation/CommandDelivery.java` (`IN_UNIT_OF_WORK`, `OUTBOX`, Javadoc per contract) and add
   `CommandDelivery delivery() default CommandDelivery.IN_UNIT_OF_WORK` to `core/annotation/Command.java`.
 - [X] T011 [P] Create `core/spi/OutgoingCommand.java` (record `CommandId commandId, Object command`, both non-null,
   `IllegalArgumentException` otherwise).
@@ -147,17 +147,17 @@ compiling and every existing test green.
   `commands` non-empty. Extend `core-test/spi/OutgoingMessagesTest.java`.
 - [X] T013 Extend `core/spi/Outbox.java` with `default boolean supportsCommands()` (false) and
   `default void committed(OutgoingMessages batch)` (no-op), Javadoc per contract.
-- [X] T014 [P] Create `core/spi/LoggedCommand.java` (record `CommandId commandId, Object command,
-  Consumer<LocalTransaction> inTransaction`, all non-null) and `core/spi/CommandReceiver.java` (`void receive(LoggedCommand)`,
+- [X] T014 [P] Create `core/spi/OutboxCommand.java` (record `CommandId commandId, Object command,
+  Consumer<LocalTransaction> inTransaction`, all non-null) and `core/spi/CommandReceiver.java` (`void receive(OutboxCommand)`,
   Javadoc per contract).
-- [X] T015 Create package `core/spi/log/` with `package-info.java` and, per [data-model.md](./data-model.md):
+- [X] T015 Create package `core/spi/store/` with `package-info.java` and, per [data-model.md](./data-model.md):
   `MessageKind`, `MessageStatus`, `DeliveryFailure` (exception class, message truncated to 4,000 chars, time; factory
-  `of(Throwable, Instant)`), `LogEntry` (validation: `commandId` present iff `COMMAND`; source saga type/id both or
-  neither), `LoggedMessage` (invariants from data-model.md: lease fields both or neither, `consumedAt` iff `CONSUMED`,
+  `of(Throwable, Instant)`), `NewMessage` (validation: `commandId` present iff `COMMAND`; source saga type/id both or
+  neither), `StoredMessage` (invariants from data-model.md: lease fields both or neither, `consumedAt` iff `CONSUMED`,
   `setAsideReason` iff `SET_ASIDE`, `payload` optional), `MessageQuery` (builder; limit 1 to 1,000, default 100),
   `ConsumerHeartbeat`, exceptions `DuplicateMessageException`, `LeaseLostException`, `UnreadableMessageException`
-  (carries the `LoggedMessage` without payload), and the `MessageLog` interface exactly as in the contract.
-- [X] T016 [P] Write `core-test/spi/log/LogRecordsTest.java` covering every validation rule of T015, and
+  (carries the `StoredMessage` without payload), and the `MessageStore` interface exactly as in the contract.
+- [X] T016 [P] Write `core-test/spi/log/StoreRecordsTest.java` covering every validation rule of T015, and
   `core-test/annotation/CommandDeliveryTest.java` (default is `IN_UNIT_OF_WORK`).
 
 ### Engine hook and test doubles
@@ -170,12 +170,12 @@ compiling and every existing test green.
 - [X] T018 [P] Extend `engine-test/support/CapturingOutbox.java` to record `committed` calls and `supportsCommands`;
   write `engine-test/OutboxCommittedTest.java`: called once after commit for `IN_TRANSACTION`, not on rollback, not for
   `AFTER_COMMIT`, a throwing `committed` changes nothing.
-- [X] T019 Create `transport-test/support/InMemoryMessageLog.java`: a thread-safe `MessageLog` double that joins the
+- [X] T019 Create `transport-test/support/InMemoryMessageStore.java`: a thread-safe `MessageStore` double that joins the
   caller's `LocalTransaction` from `engine-test/support/InMemoryTransactionBoundary` (entries appended in a transaction
   become visible only on its commit, vanish on rollback), implements every lease invariant of data-model.md, stores the
   payload object as is, and offers test hooks `failNextAppend()`, `crashAfter(String operation)` and
   `markUnreadable(messageId)`.
-- [X] T020 [P] Write `transport-test/support/InMemoryMessageLogTest.java`: append visibility on commit/rollback, lease
+- [X] T020 [P] Write `transport-test/support/InMemoryMessageStoreTest.java`: append visibility on commit/rollback, lease
   ordering and head-of-key blocking, lease expiry, lease-lost writes rejected, set-aside does not block, redeliver,
   purge.
 - [X] T021 Checkpoint: `mvn -B -pl saga-forge-core,saga-forge-engine,saga-forge-transport-inmemory -am clean verify`.
@@ -186,7 +186,7 @@ compiling and every existing test green.
 
 **Goal**: an event committed by one unit of work reaches the sagas that react to it, after commit, with no broker.
 
-**Independent Test**: canonical order saga over the transport and `InMemoryMessageLog`; `OrderCreatedEvent` published
+**Independent Test**: canonical order saga over the transport and `InMemoryMessageStore`; `OrderCreatedEvent` published
 outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (quickstart scenario 1, 2).
 
 - [X] T022 [P] [US1] Create `transport/TransportSettings.java` (record: workers 4, maxAttempts 10, backoff initial 1 s
@@ -196,11 +196,11 @@ outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (qui
   `@DomainEvent(aggregate)` and the event's `@AggregateIdentifier` field (`String.valueOf`); for commands, the command's
   `@AggregateIdentifier` value with its aggregate type if present, else `saga:` + `CommandId.sagaId()`, else null.
   Reflection results cached per class.
-- [X] T024 [US1] Create `transport/internal/LogAppender.java`: maps an `OutgoingMessages` batch to `LogEntry`s (event
+- [X] T024 [US1] Create `transport/internal/LogAppender.java`: maps an `OutgoingMessages` batch to `NewMessage`s (event
   message id `unitOfWorkId + ":" + index`, commands after events with their `CommandId.value()`), and a single event
-  published outside a unit of work to a `LogEntry` with a random UUID id.
+  published outside a unit of work to a `NewMessage` with a random UUID id.
 - [X] T025 [US1] Create `transport/internal/Relay.java`: a coordinator thread waiting on a signal or the poll interval,
-  leasing batches through `MessageLog.lease`, dispatching each to a `KeyedWorkers` pool (same key → same worker, null
+  leasing batches through `MessageStore.lease`, dispatching each to a `KeyedWorkers` pool (same key → same worker, null
   key → any), delivering an `EVENT` entry to `EventReceiver.receive` then `markConsumed` in its own transaction;
   `signal()` is non-blocking. Failure handling is deferred to US2 (here: any exception releases nothing and is logged).
 - [X] T026 [US1] Create `transport/internal/KeyedWorkers.java` over a host-supplied `Executor` or an internal fixed pool
@@ -214,7 +214,7 @@ outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (qui
   instance assumption and the assembly order of the contract.
 - [X] T029 [P] [US1] Create fixtures `transport-test/fixtures/OrderModulith.java`: the canonical order saga, `Order`
   aggregate and `PaymentService` copied from `saga-forge-example` in a test package (the example module is not a
-  dependency), plus `transport-test/support/TransportHarness.java` assembling engine + transport + `InMemoryMessageLog`
+  dependency), plus `transport-test/support/TransportHarness.java` assembling engine + transport + `InMemoryMessageStore`
   + `TransactionalInMemoryStorageProvider` per the contract's assembly snippet, with `awaitQuiet(Duration)`.
 - [X] T030 [US1] Write `transport-test/EventDeliveryTest.java`: US1 acceptance scenarios 1 to 4 (start outside a unit of
   work; cross-instance event after commit; rollback delivers nothing; unreacted event consumed once), delivery never on
@@ -243,12 +243,12 @@ outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (qui
 - [X] T035 [US2] Add lease renewal to `Relay.java`: while a delivery runs longer than half the lease, renew it; a
   delivery whose renewal reports the id lost finishes but its result write is dropped.
 - [X] T036 [US2] Implement restart and shutdown in `InMemoryTransport.java`/`Relay.java`: `start` leases immediately
-  (FR-018); `stop(timeout)` stops leasing, waits for running deliveries up to `timeout`, then `MessageLog.release`
+  (FR-018); `stop(timeout)` stops leasing, waits for running deliveries up to `timeout`, then `MessageStore.release`
   (FR-020).
 - [X] T037 [P] [US2] Create `transport/internal/Heartbeat.java`: random consumer id, upsert every 30 s, WARNING at start
   if `liveConsumers(now - 90 s)` lists another consumer (FR-021); used as the relay's `consumerId`.
 - [X] T038 [US2] Write `transport-test/RestartTest.java`: US2 acceptance scenarios 1 to 4 using two transports over one
-  `InMemoryMessageLog` (first one abandoned without `stop`, leases expired by a fake clock); scenario 3 asserts
+  `InMemoryMessageStore` (first one abandoned without `stop`, leases expired by a fake clock); scenario 3 asserts
   `HandlingOutcome.DUPLICATE` and one step run.
 - [X] T039 [P] [US2] Write `transport-test/FailureHandlingTest.java`: backoff schedule, set-aside at the 10th failure
   (SC-006), other keys keep flowing while one key retries (FR-016), set-aside unblocks its key, unreadable payload set
@@ -262,29 +262,29 @@ outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (qui
 
 ---
 
-## Phase 5: Postgres message log
+## Phase 5: Postgres message store
 
 **Purpose**: the durable log for real restarts ([contracts/postgres-message-log.md](./contracts/postgres-message-log.md)).
 
-- [X] T043 Extend `postgres-res/schema.sql` with `saga_message_log`, `saga_message_log_consumer` and the four indexes
+- [X] T043 Extend `postgres-res/schema.sql` with `saga_message_store`, `saga_message_store_consumer` and the four indexes
   exactly as [data-model.md](./data-model.md); create `postgres-res/schema-upgrade-007.sql` (the same DDL, guarded with
   `IF NOT EXISTS`).
-- [X] T044 Create `postgres/MessageLogRows.java` (row ↔ `LoggedMessage` mapping, `CommandId` and `DeliveryFailure` as JSONB
+- [X] T044 Create `postgres/PostgresMessageStore.java` (row ↔ `StoredMessage` mapping, `CommandId` and `DeliveryFailure` as JSONB
   via `JsonCodec`, payload decoding with the configured class loader; decode failure → `UnreadableMessageException`).
-- [X] T045 Create `postgres/PostgresMessageLog.java` implementing `MessageLog` per contract: batched append (unique
+- [X] T045 Create `postgres/PostgresMessageStore.java` implementing `MessageStore` per contract: batched append (unique
   violation → `DuplicateMessageException`), single-statement lease with `FOR UPDATE SKIP LOCKED` and the head-of-key
   `NOT EXISTS`, leaseholder writes with `leased_by` guard (`LeaseLostException`), `release`, `query`, `redeliver`,
-  `purgeConsumed`, `heartbeat`, `liveConsumers`, and public `appendDeliveryRecord(LocalTransaction, LogEntry,
+  `purgeConsumed`, `heartbeat`, `liveConsumers`, and public `appendDeliveryRecord(LocalTransaction, NewMessage,
   String externalRef)` for interop; SQL errors → `UncheckedSqlException`.
 - [X] T046 [P] Extend `postgres-test/SchemaTest.java` for the new tables, columns, checks and indexes, and for
   `schema-upgrade-007.sql` on a 006 schema (container).
-- [X] T047 Create `transport-test/support/MessageLogContract.java` (in the transport `test-jar`): an abstract JUnit
-  contract suite over any `MessageLog` (the invariants of T020), and make `InMemoryMessageLogTest` extend it.
-- [X] T048 Write `postgres-test/PostgresMessageLogContainerTest.java` (`@Tag("container")`) extending
-  `MessageLogContract`, plus Postgres-only cases: `SKIP LOCKED` between two concurrent consumers, payload round trip for
+- [X] T047 Create `transport-test/support/MessageStoreContract.java` (in the transport `test-jar`): an abstract JUnit
+  contract suite over any `MessageStore` (the invariants of T020), and make `InMemoryMessageStoreTest` extend it.
+- [X] T048 Write `postgres-test/PostgresMessageStoreContainerTest.java` (`@Tag("container")`) extending
+  `MessageStoreContract`, plus Postgres-only cases: `SKIP LOCKED` between two concurrent consumers, payload round trip for
   the example's events and commands (FR-004), unreadable class set aside.
 - [X] T049 Write `postgres-test/TransportFaultInjectionContainerTest.java` (`@Tag("container")`): the order saga over
-  engine + transport + `PostgresStorageProvider` + `PostgresMessageLog`; stop at each boundary (after commit, after
+  engine + transport + `PostgresStorageProvider` + `PostgresMessageStore`; stop at each boundary (after commit, after
   lease, after `receive` before `markConsumed`, during `stop`) and start a fresh transport on the same database; assert
   SC-001 (all delivered, no step twice) and SC-002 (no rolled-back entry ever written).
 - [X] T050 Write `postgres-test/RestartBacklogContainerTest.java` (`@Tag("container")`): 10,000 unconsumed entries,
@@ -299,33 +299,33 @@ outside a unit of work; saga ends `COMPLETED` after `PaymentProcessedEvent` (qui
 **Goal**: commands whose type opts in are logged with the sender's unit of work and handled once after commit, with
 their original `CommandId`; other commands behave as today.
 
-**Independent Test**: `ProcessPaymentCommand` marked `LOGGED`; crash after the step commits; after restart the handler
+**Independent Test**: `ProcessPaymentCommand` marked `OUTBOX`; crash after the step commits; after restart the handler
 runs once with the same `CommandId` (quickstart scenarios 5, 6).
 
-- [X] T052 [US3] Implement R23 in `core/scanner/ReflectiveAnnotationScanner.java` (`validateLoggedCommands` in
+- [X] T052 [US3] Implement R23 in `core/scanner/ReflectiveAnnotationScanner.java` (`validateOutboxCommands` in
   `validateAll`), message per T001; extend `core-test/scanner/ValidationReportTest.java` with a passing and a failing
   model.
-- [X] T053 [US3] In `engine/internal/EngineCommandGateway.java`: for a `LOGGED` command inside a unit of work, resolve the
+- [X] T053 [US3] In `engine/internal/EngineCommandGateway.java`: for a `OUTBOX` command inside a unit of work, resolve the
   handler route first (`NoCommandHandlerException` as today if none), assign the `CommandId` as today, skip it if already handled, otherwise buffer it on the unit of work
-  (`UnitOfWork.recordLoggedCommand(OutgoingCommand)`) without running the handler; outside a unit of work, open the
+  (`UnitOfWork.recordOutboxCommand(OutgoingCommand)`) without running the handler; outside a unit of work, open the
   non-saga unit of work and buffer it there (FR-010a). `IN_UNIT_OF_WORK` commands unchanged.
 - [X] T054 [US3] In `engine/internal/UnitOfWork.java`, `SagaUnitOfWork.java`, `NonSagaUnitOfWork.java`: carry buffered
-  commands into the `OutgoingMessages` batch in send order; discard them on rollback; on commit add each logged command's
+  commands into the `OutgoingMessages` batch in send order; discard them on rollback; on commit add each outbox command's
   `CommandId` to the sending step's `StepRecord.handledCommands` (research §3).
-- [X] T055 [US3] Implement `CommandReceiver` in the engine (`engine/internal/LoggedCommandHandling.java`, exposed by
+- [X] T055 [US3] Implement `CommandReceiver` in the engine (`EngineCommandGateway.receive`, exposed by
   `SagaEngine.commandReceiver()`): new non-saga unit of work, `CommandIds.withBound(delivery.commandId(), …)`, run the
   route, call `delivery.inTransaction()` with the current `LocalTransaction` before commit; reentrancy and not-started
   rules as `EventReceiver`.
 - [X] T056 [US3] In `engine/internal/StartupChecks.java`: fail `start()` with `SagaEngineStartupException` if the
-  registered model has a `LOGGED` command type and the outbox's `supportsCommands()` is false.
+  registered model has a `OUTBOX` command type and the outbox's `supportsCommands()` is false.
 - [X] T057 [US3] Extend `transport/internal/LogAppender.java` and `Relay.java` for `COMMAND` entries: deliver through
-  `CommandReceiver.receive(new LoggedCommand(id, command, tx -> log.markConsumed(tx, consumerId, messageId, now)))`;
+  `CommandReceiver.receive(new OutboxCommand(id, command, tx -> log.markConsumed(tx, consumerId, messageId, now)))`;
   failures as in T034.
-- [X] T058 [P] [US3] Write `engine-test/LoggedCommandTest.java`: not handled before commit, never on rollback, handled
+- [X] T058 [P] [US3] Write `engine-test/OutboxCommandTest.java`: not handled before commit, never on rollback, handled
   via `CommandReceiver` with the original `CommandId`, events the handler records go to the outbox, an `IN_UNIT_OF_WORK`
   command whose handler throws still rolls the step back and retries/compensates (US3 scenario 5), startup refusal of
   T056, retried step does not log the command twice.
-- [X] T059 [P] [US3] Write `engine-test/LoggedCommandPropertyTest.java` (jqwik, Property 35) over random step outcomes
+- [X] T059 [P] [US3] Write `engine-test/OutboxCommandPropertyTest.java` (jqwik, Property 35) over random step outcomes
   (commit, rollback, retry) and redeliveries.
 - [X] T060 [US3] Write `transport-test/CommandDeliveryTest.java`: US3 acceptance scenarios 1 to 4, including a crash
   right after the handler's commit (the consumed mark is in the same transaction, so no second run), and a
@@ -334,20 +334,20 @@ runs once with the same `CommandId` (quickstart scenarios 5, 6).
 
 ---
 
-## Phase 7: User Story 4 — The operator can see what the log holds (P3)
+## Phase 7: User Story 4 — The operator can see what the store holds (P3)
 
-**Goal**: query the log by status and saga, redeliver set-aside entries, and keep consumed entries 7 days.
+**Goal**: query the store by status and saga, redeliver set-aside entries, and keep consumed entries 7 days.
 
 **Independent Test**: one consumed, one unconsumed and one set-aside entry are reported with status, type, attempts and
 last failure; the set-aside one can be redelivered (quickstart scenarios 8, 10).
 
-- [X] T062 [US4] Create `transport/MessageLogQueries.java` (`find(MessageQuery)`, `redeliver(messageId)` → boolean plus
+- [X] T062 [US4] Create `transport/MessageStoreQueries.java` (`find(MessageQuery)`, `redeliver(messageId)` → boolean plus
   `relay.signal()`, `status()` with counts per status and the oldest unconsumed age) and expose it as
   `InMemoryTransport.queries()`.
 - [X] T063 [US4] Create `transport/internal/RetentionSweeper.java`: every sweep interval, `purgeConsumed(now - retention,
   1000)` until fewer than 1,000 are deleted; never touches other statuses (FR-019); started and stopped with the
   transport.
-- [X] T064 [US4] Add `InMemoryTransport.onDelivered(Consumer<LoggedMessage>)`, called after an event entry is consumed;
+- [X] T064 [US4] Add `InMemoryTransport.onDelivered(Consumer<StoredMessage>)`, called after an event entry is consumed;
   exceptions logged and ignored (FR-027, used by T070).
 - [X] T065 [P] [US4] Write `transport-test/OperatorQueriesTest.java` (US4 scenarios 1 and 2, SC-007) and
   `transport-test/RetentionTest.java` (fake clock: consumed older than 7 days removed, set-aside and unconsumed kept).
@@ -376,7 +376,7 @@ last failure; the set-aside one can be redelivered (quickstart scenarios 8, 10).
 - [X] T070 [P] Create `spring/transport/ApplicationEventBridge.java` (on unless
   `saga-forge.transport.publish-application-events=false`): `transport.onDelivered` re-publishes the payload through
   `ApplicationEventPublisher` outside any transaction, listener failures logged and ignored.
-- [X] T071 Create `spring/modulith/SagaForgeEnvelope.java`, `spring/modulith/ModulithMessageLog.java` (decorator per
+- [X] T071 Create `spring/modulith/SagaForgeEnvelope.java`, `spring/modulith/ModulithMessageStore.java` (decorator per
   contract and research §10, using the path T067 settled) and `spring/modulith/ModulithInteropConfiguration.java`
   (conditional on an `EventPublicationRegistry` bean and `saga-forge.transport.modulith-interop` not `false`; INFO when
   `republish-outstanding-events-on-restart` is on).
@@ -396,19 +396,19 @@ last failure; the set-aside one can be redelivered (quickstart scenarios 8, 10).
 
 ## Phase 9: Polish & cross-cutting
 
-- [X] T076 [P] Update `saga-forge-example`: mark `ProcessPaymentCommand` `@Command(delivery = CommandDelivery.LOGGED)` only
-  if `OrderProcessingSagaEngineTest` keeps its current expectations, otherwise leave it and add a second, logged command
+- [X] T076 [P] Update `saga-forge-example`: mark `ProcessPaymentCommand` `@Command(delivery = CommandDelivery.OUTBOX)` only
+  if `OrderProcessingSagaEngineTest` keeps its current expectations, otherwise leave it and add a second, outbox command
   example in a comment; add `example-test/OrderProcessingSagaTransportTest.java` running the saga end to end over
-  `InMemoryTransport` and the `InMemoryMessageLog` test-jar double (SC-004). Keep the example in sync with AGENTS.md rules
+  `InMemoryTransport` and the `InMemoryMessageStore` test-jar double (SC-004). Keep the example in sync with AGENTS.md rules
   (`associationProperty`, start/end annotations shown).
 - [X] T077 [P] Update `docs/architecture.md`: Current status table (transport in-memory implemented), module
   responsibilities for `saga-forge-transport-inmemory` (outbox + relay, no Spring; supersedes "wraps
   `ApplicationEventPublisher`") and the starter (transport wiring, Modulith interop), the at-least-once guarantee and the
   closing of G-ENG-07 for hosts using it.
-- [X] T078 [P] Update `README.md` (transport assembly snippet from the contract, `CommandDelivery.LOGGED` example) and
+- [X] T078 [P] Update `README.md` (transport assembly snippet from the contract, `CommandDelivery.OUTBOX` example) and
   `docs/use-cases.md` (a restart scenario).
 - [X] T079 [P] Update `AGENTS.md`: Current Status bullet for 007, Module Map entries for the transport and starter, Saga
-  Model note on `@Command(delivery = LOGGED)`, Known Gaps line for G-007-01 to G-007-06.
+  Model note on `@Command(delivery = OUTBOX)`, Known Gaps line for G-007-01 to G-007-06.
 - [X] T080 Self-check: every FR-001 to FR-029 and SC-001 to SC-008 maps to a completed task or a recorded gap; note any
   uncovered item in T081. Mark G-ENG-07 in memory.md as closed for hosts using the in-memory transport.
 - [X] T081 Fill the memory.md implementation notes from T002 (what changed per module, test counts, any deviation, the
@@ -457,7 +457,7 @@ Setup → Foundational (rename → contracts → hook/doubles) → US1 → US2 �
 
 ### MVP (US1)
 
-Phases 1 to 3: the rename, the contracts, and events delivered in memory after commit over the log double. It proves
+Phases 1 to 3: the rename, the contracts, and events delivered in memory after commit over the store double. It proves
 the outbox and relay shape end to end; durability across real restarts follows with US2 and Postgres.
 
 ### Incremental delivery
@@ -465,7 +465,7 @@ the outbox and relay shape end to end; durability across real restarts follows w
 1. MVP (US1).
 2. US2: failures, retries, set-aside, restart.
 3. Postgres: the real durable log, fault injection, backlog restart.
-4. US3: logged commands.
+4. US3: outbox commands.
 5. US4: operator queries and retention.
 6. Spring wiring and Modulith interop.
 7. Polish.

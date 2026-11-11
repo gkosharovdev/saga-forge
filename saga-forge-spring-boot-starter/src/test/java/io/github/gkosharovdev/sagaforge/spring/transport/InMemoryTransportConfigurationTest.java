@@ -14,11 +14,11 @@ import org.springframework.modulith.events.core.EventSerializer;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageLog;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithInteropConfiguration;
-import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithMessageLog;
-import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageLog;
+import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithMessageStore;
+import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
 /** Conditions and properties of the transport's Spring wiring (contracts/spring-wiring.md, tasks.md T074). */
@@ -45,7 +45,7 @@ class InMemoryTransportConfigurationTest {
         withDatabase().run(context -> {
             assertThat(context).hasSingleBean(InMemoryTransport.class);
             assertThat(context.getBean(TransactionBoundary.class)).isInstanceOf(SpringTransactionBoundary.class);
-            assertThat(context.getBean(MessageLog.class)).isInstanceOf(PostgresMessageLog.class);
+            assertThat(context.getBean(MessageStore.class)).isInstanceOf(PostgresMessageStore.class);
             assertThat(context).hasSingleBean(TransportLifecycle.class).hasSingleBean(ApplicationEventBridge.class);
         });
     }
@@ -65,23 +65,23 @@ class InMemoryTransportConfigurationTest {
     }
 
     @Test
-    @DisplayName("with Spring Modulith's registry the log is the interop log, unless switched off")
+    @DisplayName("with Spring Modulith's registry the store is the interop log, unless switched off")
     void modulithInterop() {
         ApplicationContextRunner modulith = withDatabase()
                 .withBean(EventPublicationRepository.class, () -> stub(EventPublicationRepository.class))
                 .withBean(EventSerializer.class, () -> stub(EventSerializer.class));
 
-        modulith.run(context -> assertThat(context.getBean(MessageLog.class)).isInstanceOf(ModulithMessageLog.class));
+        modulith.run(context -> assertThat(context.getBean(MessageStore.class)).isInstanceOf(ModulithMessageStore.class));
         modulith.withPropertyValues("saga-forge.transport.modulith-interop=false").run(context ->
-                assertThat(context.getBean(MessageLog.class)).isInstanceOf(PostgresMessageLog.class));
+                assertThat(context.getBean(MessageStore.class)).isInstanceOf(PostgresMessageStore.class));
     }
 
     @Test
-    @DisplayName("a host-defined MessageLog wins")
+    @DisplayName("a host-defined MessageStore wins")
     void hostLogWins() {
-        MessageLog own = stub(MessageLog.class);
-        withDatabase().withBean(MessageLog.class, () -> own)
-                .run(context -> assertThat(context.getBean(MessageLog.class)).isSameAs(own));
+        MessageStore own = stub(MessageStore.class);
+        withDatabase().withBean(MessageStore.class, () -> own)
+                .run(context -> assertThat(context.getBean(MessageStore.class)).isSameAs(own));
     }
 
     /** An interface implementation whose methods do nothing; enough for bean conditions. */

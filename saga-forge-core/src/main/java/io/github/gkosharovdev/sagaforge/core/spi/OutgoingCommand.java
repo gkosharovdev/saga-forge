@@ -3,7 +3,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 
 /**
- * A {@code @Command(delivery = LOGGED)} command sent in a unit of work, as carried by {@link OutgoingMessages}
+ * A {@code @Command(delivery = OUTBOX)} command sent in a unit of work, as carried by {@link OutgoingMessages}
  * ({@code specs/007-in-memory-transport} research §3).
  *
  * @param commandId the identity assigned when the command was sent; non-null

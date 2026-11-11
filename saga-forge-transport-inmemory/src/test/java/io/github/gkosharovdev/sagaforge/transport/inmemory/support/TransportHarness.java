@@ -9,8 +9,8 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaConte
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.engine.SagaEngine;
 import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.engine.support.TransactionalInMemoryStorageProvider;
@@ -21,7 +21,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentServi
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
 
 /**
- * Engine + {@link InMemoryTransport} + {@link InMemoryMessageLog} + in-memory saga storage, assembled as in
+ * Engine + {@link InMemoryTransport} + {@link InMemoryMessageStore} + in-memory saga storage, assembled as in
  * contracts/in-memory-transport.md (tasks.md T029). {@link #restart()} builds a new engine and transport over the same
  * storage and log, as a restarted process would. The services are shared across restarts.
  */
@@ -35,7 +35,7 @@ public final class TransportHarness implements AutoCloseable {
     public final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
     public final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     public final InMemorySagaContextStore contexts = new InMemorySagaContextStore();
-    public final InMemoryMessageLog log = new InMemoryMessageLog();
+    public final InMemoryMessageStore log = new InMemoryMessageStore();
     public final PaymentService payments = new PaymentService();
     public final ShippingService shipping = new ShippingService();
     public final CardService cards = new CardService();
@@ -53,7 +53,7 @@ public final class TransportHarness implements AutoCloseable {
     }
 
     private void assemble() {
-        transport = InMemoryTransport.builder().log(log).transactions(boundary).settings(settings).build();
+        transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).settings(settings).build();
         engine = SagaEngine.builder()
                 .register(model)
                 .storage(storage)
@@ -117,7 +117,7 @@ public final class TransportHarness implements AutoCloseable {
     /** Waits until every visible message is consumed or set aside. */
     public void awaitQuiet(Duration timeout) {
         await(() -> !log.all().isEmpty() && log.all().stream()
-                .allMatch(m -> m.status() != MessageStatus.UNCONSUMED), timeout, "the log to become quiet");
+                .allMatch(m -> m.status() != MessageStatus.UNCONSUMED), timeout, "the store to become quiet");
     }
 
     /** Waits until {@code condition} holds. */
@@ -146,8 +146,8 @@ public final class TransportHarness implements AutoCloseable {
         return instancesOf(sagaType).stream().filter(i -> i.status() == status).findFirst();
     }
 
-    /** @return the messages of {@code payloadType} in the log */
-    public List<LoggedMessage> messagesOf(Class<?> payloadType) {
+    /** @return the messages of {@code payloadType} in the store */
+    public List<StoredMessage> messagesOf(Class<?> payloadType) {
         return log.all().stream().filter(m -> m.payloadType().equals(payloadType.getName())).toList();
     }
 

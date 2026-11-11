@@ -3,7 +3,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 /**
  * SPI receiving the outgoing messages of a committed unit of work, one {@link OutgoingMessages} batch per unit
  * of work: its buffered domain events and, since {@code specs/007-in-memory-transport}, its
- * {@code @Command(delivery = LOGGED)} commands. Named {@code EventHandoff} (with {@code handOff}) before 007. The default implementation ({@code ImmediateDispatchOutbox} in {@code saga-forge-engine}) calls
+ * {@code @Command(delivery = OUTBOX)} commands. Named {@code EventHandoff} (with {@code handOff}) before 007. The default implementation ({@code ImmediateDispatchOutbox} in {@code saga-forge-engine}) calls
  * {@link EventDispatcher#dispatch(Object)} for each event after commit; a transactional outbox can take its place
  * without an engine change.
  *
@@ -72,13 +72,13 @@ public interface Outbox {
     /**
      * Receives the outgoing messages of one unit of work.
      *
-     * @param batch the unit of work's events, logged commands and identity; never {@code null}, never empty
+     * @param batch the unit of work's events, outbox commands and identity; never {@code null}, never empty
      */
     void store(OutgoingMessages batch);
 
     /**
-     * Reports whether this outbox can store {@code @Command(delivery = LOGGED)} commands. The engine refuses to start
-     * with a model that sends logged commands to an outbox that cannot ({@code specs/007-in-memory-transport}).
+     * Reports whether this outbox can store {@code @Command(delivery = OUTBOX)} commands. The engine refuses to start
+     * with a model that sends outbox commands to an outbox that cannot ({@code specs/007-in-memory-transport}).
      *
      * @return {@code false} unless overridden
      */

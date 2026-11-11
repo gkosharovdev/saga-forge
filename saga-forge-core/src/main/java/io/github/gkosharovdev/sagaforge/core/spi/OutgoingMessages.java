@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * The outgoing messages of one committed unit of work, as given to {@link Outbox#store(OutgoingMessages)}: the
- * buffered events and, since {@code specs/007-in-memory-transport}, the {@code @Command(delivery = LOGGED)} commands
+ * buffered events and, since {@code specs/007-in-memory-transport}, the {@code @Command(delivery = OUTBOX)} commands
  * sent in it. Named {@code HandedOffEvents} before 007.
  *
  * @param unitOfWorkId the unit of work's identifier, unique per unit of work, saga-scoped or not; non-null
@@ -13,7 +13,7 @@ import java.util.List;
  * @param sagaId       the owning instance; non-null if and only if the unit of work is saga-scoped
  * @param events       the events, in recording order; non-null, no {@code null} element; an unmodifiable defensive
  *                     copy
- * @param commands     the logged commands, in send order; non-null, no {@code null} element; an unmodifiable
+ * @param commands     the outbox commands, in send order; non-null, no {@code null} element; an unmodifiable
  *                     defensive copy
  * @throws IllegalArgumentException if {@code unitOfWorkId}, {@code events}, {@code commands} or an element of them is
  *                                  {@code null}, if both {@code events} and {@code commands} are empty, or if exactly

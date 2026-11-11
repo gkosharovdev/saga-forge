@@ -10,25 +10,25 @@ import io.github.gkosharovdev.sagaforge.engine.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 
-/** A transport over an {@link InMemoryMessageLog} with a test receiver, no engine. */
+/** A transport over an {@link InMemoryMessageStore} with a test receiver, no engine. */
 public final class TransportUnderTest implements AutoCloseable {
 
     public final InMemoryTransactionBoundary boundary;
-    public final InMemoryMessageLog log;
+    public final InMemoryMessageStore log;
     public final RecordingLogger logger = new RecordingLogger();
     public final RecordingReceiver receiver;
     public final InMemoryTransport transport;
 
     public TransportUnderTest(TransportSettings settings, Function<Object, HandlingReport> receive) {
-        this(new InMemoryTransactionBoundary(), new InMemoryMessageLog(), settings, receive);
+        this(new InMemoryTransactionBoundary(), new InMemoryMessageStore(), settings, receive);
     }
 
-    public TransportUnderTest(InMemoryTransactionBoundary boundary, InMemoryMessageLog log, TransportSettings settings,
+    public TransportUnderTest(InMemoryTransactionBoundary boundary, InMemoryMessageStore log, TransportSettings settings,
             Function<Object, HandlingReport> receive) {
         this.boundary = boundary;
         this.log = log;
         this.receiver = new RecordingReceiver(receive);
-        this.transport = InMemoryTransport.builder().log(log).transactions(boundary).settings(settings)
+        this.transport = InMemoryTransport.builder().messageStore(log).transactions(boundary).settings(settings)
                 .logger((Logger) logger).build();
     }
 

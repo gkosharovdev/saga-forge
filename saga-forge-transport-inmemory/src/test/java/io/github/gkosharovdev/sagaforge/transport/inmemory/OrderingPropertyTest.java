@@ -10,8 +10,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.core.spi.log.LoggedMessage;
-import io.github.gkosharovdev.sagaforge.core.spi.log.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportUnderTest;
 import net.jqwik.api.Arbitraries;
@@ -67,7 +67,7 @@ class OrderingPropertyTest {
                 List<Object> expected = t.log.all().stream()
                         .filter(m -> m.status() == MessageStatus.CONSUMED && ((Unrouted) m.payload()).orderId()
                                 .equals(key))
-                        .map(LoggedMessage::payload).toList();
+                        .map(StoredMessage::payload).toList();
                 List<Object> actual = succeeded.stream().filter(e -> ((Unrouted) e).orderId().equals(key)).toList();
                 assertThat(actual).usingElementComparator((x, y) -> x == y ? 0 : 1).isEqualTo(expected);
             }

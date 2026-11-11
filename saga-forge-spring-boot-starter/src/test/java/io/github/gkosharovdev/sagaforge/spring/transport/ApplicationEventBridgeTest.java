@@ -15,7 +15,7 @@ import io.github.gkosharovdev.sagaforge.engine.support.InMemoryTransactionBounda
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Unrouted;
-import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageLog;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 
 /** FR-027 (tasks.md T074): delivered events are re-published as application events; listener failures are ignored. */
 class ApplicationEventBridgeTest {
@@ -23,8 +23,8 @@ class ApplicationEventBridgeTest {
     @Test
     @DisplayName("each delivered event is published once; a failing publisher changes nothing")
     void republishes() {
-        InMemoryMessageLog log = new InMemoryMessageLog();
-        InMemoryTransport transport = InMemoryTransport.builder().log(log)
+        InMemoryMessageStore log = new InMemoryMessageStore();
+        InMemoryTransport transport = InMemoryTransport.builder().messageStore(log)
                 .transactions(new InMemoryTransactionBoundary())
                 .settings(TransportSettings.defaults().withPollInterval(Duration.ofMillis(20))).build();
         List<Object> published = new CopyOnWriteArrayList<>();

@@ -25,7 +25,7 @@ import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.core.spi.LoggedCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 
@@ -150,9 +150,9 @@ final class EngineCommandGateway implements CommandGateway {
         try {
             requireCommand(command);
             CommandRoute route = routeFor(command);
-            boolean logged = isLogged(command);
+            boolean logged = isOutbox(command);
             if (logged && !outboxStoresCommands) {
-                throw new IllegalStateException("Command " + command.getClass().getName() + " is delivered LOGGED, "
+                throw new IllegalStateException("Command " + command.getClass().getName() + " is delivered OUTBOX, "
                         + "but the engine's Outbox does not support commands; use a transport whose outbox does, "
                         + "such as the in-memory transport");
             }
@@ -163,7 +163,7 @@ final class EngineCommandGateway implements CommandGateway {
             }
             if (logged) {
                 // 007 research §3: stored with the unit of work, handled after it commits, never if it rolls back.
-                unitOfWork.recordLoggedCommand(new OutgoingCommand(id, command));
+                unitOfWork.recordOutboxCommand(new OutgoingCommand(id, command));
                 unitOfWork.commandHandled(id);
                 return;
             }
@@ -180,12 +180,12 @@ final class EngineCommandGateway implements CommandGateway {
     }
 
     /**
-     * Handles a logged command delivered by a transport ({@code CommandReceiver}, 007 research §3): a new non-saga
+     * Handles a outbox command delivered by a transport ({@code CommandReceiver}, 007 research §3): a new non-saga
      * unit of work, the handler with the delivery's {@code CommandId} bound, then {@code inTransaction} before commit.
      *
      * @throws IllegalStateException if a unit of work is running on this thread
      */
-    void receive(LoggedCommand delivery) {
+    void receive(OutboxCommand delivery) {
         if (delivery == null) {
             throw new IllegalArgumentException("delivery must not be null");
         }
@@ -193,7 +193,7 @@ final class EngineCommandGateway implements CommandGateway {
         requireCommand(command);
         if (UnitOfWork.bound().isPresent()) {
             throw new IllegalStateException("CommandReceiver.receive was called inside a unit of work; a transport "
-                    + "delivers logged commands from its own threads");
+                    + "delivers outbox commands from its own threads");
         }
         CommandRoute route = routeFor(command);
         nonSagaUnitsOfWork.get().run(() -> {
@@ -207,8 +207,8 @@ final class EngineCommandGateway implements CommandGateway {
         });
     }
 
-    private static boolean isLogged(Object command) {
-        return command.getClass().getAnnotation(Command.class).delivery() == CommandDelivery.LOGGED;
+    private static boolean isOutbox(Object command) {
+        return command.getClass().getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX;
     }
 
     private CommandRoute routeFor(Object command) {

@@ -18,7 +18,7 @@ public @interface Command {
 
     /**
      * How the command reaches its handler; {@link CommandDelivery#IN_UNIT_OF_WORK} unless the type opts into the
-     * message log with {@link CommandDelivery#LOGGED} ({@code specs/007-in-memory-transport} FR-010).
+     * message store with {@link CommandDelivery#OUTBOX} ({@code specs/007-in-memory-transport} FR-010).
      *
      * @return the delivery of this command type
      */
