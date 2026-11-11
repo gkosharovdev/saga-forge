@@ -10,9 +10,9 @@ import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
 /**
- * Starts the transport with the application and stops it first on shutdown ({@code specs/007-in-memory-transport}
- * FR-020, FR-029). Starts the host's {@link SagaRuntime} bean if it is not started yet, then
- * {@code transport.start(runtime, runtime.commandReceiver())}. Without a {@code SagaRuntime} bean it does nothing.
+ * Starts the transport with the application, after the {@link SagaRuntime} started, and stops it first on shutdown
+ * ({@code specs/007-in-memory-transport} FR-020, {@code specs/008-spring-boot-starter} FR-005). Without a started
+ * {@code SagaRuntime} it does nothing.
  */
 public final class TransportLifecycle implements SmartLifecycle {
 
@@ -40,7 +40,8 @@ public final class TransportLifecycle implements SmartLifecycle {
             return;
         }
         if (!runtime.isStarted()) {
-            runtime.start();
+            // SagaRuntimeLifecycle starts the runtime one phase earlier (008); without it there is nothing to deliver to.
+            return;
         }
         EventReceiver receiver = runtime;
         for (EventReceiverCustomizer customizer : customizers.orderedStream().toList()) {

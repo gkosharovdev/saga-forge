@@ -19,9 +19,10 @@ engine assembly stay in the later starter feature (G-007-02); the host still bui
 - `TransportLifecycle` (`SmartLifecycle`, phase after the host's engine lifecycle): `start()` calls
   `transport.start(engine, engine.commandReceiver())` using the `SagaEngine` bean; `stop()` calls
   `transport.stop(spring.lifecycle.timeout-per-shutdown-phase)`.
-- `ApplicationEventBridge` (on by default when `saga-forge.transport.publish-application-events` is not `false`): registers
-  `transport.onDelivered(...)` and re-publishes each delivered event's payload through `ApplicationEventPublisher`
-  outside any transaction (FR-027).
+- `ApplicationEventBridge`: registers `transport.onDelivered(...)` and re-publishes each delivered event's payload
+  through `ApplicationEventPublisher` outside any transaction (FR-027). Since `specs/008-spring-boot-starter` it is
+  active only with `saga-forge.application-events.mode=after-delivery`; the default `in-transaction` publishes every
+  recorded event inside the unit of work instead, and `saga-forge.transport.publish-application-events` is gone.
 
 ## Spring Modulith interop (`ModulithInteropConfiguration`, conditional on an `EventPublicationRegistry` bean and `saga-forge.transport.modulith-interop != false`)
 

@@ -3,24 +3,14 @@ package io.github.gkosharovdev.sagaforge.spring;
 import java.util.List;
 import java.util.Map;
 
-import javax.sql.DataSource;
 
 import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.PlatformTransactionManager;
 
-import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
-import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
-import io.github.gkosharovdev.sagaforge.spring.transport.EventReceiverCustomizer;
-import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresSagaContextStore;
-import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresStorageProvider;
+import io.github.gkosharovdev.sagaforge.spring.acceptance.AcceptanceApp;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
@@ -31,16 +21,16 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportAcce
 
 /**
  * A Spring Boot application context hosting the acceptance model over Testcontainers Postgres
- * (specs/007-in-memory-transport SC-008): the starter's transport configuration wires the transport; the application
- * builds its {@link SagaRuntime} bean. With {@code modulith} the Spring Modulith JDBC registry is active, otherwise its
+ * (specs/007-in-memory-transport SC-008): the starter assembles the runtime from {@link AcceptanceApp}'s beans and the
+ * acceptance model ({@code specs/008-spring-boot-starter} SC-006). With {@code modulith} the Spring Modulith JDBC registry is active, otherwise its
  * auto-configurations are excluded. A restart closes the context and opens a new one; the services survive it.
  */
 public final class SpringSetup implements TransportAcceptanceSuite.Setup {
 
     /** Services shared across restarts, as an external system would be. */
-    static final ThreadLocal<Services> SERVICES = new ThreadLocal<>();
+    public static final ThreadLocal<Services> SERVICES = new ThreadLocal<>();
 
-    record Services(PaymentService payments, ShippingService shipping, CardService cards, FlakyReceiver[] receiver) {
+    public record Services(PaymentService payments, ShippingService shipping, CardService cards, FlakyReceiver[] receiver) {
     }
 
     private final boolean modulith;
@@ -56,7 +46,7 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
 
     private void open() {
         SERVICES.set(services);
-        SpringApplicationBuilder builder = new SpringApplicationBuilder(App.class).web(WebApplicationType.NONE)
+        SpringApplicationBuilder builder = new SpringApplicationBuilder(AcceptanceApp.class).web(WebApplicationType.NONE)
                 .properties(Map.of(
                         "saga-forge.transport.workers", "2",
                         "saga-forge.transport.max-attempts", "3",
@@ -131,56 +121,5 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
 
     public JdbcTemplate jdbc() {
         return new JdbcTemplate(StarterPostgres.dataSource());
-    }
-
-    /** The application: its own DataSource, transaction manager, services and runtime. */
-    @Configuration(proxyBeanMethods = false)
-    @EnableAutoConfiguration
-    static class App {
-
-        @Bean
-        DataSource dataSource() {
-            return StarterPostgres.dataSource();
-        }
-
-        @Bean
-        PlatformTransactionManager transactionManager(DataSource dataSource) {
-            return new DataSourceTransactionManager(dataSource);
-        }
-
-        @Bean
-        JdbcTemplate jdbcTemplate(DataSource dataSource) {
-            return new JdbcTemplate(dataSource);
-        }
-
-        @Bean
-        Services services() {
-            return SERVICES.get();
-        }
-
-        @Bean
-        SagaRuntime sagaRuntime(DataSource dataSource, TransactionBoundary transactions, InMemoryTransport transport,
-                Services services) {
-            SagaRuntime runtime = SagaRuntime.builder()
-                    .register(TransportAcceptanceSuite.MODEL)
-                    .storage(new PostgresStorageProvider(dataSource, transactions))
-                    .contextStore(new PostgresSagaContextStore(dataSource))
-                    .transactions(transactions)
-                    .dispatcher(transport.dispatcher())
-                    .outbox(transport.outbox())
-                    .handlerInstances(new MapHandlerInstanceProvider().register(services.payments())
-                            .register(services.shipping()).register(services.cards()))
-                    .build();
-            return runtime;
-        }
-
-        /** Lets tests fail deliveries, through the starter's customizer hook. */
-        @Bean
-        EventReceiverCustomizer flakyDeliveries(Services services) {
-            return receiver -> {
-                services.receiver()[0] = new FlakyReceiver(receiver);
-                return services.receiver()[0];
-            };
-        }
     }
 }

@@ -22,6 +22,7 @@
         <module>saga-forge-transport-kafka</module>
         <module>saga-forge-spring-boot-starter</module>
         <module>saga-forge-example</module>
+        <module>saga-forge-example-spring</module>
     </modules>
 
     <properties>

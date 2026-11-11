@@ -1,0 +1,111 @@
+{
+  "properties": [
+    {
+      "name": "saga-forge.transport.workers",
+      "type": "java.lang.Integer",
+      "defaultValue": 4,
+      "description": "Delivery threads of the in-memory transport; messages with the same ordering key (aggregate) always use the same one."
+    },
+    {
+      "name": "saga-forge.transport.max-attempts",
+      "type": "java.lang.Integer",
+      "defaultValue": 10,
+      "description": "Failed deliveries of a message before it is set aside for an operator."
+    },
+    {
+      "name": "saga-forge.transport.initial-backoff",
+      "type": "java.time.Duration",
+      "defaultValue": "1s",
+      "description": "Wait after a message's first failed delivery; doubled per further failure."
+    },
+    {
+      "name": "saga-forge.transport.max-backoff",
+      "type": "java.time.Duration",
+      "defaultValue": "1m",
+      "description": "Longest wait between delivery attempts of a message."
+    },
+    {
+      "name": "saga-forge.transport.lease-duration",
+      "type": "java.time.Duration",
+      "defaultValue": "5m",
+      "description": "How long a leased message is reserved for this application instance before another may take it."
+    },
+    {
+      "name": "saga-forge.transport.poll-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "500ms",
+      "description": "Longest wait between polls of the message store when nothing signals new messages."
+    },
+    {
+      "name": "saga-forge.transport.lease-batch-size",
+      "type": "java.lang.Integer",
+      "defaultValue": 100,
+      "description": "Most messages leased at once."
+    },
+    {
+      "name": "saga-forge.transport.retention",
+      "type": "java.time.Duration",
+      "defaultValue": "7d",
+      "description": "How long consumed messages are kept in the message store."
+    },
+    {
+      "name": "saga-forge.transport.retention-sweep-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "1h",
+      "description": "How often consumed messages older than the retention are removed."
+    },
+    {
+      "name": "saga-forge.transport.heartbeat-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "30s",
+      "description": "How often this application instance refreshes its heartbeat in the message store."
+    },
+    {
+      "name": "saga-forge.transport.modulith-interop",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether the transport stores its messages in Spring Modulith's event publication registry when it is present, so the application has one outbox."
+    }
+  ],
+  "hints": [
+    {
+      "name": "saga-forge.storage.type",
+      "values": [
+        {
+          "value": "postgres",
+          "description": "saga-forge-storage-postgres."
+        }
+      ]
+    },
+    {
+      "name": "saga-forge.storage.postgres.initialize-schema",
+      "values": [
+        {
+          "value": "never",
+          "description": "Never create tables; missing tables fail startup. For Flyway or Liquibase users."
+        },
+        {
+          "value": "always",
+          "description": "Create Saga Forge's tables from schema.sql when none exist; never alters existing tables."
+        }
+      ]
+    },
+    {
+      "name": "saga-forge.application-events.mode",
+      "values": [
+        {
+          "value": "in-transaction",
+          "description": "Publish every recorded domain event through Spring's ApplicationEventPublisher inside the unit of work's transaction (Spring Modulith listeners)."
+        },
+        {
+          "value": "after-delivery",
+          "description": "Publish an event as an application event when the transport delivers it, after the recording transaction committed."
+        },
+        {
+          "value": "none",
+          "description": "Do not publish recorded domain events as application events."
+        }
+      ]
+    }
+  ]
+}

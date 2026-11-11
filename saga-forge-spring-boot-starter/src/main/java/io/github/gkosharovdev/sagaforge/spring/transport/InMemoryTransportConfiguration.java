@@ -2,8 +2,6 @@ package io.github.gkosharovdev.sagaforge.spring.transport;
 
 import java.time.Duration;
 
-import javax.sql.DataSource;
-
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -11,42 +9,31 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.transaction.PlatformTransactionManager;
 
+import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
-import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
-import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
+import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 
 /**
- * Spring wiring of the in-memory transport only ({@code specs/007-in-memory-transport} FR-029,
- * contracts/spring-wiring.md): the host's transaction manager as {@link TransactionBoundary}, a Postgres
- * {@link MessageStore}, a Spring-managed executor, start and stop with the application context, and the optional
- * application-event bridge. The host still builds its {@code SagaRuntime} bean, passing
- * {@code transport.dispatcher()} and {@code transport.outbox()}.
+ * The in-memory transport (007), the default when no broker transport is on the class path
+ * ({@code specs/008-spring-boot-starter} FR-008): a managed executor, the transport over the {@link MessageStore}, its
+ * {@link EventDispatcher} and {@link Outbox} as beans for the runtime, and the {@link TransportLifecycle} that starts it
+ * around the started runtime and stops it first.
  */
-@AutoConfiguration(afterName = {
-        "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
-        "org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration",
-        "org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration" })
+@AutoConfiguration(after = { SpringTransactionConfiguration.class, PostgresStorageConfiguration.class })
+@ConditionalOnProperty(prefix = "saga-forge", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnClass(InMemoryTransport.class)
-@ConditionalOnBean({ DataSource.class, PlatformTransactionManager.class })
+@ConditionalOnBean({ MessageStore.class, TransactionBoundary.class })
 @EnableConfigurationProperties(TransportProperties.class)
 public class InMemoryTransportConfiguration {
-
-    @Bean
-    @ConditionalOnMissingBean(TransactionBoundary.class)
-    public SpringTransactionBoundary sagaForgeTransactionBoundary(PlatformTransactionManager transactionManager,
-            DataSource dataSource) {
-        return new SpringTransactionBoundary(transactionManager, dataSource);
-    }
 
     @Bean(name = "sagaForgeTransportExecutor")
     @ConditionalOnMissingBean(name = "sagaForgeTransportExecutor")
@@ -63,8 +50,20 @@ public class InMemoryTransportConfiguration {
     @ConditionalOnMissingBean
     public InMemoryTransport sagaForgeInMemoryTransport(MessageStore messageStore, TransactionBoundary transactions,
             TransportProperties properties, ThreadPoolTaskExecutor sagaForgeTransportExecutor) {
-        return InMemoryTransport.builder().messageStore(messageStore).transactions(transactions).settings(properties.toSettings())
-                .executor(sagaForgeTransportExecutor).build();
+        return InMemoryTransport.builder().messageStore(messageStore).transactions(transactions)
+                .settings(properties.toSettings()).executor(sagaForgeTransportExecutor).build();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(EventDispatcher.class)
+    public EventDispatcher sagaForgeEventDispatcher(InMemoryTransport transport) {
+        return transport.dispatcher();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(Outbox.class)
+    public Outbox sagaForgeOutbox(InMemoryTransport transport) {
+        return transport.outbox();
     }
 
     @Bean
@@ -75,26 +74,5 @@ public class InMemoryTransportConfiguration {
         Duration timeout = environment.getProperty("spring.lifecycle.timeout-per-shutdown-phase", Duration.class,
                 Duration.ofSeconds(30));
         return new TransportLifecycle(transport, runtimes, customizers, timeout);
-    }
-
-    @Bean
-    @ConditionalOnProperty(prefix = "saga-forge.transport", name = "publish-application-events",
-            havingValue = "true", matchIfMissing = true)
-    public ApplicationEventBridge sagaForgeApplicationEventBridge(InMemoryTransport transport,
-            ApplicationEventPublisher publisher) {
-        return new ApplicationEventBridge(transport, publisher);
-    }
-
-    /** The Postgres message store, when the Postgres module is present and no other log is defined. */
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(PostgresMessageStore.class)
-    static class PostgresLogConfiguration {
-
-        @Bean
-        @ConditionalOnMissingBean(MessageStore.class)
-        public PostgresMessageStore sagaForgeMessageStore(DataSource dataSource, TransactionBoundary transactions) {
-            return new PostgresMessageStore(dataSource, transactions, InMemoryTransportConfiguration.class
-                    .getClassLoader());
-        }
     }
 }

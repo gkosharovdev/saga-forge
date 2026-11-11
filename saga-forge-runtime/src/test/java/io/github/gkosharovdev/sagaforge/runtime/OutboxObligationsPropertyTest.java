@@ -102,6 +102,9 @@ class OutboxObligationsPropertyTest {
         assertThat(committed).extracting(batch -> new Expected(batch.sagaType(), batch.events()))
                 .containsExactlyElementsOf(expected);
         assertThat(committed).extracting(OutgoingMessages::unitOfWorkId).doesNotHaveDuplicates();
+        // 008: recordedEvents holds every handed-on event, in the same relative order.
+        assertThat(committed).allSatisfy(batch ->
+                assertThat(batch.recordedEvents()).containsSubsequence(batch.events()));
         assertThat(committed).allSatisfy(batch ->
                 assertThat(batch.sagaId() == null).isEqualTo(batch.sagaType() == null));
     }

@@ -42,6 +42,7 @@ public final class CapturingOutbox implements Outbox {
     private final List<OutgoingMessages> notified = new CopyOnWriteArrayList<>();
     private final AtomicReference<RuntimeException> nextNotificationFailure = new AtomicReference<>();
     private volatile boolean commands;
+    private volatile boolean observing;
 
     private CapturingOutbox(Timing timing, InMemoryTransactionBoundary boundary, Outbox delegate) {
         this.timing = timing;
@@ -115,6 +116,17 @@ public final class CapturingOutbox implements Outbox {
         if (injected != null) {
             throw injected;
         }
+    }
+
+    @Override
+    public boolean observesRecordedEvents() {
+        return observing;
+    }
+
+    /** @return this outbox, now reporting {@link #observesRecordedEvents()} as {@code true} (008) */
+    public CapturingOutbox observingRecordedEvents() {
+        observing = true;
+        return this;
     }
 
     /** @return this outbox, now reporting {@link #supportsCommands()} as {@code true} */

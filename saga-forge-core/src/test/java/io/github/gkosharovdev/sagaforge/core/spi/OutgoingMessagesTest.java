@@ -128,4 +128,19 @@ class OutgoingMessagesTest {
         assertThatThrownBy(() -> new OutgoingCommand(CommandId.unscoped("com.example.Pay"), null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("008: recordedEvents defaults to events and may stand alone; nulls are rejected")
+    void recordedEvents() {
+        assertThat(new OutgoingMessages(UOW, null, null, List.of(FIRST)).recordedEvents()).containsExactly(FIRST);
+        var onlyRecorded = new OutgoingMessages(UOW, SAGA_TYPE, SAGA_ID, List.of(), List.of(), List.of(FIRST, SECOND));
+        assertThat(onlyRecorded.events()).isEmpty();
+        assertThat(onlyRecorded.recordedEvents()).containsExactly(FIRST, SECOND);
+        assertThatThrownBy(() -> new OutgoingMessages(UOW, null, null, List.of(), List.of(), List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OutgoingMessages(UOW, null, null, List.of(FIRST), List.of(), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OutgoingMessages(UOW, null, null, List.of(FIRST), List.of(),
+                Arrays.asList(FIRST, null))).isInstanceOf(IllegalArgumentException.class);
+    }
 }
