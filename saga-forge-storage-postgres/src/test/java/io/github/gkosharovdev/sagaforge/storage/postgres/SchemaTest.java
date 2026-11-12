@@ -308,6 +308,34 @@ class SchemaTest {
         }
     }
 
+    @Test
+    @DisplayName("010: schema-upgrade-010.sql adds trace_context to a 007 message store and is idempotent")
+    void upgradeScript010Applies() throws SQLException {
+        try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("DROP SCHEMA IF EXISTS pre010 CASCADE");
+            statement.execute("CREATE SCHEMA pre010");
+            statement.execute("SET search_path TO pre010");
+            try {
+                for (String script : new String[] {"schema-before-006.sql", "schema-upgrade-006.sql",
+                        "schema-upgrade-007.sql", "schema-upgrade-010.sql", "schema-upgrade-010.sql"}) {
+                    for (String sql : PostgresTestSupport.statements(script)) {
+                        statement.execute(sql);
+                    }
+                }
+                try (ResultSet column = statement.executeQuery("SELECT data_type FROM information_schema.columns"
+                        + " WHERE table_schema = 'pre010' AND table_name = 'saga_message_store'"
+                        + " AND column_name = 'trace_context'")) {
+                    assertThat(column.next()).isTrue();
+                    assertThat(column.getString(1)).isEqualTo("jsonb");
+                }
+            } finally {
+                statement.execute("SET search_path TO public");
+                statement.execute("DROP SCHEMA pre010 CASCADE");
+            }
+        }
+    }
+
     private static void execute(String sql, Object... params) throws SQLException {
         try (Connection connection = PostgresTestSupport.newDataSource().getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {

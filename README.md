@@ -194,7 +194,9 @@ from a durable message store written in the same transaction as the saga state, 
 restart. The Spring Boot starter (feature 008) assembles and starts the runtime from the application's beans,
 `DataSource` and Spring Data repositories, publishes saga events to Spring Modulith's module listeners, and reports
 the message store through Actuator. The saga test fixture (feature 009, `saga-forge-test`) runs a saga's given/when/then
-tests on the shipped runtime, in memory, with no database, transport or Spring context. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
+tests on the shipped runtime, in memory, with no database, transport or Spring context. The runtime and the
+in-memory transport instrument themselves with the OpenTelemetry API (feature 010): saga spans join the request's trace,
+also across the message store and restarts, and saga metrics feed dashboards and alerts. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
 Quarkus extension. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
@@ -311,6 +313,97 @@ predictable. A `SagaContext` value Postgres cannot store, such as a `BigDecimal`
 wrote it. A failed expectation names the saga, the association value, the event, the steps that ran and the
 expected and actual values. The reference tests are `OrderProcessingSagaFixtureTest` in `saga-forge-example`; the
 [fixture README](saga-forge-test/README.md) covers every expectation.
+
+
+## Observability
+
+The runtime and the in-memory transport instrument themselves with the OpenTelemetry API
+(`io.opentelemetry:opentelemetry-api`). Without an OpenTelemetry SDK nothing is recorded and nothing changes. With
+one, every saga unit of work, step, command and compensation is a span in the trace of the code that published the
+start event, also when the message store delivers an event later or after a restart. Saga metrics count starts,
+outcomes, retries and compensations, time each step, and report the message store's backlog.
+
+**Spring Boot**: nothing to add if the application already traces with OpenTelemetry (Spring Boot's OpenTelemetry
+setup, or Micrometer Tracing's OpenTelemetry bridge). The starter passes the application's `OpenTelemetry` bean along;
+`saga-forge.telemetry.*` switches tracing, metrics and the optional details (see the
+[starter README](saga-forge-spring-boot-starter/README.md#with-opentelemetry)).
+
+**Plain Java**: give the runtime and the transport the same instance:
+
+```java
+InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(transactions)
+        .openTelemetry(openTelemetry).build();
+SagaRuntime runtime = SagaRuntime.builder()
+        .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
+        .storage(storage).contextStore(contexts).transactions(transactions)
+        .dispatcher(transport.dispatcher()).outbox(transport.outbox())
+        .openTelemetry(openTelemetry)
+        .telemetry(SagaTelemetrySettings.defaults())          // optional
+        .build();
+```
+
+**Privacy**: spans carry saga types, step and command names, generated ids (saga id, command id), outcomes and the
+failure's type. Association values (an order id), event and command contents, and failure messages are recorded only
+when switched on (`SagaTelemetrySettings.withRecordAssociationValues(true)`, `withRecordContents(true)`,
+`withRecordFailureMessages(true)`). Metrics carry only the saga type, step, command type, outcome and failure
+classification, so their series never grow with traffic.
+
+**Postgres**: the trace context is stored with each message in `saga_message_store.trace_context`; existing databases
+apply `schema-upgrade-010.sql`.
+
+### Telemetry reference
+
+Spans (instrumentation scope `io.github.gkosharovdev.sagaforge`):
+
+| Span | Kind | One per | Attributes (always) | Details |
+|---|---|---|---|---|
+| `saga_forge.handle` | internal | saga type and instance an event reaches | `saga_forge.saga.type`, `saga_forge.event.type`, `saga_forge.handling.outcome`, `saga_forge.saga.started`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`; association value\*, content\* |
+| `saga_forge.attempt` | internal | attempt of a unit of work | `saga_forge.saga.type`, `saga_forge.attempt.result`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id`, `saga_forge.attempt.number` |
+| `saga_forge.step` | internal | step run | `saga_forge.saga.type`, `saga_forge.step`, `error.type` | `saga_forge.saga.id` |
+| `saga_forge.command` | internal | command handling | `saga_forge.command.type`, `saga_forge.command.delivery`, `saga_forge.command.result`, `error.type` | `saga_forge.command.id`, `saga_forge.step`, `saga_forge.saga.id`, content\* |
+| `saga_forge.compensation` | internal | compensation | `saga_forge.saga.type`, `saga_forge.step`, `saga_forge.compensation.status`, `saga_forge.compensation.trigger` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id` |
+| `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt` |
+| `saga_forge.event.ignored` | internal | event no saga type reacts to | `saga_forge.event.type` | content\* |
+
+Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.saga.ended` (`saga_forge.saga.outcome`),
+`saga_forge.retry.scheduled` (`saga_forge.attempt.number`, `saga_forge.retry.wait` in ms),
+`saga_forge.compensation.started`. \* off by default; failure messages (`saga_forge.failure.message` and exception
+events) likewise.
+
+Metrics:
+
+| Metric | Instrument | Unit | Attributes |
+|---|---|---|---|
+| `saga_forge.handle.duration`, `.attempt.duration`, `.step.duration`, `.command.duration`, `.compensation.duration`, `.delivery.duration` | histogram | s | the span's low-cardinality attributes |
+| `saga_forge.saga.started` | counter | — | `saga_forge.saga.type` |
+| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `requires_intervention`) |
+| `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
+| `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
+| `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
+| `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+
+Runtime log lines written inside a unit of work carry `traceId=` and `spanId=`.
+
+Example alerts, in PromQL, assuming the OpenTelemetry-to-Prometheus name translation (dots become underscores,
+counters gain `_total`, units become suffixes):
+
+```promql
+# Sagas failing or needing intervention, per saga type
+sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|requires_intervention"}[5m])) > 0
+
+# Compensations as a share of finished sagas
+sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]))
+  / sum(rate(saga_forge_saga_ended_total[15m])) > 0.05
+
+# Retries exhausted
+sum by (saga_forge_saga_type, saga_forge_step) (increase(saga_forge_retry_exhausted_total[15m])) > 0
+
+# Messages set aside for an operator
+saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
+
+# Delivery falling behind
+saga_forge_message_store_oldest_unconsumed_age_seconds > 60
+```
 
 ## Vocabulary
 

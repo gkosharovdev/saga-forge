@@ -79,7 +79,8 @@
   10k-message restart, Spring own-log and Spring Modulith interop acceptance) passed on 2026-11-11. The whole build
   with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests). With 009 (the fixture,
   the interceptor and the example fixture tests) the whole build, container suites included, passed on 2026-11-12
-  (1,574 tests).
+  (1,574 tests). With 010 (OpenTelemetry instrumentation) the whole build, container suites included, passed on
+  2026-11-12 (1,612 tests; the opt-in `TelemetryOverheadTest` skipped).
 - Implemented and tested, including container suites, added by `specs/008-spring-boot-starter`: the Spring Boot
   starter assembles and starts the runtime with no host code. It collects the model (auto-configuration packages,
   beans, `saga-forge.scan-packages`, `SagaModelContributor`), detects storage (`saga-forge.storage.type` when
@@ -104,6 +105,18 @@
   `FixtureParityTest` compares the fixture with a hand-assembled runtime; `DurableContextValueContractTest` (Postgres)
   ties the value rule to `JsonCodec`. Both examples ship fixture tests; the canonical saga now keeps its amount as a
   `String` in `SagaContext`, like the Spring example.
+- Implemented and tested, including container suites, added by `specs/010-otel-observability`: OpenTelemetry
+  instrumentation. `saga-forge-runtime` and `saga-forge-transport-inmemory` depend on `opentelemetry-api` (1.62.0, the
+  version Spring Boot 4.1 manages) and instrument themselves, no-op until the host passes an SDK through
+  `SagaRuntime.Builder.openTelemetry`/`InMemoryTransport.Builder.openTelemetry` (plus `telemetry(SagaTelemetrySettings)`,
+  a plain value in core's `core.telemetry`). Spans `saga_forge.handle`/`attempt`/`step`/`command`/`compensation`/
+  `delivery`/`event.ignored` (`runtime.internal.SagaInstrumentation`, `transport.inmemory.internal.TransportInstrumentation`);
+  duration histograms, outcome and retry counters, message-store gauges; diagnostics carry `traceId`/`spanId`.
+  Core's `NewMessage`/`StoredMessage` gain `traceContext`; Postgres stores it in `saga_message_store.trace_context`
+  (existing databases apply `schema-upgrade-010.sql`). Property 37. The starter hands the application's `OpenTelemetry`
+  bean on (`SagaForgeTelemetryConfiguration`, `SagaForgeTelemetry`, `saga-forge.telemetry.*`); the Spring example
+  proves it through Micrometer Tracing's OpenTelemetry bridge. `SagaFixture.Builder.openTelemetry` for fixture tests.
+  No own observation SPI and no Micrometer instrumentation (G-010-06).
 - Not implemented: MySQL and MongoDB storage, the Kafka transport; no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
   `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
@@ -114,7 +127,7 @@
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
-- `saga-forge-runtime` — the saga runtime; depends on the JDK and `saga-forge-core` only. Public surface:
+- `saga-forge-runtime` — the saga runtime; depends on the JDK, `saga-forge-core` and `opentelemetry-api` (010) only. Public surface:
   `SagaRuntime` with its host-facing builder, `StartupReport`, `SagaRuntimeStartupException`,
   `ImmediateDispatchOutbox`; everything else is package-private in `engine.internal`. Every contract it needs lives
   in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
@@ -133,7 +146,8 @@
 - `saga-forge-storage-mysql` / `-mongodb` — target: `StorageProvider` + `SagaContextStore` implementations, one
   per backend.
 - `saga-forge-transport-inmemory` — `InMemoryTransport`: `EventDispatcher` and `IN_TRANSACTION` `Outbox` over a
-  `MessageStore`, plus the in-process relay; depends on `saga-forge-core` only (no Spring, no CDI). Its test-jar ships
+  `MessageStore`, plus the in-process relay; depends on `saga-forge-core` and `opentelemetry-api` (010) only (no Spring,
+  no CDI). Its test-jar ships
   `InMemoryMessageStore`, `MessageStoreContract` and `TransportAcceptanceSuite`.
 - `saga-forge-transport-kafka` — target: `EventDispatcher` over Kafka. These two transports are the only ones
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
@@ -266,6 +280,11 @@
   guarded by a contract test (G-009-03); in record mode an outbox command still needs a registered handler class
   (G-009-04); aggregates without a no-argument constructor are shared, not copied (G-009-05); `Long` read-back as
   `Integer` is not emulated (G-009-06); outbox commands are reported at delivery, after the sender's own (G-009-07).
+
+- Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
+  (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,
+  not MDC (G-010-04); saga metrics need an OpenTelemetry metric exporter, Spring Boot defines none (G-010-05); no
+  Micrometer instrumentation, and it must never run beside the OpenTelemetry one (G-010-06).
 
 ## Agent Working Rules For This Repo
 - Prefer edits that preserve the annotation-driven declarative style over imperative orchestration code.

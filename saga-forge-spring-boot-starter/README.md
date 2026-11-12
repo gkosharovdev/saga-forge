@@ -25,6 +25,7 @@ Requires Java 21 and Spring Boot 4.1.
 | Lifecycle | the runtime starts after the context refreshed, then the transport; on shutdown the transport stops first | — |
 | Spring Modulith | with its event publication registry present, the transport stores its messages there: one outbox | `saga-forge.transport.modulith-interop=false` |
 | Actuator | with Actuator present, a read-only `sagaforge` endpoint and a `sagaforge` health indicator (`DOWN` while messages are set aside) | Spring Boot's `management.*` properties |
+| OpenTelemetry | the application's `OpenTelemetry` bean (Spring Boot's OpenTelemetry setup, or Micrometer Tracing's OpenTelemetry bridge) handed to the runtime and the transport: saga spans inside the request's trace, saga metrics, trace context stored with every message | `SagaForgeTelemetry`, or `saga-forge.telemetry.*` |
 
 Every bean backs off when the application defines one of the same type. Two `SagaRuntime` beans fail startup.
 
@@ -110,6 +111,44 @@ class PaymentNotifier {
 
 `ApplicationModules.of(App.class).verify()` keeps passing: the starter adds no type to your modules.
 
+### With OpenTelemetry
+
+Nothing to add when the application already traces with OpenTelemetry: the starter passes the application's
+`OpenTelemetry` bean to the runtime and the transport. Either setup provides one:
+
+```xml
+<!-- Spring Boot's OpenTelemetry setup -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-opentelemetry</artifactId>
+</dependency>
+<!-- or Micrometer Tracing with its OpenTelemetry bridge -->
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-tracing-bridge-otel</artifactId>
+</dependency>
+```
+
+Each saga unit of work, step and command becomes a span in the trace of the request that published the start event,
+also when the message store delivers an event later or after a restart. Spans carry no association values, contents
+or failure messages unless switched on below. The span and metric names are in the root README's telemetry
+reference.
+
+**Metrics** are recorded through OpenTelemetry's metrics API. Spring Boot exports them only when the application
+defines an `SdkMeterProvider` bean with an exporter (Spring Boot itself sends its own metrics through Micrometer); for
+example, with `opentelemetry-exporter-otlp`:
+
+```java
+@Bean
+SdkMeterProvider sdkMeterProvider(Resource resource) {
+    return SdkMeterProvider.builder().setResource(resource)
+            .registerMetricReader(PeriodicMetricReader.builder(OtlpHttpMetricExporter.getDefault()).build())
+            .build();
+}
+```
+
+Without it, saga spans are exported and saga metrics are dropped (memory.md G-010-05).
+
 ### With Actuator
 
 ```xml
@@ -154,6 +193,12 @@ them off with `management.endpoint.sagaforge.enabled=false` and `management.heal
 | `saga-forge.transport.retention-sweep-interval` | `1h` | How often consumed messages older than the retention are removed. |
 | `saga-forge.transport.heartbeat-interval` | `30s` | How often this instance refreshes its heartbeat in the message store. |
 | `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
+| `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
+| `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |
+| `saga-forge.telemetry.metrics.enabled` | `true` | Whether saga metrics are recorded. |
+| `saga-forge.telemetry.record-association-values` | `false` | Record association values (an order id, say) on spans. |
+| `saga-forge.telemetry.record-contents` | `false` | Record saga event and command contents (`toString`, at most 1,000 characters) on spans. |
+| `saga-forge.telemetry.record-failure-messages` | `false` | Record failure messages and exception events on spans; the failure's type is always recorded. |
 
 Your IDE completes all of them from the starter's configuration metadata.
 

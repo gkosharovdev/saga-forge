@@ -26,6 +26,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
 | Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
 | Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
+| Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
 
 ## Module responsibilities
 
@@ -38,7 +39,9 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   `SagaRuntime` is the `EventReceiver` transports deliver to: it routes each event to saga types and instances by
   association, runs each saga-scoped unit of work in the host's local transaction through `TransactionBoundary`,
   allows one unit of work per instance at a time, stores committed events in an `Outbox`, and validates the
-  registered model and plug-ins at `start()`. Host integrations assemble it through its builder; application
+  registered model and plug-ins at `start()`. Since 010 it instruments itself with the OpenTelemetry API
+  (`opentelemetry-api`, its only dependency besides core), no-op until the host passes an SDK; see
+  [Observability](#observability). Host integrations assemble it through its builder; application
   developers using the starter never do.
 - **`saga-forge-test`** — the saga test fixture applications add in test scope (009), depending on
   `saga-forge-core` and `saga-forge-runtime` only. `SagaFixture` builds and starts the shipped `SagaRuntime` over
@@ -250,6 +253,27 @@ names on the left are from *Enterprise Integration Patterns* (Hohpe and Woolf) u
 In a Spring application with Spring Modulith, the Message Store is Spring Modulith's event publication registry
 instead, and Saga Forge keeps only its delivery records beside it: one outbox per application, not two
 ([007](../specs/007-in-memory-transport/spec.md) FR-028).
+
+## Observability
+
+The runtime and the in-memory transport instrument themselves with the OpenTelemetry API
+([010](../specs/010-otel-observability/spec.md)); core stays free of it and carries trace context only as a string map.
+For each event the runtime opens a `saga_forge.handle` span per saga type and instance it reaches, an
+`saga_forge.attempt` span per attempt of the unit of work, a `saga_forge.step` span per step, a `saga_forge.command`
+span per command handling and a `saga_forge.compensation` span per compensation; retry waits and terminal outcomes are
+events on `handle`. Every span is made current, so the runtime's diagnostics (and the log backend's MDC) carry its
+trace id.
+
+Trace context crosses the asynchronous hop through the message store: while a unit of work's `attempt` span is current,
+the transport injects the context into each message it stores (`NewMessage.traceContext`, Postgres
+`saga_message_store.trace_context`), and on delivery it extracts it as the parent of a `saga_forge.delivery` consumer
+span around `receive`. A unit of work delivered later, on another worker or after a restart, therefore continues the
+trace of the code that published the first event.
+
+Metrics carry only attributes bounded by the model (saga type, step, command type, outcome, classification): duration
+histograms per span, counters for starts, outcomes, handling outcomes and retries, and message-store gauges read from
+the same queries as the starter's Actuator endpoint. Spans carry generated ids; association values, contents and
+failure messages are recorded only when switched on (`SagaTelemetrySettings`). The full reference is in the README.
 
 ## Truthful state and transaction boundaries
 

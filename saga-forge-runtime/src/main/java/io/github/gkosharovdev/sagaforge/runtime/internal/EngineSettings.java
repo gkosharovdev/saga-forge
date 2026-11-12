@@ -6,6 +6,8 @@ import java.util.Optional;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
+import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
+import io.opentelemetry.api.OpenTelemetry;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
@@ -37,6 +39,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * @param sources            clock and id suppliers
  * @param retry              retry limits and the pause between attempts
  * @param commandInterceptor sees every command handling; {@link CommandInterceptor#proceeding()} by default
+ * @param openTelemetry      where spans and metrics go; {@link OpenTelemetry#noop()} by default (010)
+ * @param telemetry          what is recorded through {@code openTelemetry}
  */
 public record EngineSettings(
         StorageProvider storage,
@@ -51,7 +55,9 @@ public record EngineSettings(
         Outbox.Timing outboxTiming,
         TimeAndIdentity sources,
         RetrySettings retry,
-        CommandInterceptor commandInterceptor) {
+        CommandInterceptor commandInterceptor,
+        OpenTelemetry openTelemetry,
+        SagaTelemetrySettings telemetry) {
 
     /**
      * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -68,8 +74,21 @@ public record EngineSettings(
         requireNonNull(sources, "sources");
         requireNonNull(retry, "retry");
         requireNonNull(commandInterceptor, "commandInterceptor");
+        requireNonNull(openTelemetry, "openTelemetry");
+        requireNonNull(telemetry, "telemetry");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
         parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
+    }
+
+    /** Settings without telemetry ({@link OpenTelemetry#noop()}). */
+    public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
+            EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
+            List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
+            Optional<SagaObjectProvider> sagaObjects, Outbox outbox, Outbox.Timing outboxTiming,
+            TimeAndIdentity sources, RetrySettings retry, CommandInterceptor commandInterceptor) {
+        this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
+                parameterResolvers, sagaObjects, outbox, outboxTiming, sources, retry, commandInterceptor,
+                OpenTelemetry.noop(), SagaTelemetrySettings.defaults());
     }
 
     /** Settings with the {@linkplain CommandInterceptor#proceeding() proceeding} interceptor. */

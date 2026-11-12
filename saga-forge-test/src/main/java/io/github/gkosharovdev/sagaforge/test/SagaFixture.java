@@ -18,8 +18,10 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntimeStartupException;
+import io.opentelemetry.api.OpenTelemetry;
 
 /**
  * A given/when/then test fixture for sagas ({@code specs/009-saga-test-fixture}). It builds and starts the shipped
@@ -245,6 +247,8 @@ public final class SagaFixture {
         private Duration maxTotalRetryBackoff;
         private boolean checkContextValues = true;
         private boolean handleAggregates;
+        private OpenTelemetry openTelemetry = OpenTelemetry.noop();
+        private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
 
         private Builder() {
         }
@@ -352,6 +356,21 @@ public final class SagaFixture {
         }
 
         /**
+         * Records the runtime's spans and metrics through {@code openTelemetry}, for tests that assert on them
+         * ({@code specs/010-otel-observability} FR-017); default {@link OpenTelemetry#noop()}.
+         */
+        public Builder openTelemetry(OpenTelemetry openTelemetry) {
+            this.openTelemetry = requireNonNull(openTelemetry, "openTelemetry");
+            return this;
+        }
+
+        /** What is recorded through {@link #openTelemetry(OpenTelemetry)}; default {@link SagaTelemetrySettings#defaults()}. */
+        public Builder telemetry(SagaTelemetrySettings telemetry) {
+            this.telemetry = requireNonNull(telemetry, "telemetry");
+            return this;
+        }
+
+        /**
          * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the runtime's startup
          * does (FR-003).
          *
@@ -404,6 +423,8 @@ public final class SagaFixture {
                     .unitOfWorkIds(() -> "uow-" + unitOfWorkIds.incrementAndGet())
                     .retryPause(clock::advance)
                     .commandInterceptor(interceptor)
+                    .openTelemetry(openTelemetry)
+                    .telemetry(telemetry)
                     .logger(logger);
             if (maxTotalRetryBackoff != null) {
                 runtime.maxTotalRetryBackoff(maxTotalRetryBackoff);

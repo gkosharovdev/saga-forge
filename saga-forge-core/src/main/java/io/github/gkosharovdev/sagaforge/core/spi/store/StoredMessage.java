@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.core.spi.store;
 
+import java.util.Map;
 import java.time.Instant;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
@@ -33,8 +34,10 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 public record StoredMessage(long position, String messageId, MessageKind kind, String payloadType, Object payload,
         CommandId commandId, String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt,
         MessageStatus status, int attempts, Instant nextAttemptAt, DeliveryFailure lastFailure, String leasedBy,
-        Instant leasedUntil, Instant consumedAt, String setAsideReason, String externalRef) {
+        Instant leasedUntil, Instant consumedAt, String setAsideReason, String externalRef,
+        Map<String, String> traceContext) {
 
+    /** Validates the components; a {@code null} {@code traceContext} becomes empty (010). */
     public StoredMessage {
         Checks.nonBlank(messageId, "messageId");
         Checks.nonNull(kind, "kind");
@@ -51,6 +54,17 @@ public record StoredMessage(long position, String messageId, MessageKind kind, S
         if (attempts < 0) {
             throw new IllegalArgumentException("attempts must not be negative, but is " + attempts);
         }
+        traceContext = traceContext == null ? Map.of() : Map.copyOf(traceContext);
+    }
+
+    /** A message without trace context (the 007 shape). */
+    public StoredMessage(long position, String messageId, MessageKind kind, String payloadType, Object payload,
+            CommandId commandId, String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt,
+            MessageStatus status, int attempts, Instant nextAttemptAt, DeliveryFailure lastFailure, String leasedBy,
+            Instant leasedUntil, Instant consumedAt, String setAsideReason, String externalRef) {
+        this(position, messageId, kind, payloadType, payload, commandId, orderingKey, sourceSagaType, sourceSagaId,
+                recordedAt, status, attempts, nextAttemptAt, lastFailure, leasedBy, leasedUntil, consumedAt,
+                setAsideReason, externalRef, Map.of());
     }
 
     /**
@@ -64,7 +78,7 @@ public record StoredMessage(long position, String messageId, MessageKind kind, S
         return new StoredMessage(position, entry.messageId(), entry.kind(), entry.payloadType(), entry.payload(),
                 entry.commandId(), entry.orderingKey(), entry.sourceSagaType(), entry.sourceSagaId(),
                 entry.recordedAt(), MessageStatus.UNCONSUMED, 0, entry.recordedAt(), null, null, null, null, null,
-                null);
+                null, entry.traceContext());
     }
 
     /** @return whether the payload is loaded */
@@ -84,6 +98,6 @@ public record StoredMessage(long position, String messageId, MessageKind kind, S
     public StoredMessage withPayload(Object newPayload) {
         return new StoredMessage(position, messageId, kind, payloadType, newPayload, commandId, orderingKey,
                 sourceSagaType, sourceSagaId, recordedAt, status, attempts, nextAttemptAt, lastFailure, leasedBy,
-                leasedUntil, consumedAt, setAsideReason, externalRef);
+                leasedUntil, consumedAt, setAsideReason, externalRef, traceContext);
     }
 }

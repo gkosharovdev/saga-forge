@@ -301,6 +301,7 @@ public final class InMemoryMessageStore implements MessageStore {
             DeliveryFailure lastFailure, String leasedBy, Instant leasedUntil, Instant consumedAt, String reason) {
         return new StoredMessage(m.position(), m.messageId(), m.kind(), m.payloadType(), m.payload(), m.commandId(),
                 m.orderingKey(), m.sourceSagaType(), m.sourceSagaId(), m.recordedAt(), status, attempts,
-                nextAttemptAt, lastFailure, leasedBy, leasedUntil, consumedAt, reason, m.externalRef());
+                nextAttemptAt, lastFailure, leasedBy, leasedUntil, consumedAt, reason, m.externalRef(),
+                m.traceContext());
     }
 }

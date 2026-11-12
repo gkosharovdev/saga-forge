@@ -15,7 +15,12 @@
     <description>In-process transport with a durable message store for single-instance deployments</description>
 
     <dependencies>
-        <!-- The only non-test dependency (Constitution Principle I, 007 FR-026) -->
+        <!-- Instrumentation through the OpenTelemetry API, no-op without an SDK (010 research §1) -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+        </dependency>
+        <!-- Saga Forge core (007 FR-026); the OpenTelemetry API above is the only other main dependency (010) -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>
             <artifactId>saga-forge-core</artifactId>
@@ -41,6 +46,11 @@
             <artifactId>saga-forge-runtime</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

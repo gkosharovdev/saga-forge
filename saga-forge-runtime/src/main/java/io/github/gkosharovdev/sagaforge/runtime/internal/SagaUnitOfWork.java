@@ -94,7 +94,8 @@ final class SagaUnitOfWork implements UnitOfWork {
     }
 
     /** Collaborators shared by every unit of work of one engine. */
-    record Collaborators(EngineSettings settings, CommandGateway gateway, Diagnostics diagnostics) {
+    record Collaborators(EngineSettings settings, CommandGateway gateway, Diagnostics diagnostics,
+            SagaInstrumentation instrumentation) {
     }
 
     /** How one attempt ended, for the {@link AttemptLoop} (005 contracts/attempt-loop.md). */
@@ -353,8 +354,18 @@ final class SagaUnitOfWork implements UnitOfWork {
         touched = new ArrayList<>();
         handledInStep = new ArrayList<>();
         commandIds.startStep(currentStep);
-        trigger.saga().run(next.step(), saga, next.recorded().event);
-        failIfReported();
+        try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.STEP)) {
+            span.set(SagaInstrumentation.SAGA_TYPE, trigger.saga().typeName())
+                    .set(SagaInstrumentation.STEP_NAME, currentStep)
+                    .set(SagaInstrumentation.SAGA_ID, trigger.sagaId());
+            try {
+                trigger.saga().run(next.step(), saga, next.recorded().event);
+                failIfReported();
+            } catch (RuntimeException | Error failure) {
+                span.fail(failure);
+                throw failure;
+            }
+        }
         lifecycle.recordStepCompleted(trigger.sagaId(), currentStep, touched, attempt, handledInStep);
         completedSteps.add(currentStep);
     }

@@ -20,6 +20,7 @@
         <spring-framework.version>7.0.10</spring-framework.version>
         <spring-data.version>2026.0.2</spring-data.version>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <micrometer-tracing.version>1.7.2</micrometer-tracing.version>
         <saga.excludedTestGroups>container</saga.excludedTestGroups>
     </properties>
 
@@ -72,6 +73,31 @@
             <groupId>io.github.gkosharovdev</groupId>
             <artifactId>saga-forge-test</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Saga spans through Micrometer Tracing's OpenTelemetry bridge (010 US4, SC-005, SC-008) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+            <version>${spring-boot.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+            <version>${micrometer-tracing.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <!-- Declares slf4j-api 1.7, which would win over Boot's 2.0 line and break Logback -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

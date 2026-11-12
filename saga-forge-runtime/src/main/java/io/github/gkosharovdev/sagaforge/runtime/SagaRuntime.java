@@ -6,6 +6,8 @@ import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
+import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
+import io.opentelemetry.api.OpenTelemetry;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
@@ -217,6 +219,8 @@ public final class SagaRuntime implements EventReceiver {
         private Duration maxTotalRetryBackoff = RetrySettings.DEFAULT_MAX_TOTAL_BACKOFF;
         private RetryPause retryPause = RetryPause.sleeping();
         private CommandInterceptor commandInterceptor;
+        private OpenTelemetry openTelemetry = OpenTelemetry.noop();
+        private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
 
         private Builder() {
         }
@@ -347,6 +351,30 @@ public final class SagaRuntime implements EventReceiver {
             return this;
         }
 
+        /**
+         * Optional: where the runtime's spans and metrics go ({@code specs/010-otel-observability}). The runtime
+         * instruments itself through the OpenTelemetry API; pass the application's instance (the same one as the
+         * transport's). Default {@link OpenTelemetry#noop()}: nothing is recorded and behaviour is unchanged.
+         *
+         * @throws IllegalArgumentException if {@code openTelemetry} is {@code null}
+         */
+        public Builder openTelemetry(OpenTelemetry openTelemetry) {
+            this.openTelemetry = requireNonNull(openTelemetry, "openTelemetry");
+            return this;
+        }
+
+        /**
+         * Optional: what is recorded through {@link #openTelemetry(OpenTelemetry)}. Default
+         * {@link SagaTelemetrySettings#defaults()}: spans and metrics, no association values, contents or failure
+         * messages.
+         *
+         * @throws IllegalArgumentException if {@code telemetry} is {@code null}
+         */
+        public Builder telemetry(SagaTelemetrySettings telemetry) {
+            this.telemetry = requireNonNull(telemetry, "telemetry");
+            return this;
+        }
+
         /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
         public Builder logger(System.Logger logger) {
             this.logger = requireNonNull(logger, "logger");
@@ -388,7 +416,8 @@ public final class SagaRuntime implements EventReceiver {
                     parameterResolvers, Optional.ofNullable(sagaObjects), effectiveOutbox, timing,
                     new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
                     new RetrySettings(maxTotalRetryBackoff, retryPause::pause),
-                    commandInterceptor != null ? commandInterceptor : CommandInterceptor.proceeding());
+                    commandInterceptor != null ? commandInterceptor : CommandInterceptor.proceeding(),
+                    openTelemetry, telemetry);
         }
 
         private static String randomId() {

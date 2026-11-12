@@ -32,6 +32,8 @@ import io.github.gkosharovdev.sagaforge.spring.host.SpringDataAggregateResolver;
 import io.github.gkosharovdev.sagaforge.spring.host.SpringHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.spring.host.SpringHostConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.host.SpringSagaObjectProvider;
+import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetry;
+import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetryConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
 
@@ -41,7 +43,8 @@ import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfig
  * builds the runtime (not started; {@link SagaRuntimeLifecycle} starts it), and exposes its {@link CommandGateway} and
  * {@link EventPublisher}. An application-defined {@code SagaRuntime} bean replaces the assembled one.
  */
-@AutoConfiguration(after = { SpringTransactionConfiguration.class, PostgresStorageConfiguration.class,
+@AutoConfiguration(after = { SagaForgeTelemetryConfiguration.class, SpringTransactionConfiguration.class,
+        PostgresStorageConfiguration.class,
         InMemoryTransportConfiguration.class, SpringHostConfiguration.class })
 @ConditionalOnProperty(prefix = "saga-forge", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnClass(SagaRuntime.class)
@@ -63,7 +66,7 @@ public class SagaRuntimeConfiguration {
             ObjectProvider<EventDispatcher> dispatcher, ObjectProvider<Outbox> outbox,
             ObjectProvider<SagaObjectProvider> sagaObjects, ObjectProvider<HandlerInstanceProvider> handlerInstances,
             ObjectProvider<HandlerParameterResolver> parameterResolvers,
-            ObjectProvider<AggregateResolver> aggregateResolvers) {
+            ObjectProvider<AggregateResolver> aggregateResolvers, ObjectProvider<SagaForgeTelemetry> telemetry) {
         properties.validate();
         StorageDetection detection = new StorageDetection(beanFactory.getBeanClassLoader());
         detection.checkSelection(properties.getStorage().getType());
@@ -99,6 +102,8 @@ public class SagaRuntimeConfiguration {
         handlerInstances.ifAvailable(builder::handlerInstances);
         parameterResolvers.orderedStream().forEach(builder::parameterResolver);
         aggregateResolvers.orderedStream().forEach(builder::aggregateResolver);
+        SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
+        builder.openTelemetry(resolved.openTelemetry()).telemetry(resolved.settings());
         return builder.build();
     }
 
