@@ -25,6 +25,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the runtime, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
 | Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
 | Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
+| Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
 
 ## Module responsibilities
 
@@ -39,6 +40,13 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   allows one unit of work per instance at a time, stores committed events in an `Outbox`, and validates the
   registered model and plug-ins at `start()`. Host integrations assemble it through its builder; application
   developers using the starter never do.
+- **`saga-forge-test`** — the saga test fixture applications add in test scope (009), depending on
+  `saga-forge-core` and `saga-forge-runtime` only. `SagaFixture` builds and starts the shipped `SagaRuntime` over
+  in-memory plug-ins of its own: a transaction boundary, storage, a context store that rejects values durable storage
+  cannot persist, an aggregate store, a synchronous loop-back transport, a controllable clock and deterministic ids.
+  It sees every command through the core `CommandInterceptor` SPI, which lets it record commands whose handler a test
+  did not register and make commands fail. It adds no execution semantics of its own; `FixtureParityTest` checks it
+  against a hand-assembled runtime.
 - **`saga-forge-spring-boot-starter`** — the only module users explicitly add for wiring (008; details in
   [its README](../saga-forge-spring-boot-starter/README.md)). It:
   - collects the saga model from the auto-configuration packages, the application's beans,

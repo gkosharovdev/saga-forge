@@ -27,13 +27,13 @@ public class OrderProcessingSaga {
     @SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
             multiplier = 2.0, maxBackoffMillis = 1_000)) // a payment-provider timeout is retried
     public void handleOrderCreated(OrderCreatedEvent event) {
-        context.putState("orderAmount", event.amount());
+        context.putState("orderAmount", event.amount().toPlainString());   // a JSON scalar, as storage needs
         commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
     }
 
     @SagaStep(associationProperty = "orderId")
     public void processPayment(PaymentProcessedEvent event) {
-        BigDecimal orderAmount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        BigDecimal orderAmount = new BigDecimal(context.getState("orderAmount", String.class).orElseThrow());
         if (orderAmount.compareTo(event.amount()) != 0) {
             throw new IllegalStateException("Payment does not match order amount"); // rolls back the payment too
         }
@@ -56,7 +56,7 @@ public class OrderProcessingSaga {
     @SagaCompensation(forStep = "processPayment") // runs in its own unit of work once the saga compensates
     public void compensatePayment(CompensationTrigger trigger) {
         String paymentId = context.getState("paymentId", String.class).orElseThrow();
-        BigDecimal amount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        BigDecimal amount = new BigDecimal(context.getState("orderAmount", String.class).orElseThrow());
         commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount)); // keyed by its CommandId
     }
 }
@@ -337,4 +337,23 @@ which asks the payment module to charge the customer and waits. The payment modu
   payment provider as the idempotency key.
 - A message that keeps failing is set aside after ten attempts, without holding up other orders, and an operator can
   deliver it again once the cause is fixed.
+
+## Testing the order saga
+
+The canonical saga's happy path, its compensation and a retried payment are tested with the saga test fixture
+(`saga-forge-test`, feature 009), with no database or transport. The compensation path, in record-and-answer mode, where
+the test publishes the events the handlers would have recorded:
+
+```java
+SagaFixture.of(OrderProcessingSaga.class).build()
+        .given(new OrderCreatedEvent("o-2", AMOUNT), new PaymentProcessedEvent("payment-2", "o-2", AMOUNT))
+        .when(new StockUnavailableEvent("o-2"))
+        .expectCompensations("compensatePayment")
+        .expectCommands(new RefundPaymentCommand("saga-1", "payment-2", AMOUNT))
+        .expectCompensatedAfter("rejectOrder");
+```
+
+The retried payment runs the real `PaymentService` with `.handlers(new PaymentService(provider))`: two provider
+timeouts, three attempts of `handleOrderCreated`, one charge, and the same `CommandId` on every attempt. The retry
+waits advance the fixture's clock instead of sleeping. All three tests are in `OrderProcessingSagaFixtureTest`.
 

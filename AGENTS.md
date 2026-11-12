@@ -77,7 +77,9 @@
 - Container suites are fenced by `@Tag("container")` and run only with `-Pcontainer-tests`; they all passed on
   2026-11-09 (186 tests), closing G-003-23. The 007 container suites (Postgres log contract, fault injection,
   10k-message restart, Spring own-log and Spring Modulith interop acceptance) passed on 2026-11-11. The whole build
-  with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests).
+  with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests). With 009 (the fixture,
+  the interceptor and the example fixture tests) the whole build, container suites included, passed on 2026-11-12
+  (1,574 tests).
 - Implemented and tested, including container suites, added by `specs/008-spring-boot-starter`: the Spring Boot
   starter assembles and starts the runtime with no host code. It collects the model (auto-configuration packages,
   beans, `saga-forge.scan-packages`, `SagaModelContributor`), detects storage (`saga-forge.storage.type` when
@@ -91,6 +93,17 @@
   `@ApplicationModuleListener`s receive saga events. Optional `sagaforge` Actuator endpoint and health indicator.
   `saga-forge-example-spring` is the canonical saga as a Spring Boot app. The starter's README documents defaults,
   properties and overrides; `ReadmePropertiesTest` keeps it in step with the configuration metadata.
+- Implemented and tested, added by `specs/009-saga-test-fixture`: the saga test fixture `saga-forge-test` (core and
+  runtime only). `SagaFixture` (given/when/then, `Then` expectations, `EventResult`, `InstanceView`,
+  `RecordedCommand`, `FixtureClock`, `SagaExpectationError`) starts the shipped runtime over package-private
+  in-memory plug-ins: transactions with snapshots, storage, a context store with the durable value check
+  (`DurableContextValues`, `UnsupportedContextValueException`, FR-019), an aggregate store/resolver, a loop-back
+  `IN_TRANSACTION` outbox and dispatcher. Record-and-answer by default, `handlers(...)` for real handlers; failure
+  rules; retry waits advance the clock; ids `saga-N`/`uow-N`. Core gains the additive `core.spi.CommandInterceptor`/
+  `CommandInvocation` and `SagaRuntime.Builder.commandInterceptor` (Property 36), called once per command handling.
+  `FixtureParityTest` compares the fixture with a hand-assembled runtime; `DurableContextValueContractTest` (Postgres)
+  ties the value rule to `JsonCodec`. Both examples ship fixture tests; the canonical saga now keeps its amount as a
+  `String` in `SagaContext`, like the Spring example.
 - Not implemented: MySQL and MongoDB storage, the Kafka transport; no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
   `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for
@@ -124,6 +137,9 @@
   `InMemoryMessageStore`, `MessageStoreContract` and `TransportAcceptanceSuite`.
 - `saga-forge-transport-kafka` — target: `EventDispatcher` over Kafka. These two transports are the only ones
   in scope — do not add RabbitMQ, SQS, etc. without an explicit decision to expand scope.
+- `saga-forge-test` — the saga test fixture (009), test scope for applications; depends on `saga-forge-core` and
+  `saga-forge-runtime` only (no Spring, storage or transport). Public API in `io.github.gkosharovdev.sagaforge.test`;
+  its in-memory plug-ins are package-private there. See its `README.md`.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
   whatever the annotation model currently supports.
 - `saga-forge-example-spring` — the canonical saga as a Spring Boot application (Spring Data JDBC `Order`, service
@@ -166,7 +182,7 @@
   `@SagaStep` method on the same class (not a `@StartCompensation` step), at most one per step. A business failure is
   a `@StartCompensation` step (with `@SagaStep`, never with `@StartSaga`/`@EndSaga`); its name is the recorded
   failure outcome.
-- Canonical example: `saga-forge-example`'s `OrderProcessingSaga` (`handleOrderCreated` (`@StartSaga`) →
+- Canonical example: `saga-forge-example`'s `OrderProcessingSaga` (fixture tests in `OrderProcessingSagaFixtureTest`; `handleOrderCreated` (`@StartSaga`) →
   `processPayment` → `completeOrder` (`@EndSaga`), or `rejectOrder` (`@StartCompensation`, on
   `StockUnavailableEvent`, which `Order` records when out of stock), all on `associationProperty = "orderId"`):
   `ProcessPaymentCommand` handled by `PaymentService` (service), `ReserveStockCommand` handled by `Order`
@@ -244,6 +260,12 @@
   `save()` are ordered by a step-name tiebreak (G-003-04, -16); no lifecycle-history query API, FR-012
   (G-003-24); the host applies `schema.sql`, no migration tool (G-003-25); `DataSource`/pool wiring belongs to
   the starter (G-003-26).
+
+- Saga test fixture (009), see memory.md G-009-01 to G-009-07: no Spring helper or test slice (G-009-01); its
+  in-memory plug-ins duplicate the runtime's test doubles (G-009-02); the value rule is duplicated from Postgres,
+  guarded by a contract test (G-009-03); in record mode an outbox command still needs a registered handler class
+  (G-009-04); aggregates without a no-argument constructor are shared, not copied (G-009-05); `Long` read-back as
+  `Integer` is not emulated (G-009-06); outbox commands are reported at delivery, after the sender's own (G-009-07).
 
 ## Agent Working Rules For This Repo
 - Prefer edits that preserve the annotation-driven declarative style over imperative orchestration code.

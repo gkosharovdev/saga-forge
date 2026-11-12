@@ -72,6 +72,13 @@
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
+        <!-- The saga test fixture's durable value rule, checked against this module's (009 G-009-03) -->
+        <dependency>
+            <groupId>io.github.gkosharovdev</groupId>
+            <artifactId>saga-forge-test</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

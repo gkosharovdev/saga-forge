@@ -29,7 +29,8 @@ import io.github.gkosharovdev.sagaforge.example.events.StockUnavailableEvent;
  * dispatches commands through the {@link CommandGateway} field, a {@code @CommandHandler} on an aggregate or a
  * service handles each command, and the handler records the next domain event with
  * {@code DomainEvents.record}. Values a later step needs are kept in the {@link SagaContext} field. Both
- * fields are recognized by their type and populated by the engine.</p>
+ * fields are recognized by their type and populated by the engine. The amount is kept as its plain string, since
+ * durable storage keeps {@code SagaContext} values as JSON scalars.</p>
  *
  * <table>
  *   <caption>Step, triggering event, dispatched command, and handler</caption>
@@ -87,7 +88,7 @@ public class OrderProcessingSaga {
     @SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
             multiplier = 2.0, maxBackoffMillis = 1_000))
     public void handleOrderCreated(OrderCreatedEvent event) {
-        context.putState("orderAmount", event.amount());
+        context.putState("orderAmount", event.amount().toPlainString());
         commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
     }
 
@@ -98,7 +99,7 @@ public class OrderProcessingSaga {
      */
     @SagaStep(associationProperty = "orderId")
     public void processPayment(PaymentProcessedEvent event) {
-        BigDecimal orderAmount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
+        BigDecimal orderAmount = amount();
         if (orderAmount.compareTo(event.amount()) != 0) {
             throw new IllegalStateException("Payment " + event.paymentId() + " of " + event.amount()
                     + " does not match order amount " + orderAmount);
@@ -134,7 +135,14 @@ public class OrderProcessingSaga {
     @SagaCompensation(forStep = "processPayment")
     public void compensatePayment(CompensationTrigger trigger) {
         String paymentId = context.getState("paymentId", String.class).orElseThrow();
-        BigDecimal amount = context.getState("orderAmount", BigDecimal.class).orElseThrow();
-        commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount));
+        commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount()));
+    }
+
+    /**
+     * The order amount kept by {@code handleOrderCreated}. It is stored as its plain string, because durable storage
+     * keeps {@code SagaContext} values as JSON scalars ({@code BigDecimal} is not one; memory.md G-003-07).
+     */
+    private BigDecimal amount() {
+        return new BigDecimal(context.getState("orderAmount", String.class).orElseThrow());
     }
 }
