@@ -1,5 +1,13 @@
 # Saga Forge
 
+[![CI](https://github.com/gkosharovdev/saga-forge/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/gkosharovdev/saga-forge/actions/workflows/ci.yml)
+[![Release](https://github.com/gkosharovdev/saga-forge/actions/workflows/release.yml/badge.svg)](https://github.com/gkosharovdev/saga-forge/actions/workflows/release.yml)
+[![Maven Central](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Frepo1.maven.org%2Fmaven2%2Fio%2Fgithub%2Fgkosharovdev%2Fsaga-forge-core%2Fmaven-metadata.xml&label=Maven%20Central)](https://central.sonatype.com/namespace/io.github.gkosharovdev)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F)](saga-forge-spring-boot-starter/README.md)
+[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-instrumented-425CC7)](#observability)
+
 Declarative, DDD-native saga orchestration for Spring applications.
 
 Saga Forge lets you *forge* a saga as a plain Java class annotated with `@Saga`. Each step is a
