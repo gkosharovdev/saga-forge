@@ -261,13 +261,15 @@
 - Deferred: whether a `@StartSaga` step may also be a `@CommandHandler`. Dropped for now: programmatic abort
   (e.g. `SagaLifecycle.abort()`) — don't add it without a spec.
 - No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled
-  process.
+  process (G-ENG-25).
+- First adopter: booking-service. memory.md "Adoption backlog" ranks the gaps that matter for it; check it when
+  choosing the next feature.
 - jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
 - In-memory transport (007), see memory.md G-007-01 to G-007-08: Quarkus extension and the constitution amendment
   pending (G-007-01); starter detection deferred (G-007-02); a redelivered start event does not recover a stranded
   start (G-007-03); delivery order is per aggregate, not per saga instance (G-007-04); relay logic may need a shared
   module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); one running instance per
-  log (FR-021).
+  log (FR-021, G-007-09).
 - Spring Boot starter (008), see memory.md G-008-01 to G-008-04: Modulith event externalization and `Scenario`
   support deferred (G-008-01); the Actuator endpoint is read-only (G-008-02); events published through Spring's own
   `ApplicationEventPublisher` do not reach sagas (G-008-03); repository tests use `ApplicationContextRunner` /

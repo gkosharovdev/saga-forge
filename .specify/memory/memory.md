@@ -642,6 +642,18 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Origin**: `specs/005-step-retry/spec.md` FR-014a; user decision, 2026-11-09.
 - **Status**: open (deferred; overlaps the "no waiting timeouts" deadline gap).
 
+### G-ENG-25: No saga deadlines or waiting timeouts
+- **Description**: a saga instance waits for its next event indefinitely. There is no way to declare that a step must
+  follow within a time (a payment that never confirms, a partner that never answers), nor to trigger a timeout step or
+  compensation when it does not. Applications must run a separate scheduled process that finds stale instances and
+  publishes a timeout event.
+- **Origin**: AGENTS.md "No waiting timeouts" (a deliberate scope decision since 002); recorded as its own gap at the
+  first adoption (booking-service, 2026-11-12).
+- **Remark**: a framework-owned declaration (for example a deadline attribute on `@SagaStep`, Constitution Principle II)
+  plus a durable scheduler in the message store would cover it; relates to G-005-01 (no scheduled backoff), which
+  needs the same scheduling mechanism.
+- **Status**: open (deferred; needs a spec).
+
 ### G-005-02: In-process retry blocks the caller and holds the instance
 - **Description**: While a retry waits, the instance's unit-of-work lock is held and the caller (for Kafka, the
   consumer thread) is blocked, so other events for that instance wait and a long total backoff can trip
@@ -848,6 +860,19 @@ Noted only; nothing is bumped until the starter feature decides.
   `PlainJavaAcceptanceTest` runs the shared suite, so SC-008's three setups run the same four scenarios.
 - **Origin**: specs/007 tasks.md T072.
 - **Status**: accepted deviation.
+
+### G-007-09: One running application instance per message store
+- **Description**: the in-memory transport's relay assumes it is the only running consumer of its message store
+  (`specs/007-in-memory-transport` FR-021). Leases keep two relays from delivering the same message at the same moment,
+  but per-aggregate ordering, backoff and the poll loop are coordinated only within one process; a second instance
+  against the same database is detected through heartbeats and logged (`saga.transport.secondInstance`), not
+  prevented or coordinated. An application that runs several replicas (horizontal scaling, rolling deploys with
+  overlap) is outside what the transport supports.
+- **Origin**: `specs/007-in-memory-transport/spec.md` FR-021; recorded as its own gap at the first adoption
+  (booking-service, 2026-11-12).
+- **Remark**: options are a leader election (one active relay, others standby, using the heartbeat table), partitioned
+  leasing by ordering key, or the Kafka transport for multi-instance deployments.
+- **Status**: open (highest priority for adoption beyond a single instance).
 
 ### In-memory transport (007), implementation notes
 - 2026-11-11: implemented from `specs/007-in-memory-transport/tasks.md` (82 tasks).
@@ -1068,6 +1093,25 @@ Noted only; nothing is bumped until the starter feature decides.
   instrumentation for the same runtime, or bridged applications would record every span twice.
 - **Origin**: `specs/010-otel-observability/spec.md` Clarifications (Q1 revised).
 - **Status**: open (deferred until a user needs Micrometer-native metrics).
+
+## Adoption backlog (booking-service, 2026-11-12)
+
+The first production adopter is booking-service: a Spring Boot monolith with one Java module per bounded context,
+integrated through events, no message broker, using the starter, Postgres storage and the in-memory transport
+(DEC-REL-01). The known gaps that matter most for it, in suggested order for the next versions:
+
+1. **G-007-09**: one running instance per message store. Blocks running more than one replica.
+2. **G-006-03**: no operator path out of `REQUIRES_INTERVENTION` (with G-008-02's read-only endpoint: saga-instance
+   views and write actions belong to the same operations feature).
+3. **G-ENG-25** and **G-005-01**: no deadlines or scheduled waits; G-005-02 (in-process retry blocks the caller) is
+   solved by the same durable scheduling.
+4. **G-ENG-24**: an event a step of its own instance runs is not handed to other saga types.
+5. **G-008-03**: events published through Spring's `ApplicationEventPublisher` do not reach sagas.
+6. **G-ENG-05**: a crash between the creation write and the first unit of work strands a `CREATED` instance.
+7. **G-003-25**: no migration tool; upgrade scripts are applied by the host.
+8. **G-010-05**: saga metrics need an OpenTelemetry metric exporter in Spring Boot.
+
+Revisit the order with feedback from booking-service before each release.
 
 ## Release and distribution
 
