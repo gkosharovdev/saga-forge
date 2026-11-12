@@ -11,7 +11,7 @@ import java.util.Optional;
  * starter will adapt the client's existing Spring Data repositories (JPA for Postgres/MySQL, Spring Data
  * MongoDB); the test harness provides an in-memory implementation.</p>
  *
- * <h3>Precedence</h3>
+ * <h2>Precedence</h2>
  * <ul>
  *   <li><em>Loading</em> an aggregate for an instance-method handler uses the client's
  *       {@code @AggregateLoader} method for that aggregate type if one exists, otherwise the first
@@ -21,13 +21,13 @@ import java.util.Optional;
  *       own unit of work persists the change (for example JPA dirty checking).</li>
  * </ul>
  *
- * <h3>Absence</h3>
+ * <h2>Absence</h2>
  * <p>{@link #load(Class, Object)} returns {@link Optional#empty()} when no aggregate exists for the id;
  * it does not throw. The engine translates absence into an {@code AggregateNotFoundException} carrying
  * the aggregate type and id. {@code Optional} is used rather than a nullable return to match
  * {@link StorageProvider#findById(String)} and to make absence explicit in the signature.</p>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <ul>
  *   <li>{@link #supports(Class)} — implementations must throw {@link IllegalArgumentException} if
  *       {@code aggregateType} is {@code null}.</li>
@@ -37,7 +37,7 @@ import java.util.Optional;
  *       {@code aggregate} is {@code null}.</li>
  * </ul>
  *
- * <h3>Failure propagation</h3>
+ * <h2>Failure propagation</h2>
  * <p>Implementations should propagate storage failures as unchecked exceptions. The engine lets them
  * propagate unchanged and rolls back the current unit of work.</p>
  */

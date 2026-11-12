@@ -11,7 +11,7 @@ import java.lang.reflect.Parameter;
  * back it with bean lookup. Several resolvers may be registered; the first that {@linkplain #supports supports} a
  * parameter wins. With none registered, every handler with another parameter is a startup error.</p>
  *
- * <h3>When each method is called</h3>
+ * <h2>When each method is called</h2>
  * <ul>
  *   <li>{@link #supports(Executable, Parameter)} at engine start, for every such parameter of every registered
  *       handler. It must be free of side effects.</li>
@@ -19,7 +19,7 @@ import java.lang.reflect.Parameter;
  *       that handler. A thrown exception fails the unit of work.</li>
  * </ul>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <p>Both methods must throw {@link IllegalArgumentException} if either argument is {@code null}.</p>
  */
 public interface HandlerParameterResolver {

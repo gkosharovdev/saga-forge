@@ -6,11 +6,12 @@ import java.util.List;
  * What {@link EventReceiver#receive(Object)} did with one event: one {@link SagaHandlingResult} per affected saga
  * type and instance.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code event} or {@code results} is {@code null}, or {@code results}
+ *                                  contains {@code null}.</p>
+ *
  * @param event   the received domain event; non-null
  * @param results one result per affected saga type and instance, in handling order; non-null, no {@code null}
  *                element; an unmodifiable defensive copy
- * @throws IllegalArgumentException if {@code event} or {@code results} is {@code null}, or {@code results}
- *                                  contains {@code null}
  */
 public record HandlingReport(Object event, List<SagaHandlingResult> results) {
 

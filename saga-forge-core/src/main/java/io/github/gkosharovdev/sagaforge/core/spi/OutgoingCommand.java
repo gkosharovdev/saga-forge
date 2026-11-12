@@ -6,9 +6,10 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * A {@code @Command(delivery = OUTBOX)} command sent in a unit of work, as carried by {@link OutgoingMessages}
  * ({@code specs/007-in-memory-transport} research §3).
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a component is {@code null}.</p>
+ *
  * @param commandId the identity assigned when the command was sent; non-null
  * @param command   the command; non-null
- * @throws IllegalArgumentException if a component is {@code null}
  */
 public record OutgoingCommand(CommandId commandId, Object command) {
 

@@ -8,6 +8,8 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 /**
  * One message to append to the {@link MessageStore}.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
+ *
  * @param messageId      unique in the store: {@code unitOfWorkId + ":" + index} for an event of a unit of work, the
  *                       {@code CommandId} value for a outbox command, a random UUID for an event published outside
  *                       any unit of work; non-blank
@@ -21,7 +23,6 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  *                       {@code sourceSagaId} is
  * @param sourceSagaId   the saga instance of the unit of work that produced it
  * @param recordedAt     when it was appended; non-null
- * @throws IllegalArgumentException if a rule above is violated
  */
 public record NewMessage(String messageId, MessageKind kind, String payloadType, Object payload, CommandId commandId,
         String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt,

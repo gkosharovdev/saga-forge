@@ -3,11 +3,12 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 /**
  * Identifies one aggregate touched by a completed saga step.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if either component is {@code null}.</p>
+ *
  * @param aggregateType fully qualified name of the {@code @Aggregate} class named by the domain event's
  *                      {@code aggregate} attribute; non-null
  * @param aggregateId   the domain event's {@code @AggregateIdentifier} value, as {@link String#valueOf(Object)};
  *                      non-null
- * @throws IllegalArgumentException if either component is {@code null}
  */
 public record AggregateReference(String aggregateType, String aggregateId) {
 

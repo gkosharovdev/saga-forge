@@ -11,16 +11,16 @@ import java.util.Optional;
  * without Spring or JTA; tests use in-memory doubles. Core depends on neither JTA nor Spring: the mapping below is
  * documentation only.</p>
  *
- * <h3>Thread binding</h3>
+ * <h2>Thread binding</h2>
  * <p>A transaction is bound to the thread that began it. {@link #current()} returns the transaction begun through
  * this boundary that is active on the calling thread, until it is committed or rolled back.</p>
  *
- * <h3>Never joins</h3>
+ * <h2>Never joins</h2>
  * <p>{@link #begin()} always starts a new top-level local transaction. If one is already active on the thread, an
  * implementation either suspends it until the new one ends, or throws {@link IllegalStateException}; which one it
  * does is part of its documentation. There is no nesting, no savepoint and no two-phase commit.</p>
  *
- * <h3>How the engine uses it</h3>
+ * <h2>How the engine uses it</h2>
  * <p>The engine begins one transaction for the creation write of a new instance, one per saga-scoped unit of work
  * (from before {@link StorageProvider#findByIdAndLock(String)} to after the instance write), one per non-saga unit
  * of work opened by {@code CommandGateway.send} outside any unit of work, and one for the {@code FAILED} write after
@@ -28,7 +28,7 @@ import java.util.Optional;
  * {@link LocalTransaction#setRollbackOnly()}, and it checks {@link LocalTransaction#isRollbackOnly()} before
  * committing.</p>
  *
- * <h3>Joining</h3>
+ * <h2>Joining</h2>
  * <ul>
  *   <li><strong>Storage providers</strong> built with the host's boundary use
  *       {@code current().flatMap(tx -> tx.resource(T.class))} for every call while a transaction is active (reads
@@ -44,7 +44,7 @@ import java.util.Optional;
  *       {@link #current()} the same way, so its rows commit or roll back with the unit of work.</li>
  * </ul>
  *
- * <h3>Mapping</h3>
+ * <h2>Mapping</h2>
  * <table>
  *   <caption>Operation mapping onto JTA and Spring</caption>
  *   <tr><th>Contract</th><th>JTA ({@code jakarta.transaction})</th>
@@ -69,7 +69,7 @@ import java.util.Optional;
  *       <td>{@code DataSourceUtils.getConnection(dataSource)}</td></tr>
  * </table>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <p>No operation of this interface takes an argument; {@link LocalTransaction#resource(Class)} throws
  * {@link IllegalArgumentException} for a {@code null} type.</p>
  */

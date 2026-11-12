@@ -5,11 +5,12 @@ import java.time.Instant;
 /**
  * Why one delivery attempt failed.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code exceptionType} is blank, {@code at} is {@code null} or {@code message}
+ *                                  is longer than {@link #MAX_MESSAGE_LENGTH}.</p>
+ *
  * @param exceptionType fully qualified class name of the failure; non-blank
  * @param message       the failure's message, at most {@link #MAX_MESSAGE_LENGTH} characters; may be {@code null}
  * @param at            when it failed; non-null
- * @throws IllegalArgumentException if {@code exceptionType} is blank, {@code at} is {@code null} or {@code message}
- *                                  is longer than {@link #MAX_MESSAGE_LENGTH}
  */
 public record DeliveryFailure(String exceptionType, String message, Instant at) {
 

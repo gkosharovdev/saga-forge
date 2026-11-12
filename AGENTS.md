@@ -117,6 +117,10 @@
   bean on (`SagaForgeTelemetryConfiguration`, `SagaForgeTelemetry`, `saga-forge.telemetry.*`); the Spring example
   proves it through Micrometer Tracing's OpenTelemetry bridge. `SagaFixture.Builder.openTelemetry` for fixture tests.
   No own observation SPI and no Micrometer instrumentation (G-010-06).
+- Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
+  publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
+  test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
+  install` fails on Javadoc errors (no `<h3>` in type comments, no `@throws` on record comments).
 - Not implemented: MySQL and MongoDB storage, the Kafka transport; no Quarkus extension yet (G-007-01). The `saga-forge-storage-mysql`,
   `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules exist only as placeholder POMs.
 - Do not assume engine/autoconfiguration behavior exists just because a module directory exists. Check for

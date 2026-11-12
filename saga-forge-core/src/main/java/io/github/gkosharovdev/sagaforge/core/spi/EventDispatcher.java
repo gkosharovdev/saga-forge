@@ -18,12 +18,12 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * modules that depend only on {@code saga-forge-core} and the respective transport client
  * library.</p>
  *
- * <h3>Outbound only</h3>
+ * <h2>Outbound only</h2>
  * <p>The dispatcher routes nothing to saga instances. Routing and correlation belong to the engine: a transport
  * delivers every event to {@link EventReceiver#receive(Object)}, and the engine resolves the saga types and
  * instances it triggers.</p>
  *
- * <h3>Relationship to the saga-scoped unit of work</h3>
+ * <h2>Relationship to the saga-scoped unit of work</h2>
  * <p>An event recorded with
  * {@link io.github.gkosharovdev.sagaforge.core.event.DomainEvents#record(Object)} (or published
  * through {@link io.github.gkosharovdev.sagaforge.core.event.EventPublisher}, which inside a unit
@@ -39,7 +39,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <p>Implementations therefore never observe an event whose unit of work rolled back.</p>
  *
- * <h3>Implementor concerns</h3>
+ * <h2>Implementor concerns</h2>
  * <ul>
  *   <li><strong>Serialization</strong>: Distributed implementations must handle serialization
  *       and deserialization of domain event objects for cross-instance transport.</li>
@@ -51,7 +51,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *       delivery semantic — this is a transport-level concern.</li>
  * </ul>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <ul>
  *   <li>{@link #dispatch(Object)} — implementations must throw
  *       {@link IllegalArgumentException} if {@code domainEvent} is {@code null}.</li>

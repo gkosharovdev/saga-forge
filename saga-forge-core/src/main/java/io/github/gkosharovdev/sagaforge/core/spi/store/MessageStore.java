@@ -13,16 +13,16 @@ import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
  * data-model.md). Storage-agnostic: implemented by storage modules ({@code PostgresMessageStore}) and decorated in
  * Spring Modulith interop mode; used by transports.
  *
- * <h3>Transactions</h3>
+ * <h2>Transactions</h2>
  * <p>Methods taking a {@link LocalTransaction} run in it and use its resources (for JDBC,
  * {@code tx.resource(Connection.class)}). Every other method runs in a short transaction of its own.</p>
  *
- * <h3>Leasable</h3>
+ * <h2>Leasable</h2>
  * <p>A message is leasable when it is {@link MessageStatus#UNCONSUMED}, not leased or its lease expired, due
  * ({@code nextAttemptAt <= now}), and no {@code UNCONSUMED} message with the same non-null ordering key has a lower
  * position. {@link MessageStatus#SET_ASIDE} messages do not block their key.</p>
  *
- * <h3>Leaseholder writes</h3>
+ * <h2>Leaseholder writes</h2>
  * <p>{@code markConsumed}, {@code recordFailure} and {@code setAside} apply only if {@code consumerId} still holds the
  * message's lease; otherwise they write nothing and throw {@link LeaseLostException}.</p>
  */

@@ -1069,6 +1069,44 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Origin**: `specs/010-otel-observability/spec.md` Clarifications (Q1 revised).
 - **Status**: open (deferred until a user needs Micrometer-native metrics).
 
+## Release and distribution
+
+### DEC-REL-01: Published to Maven Central under Apache-2.0
+- **Decision (user, 2026-11-12)**: Saga Forge is published to Maven Central through the Sonatype Central Portal, under
+  the namespace `io.github.gkosharovdev` (verified through GitHub sign-in), licensed Apache-2.0 (`LICENSE`). First
+  consumer: the booking-service monolith (one module per bounded context, events between them, no broker), using the
+  starter, Postgres storage and the in-memory transport.
+- **How**: root POM metadata (url, licenses, developers, scm, issue management) and a `release` profile (sources,
+  Javadoc with `doclint all,-missing`, GPG signing with loopback pinentry, `central-publishing-maven-plugin` 0.8.0
+  excluding the examples and placeholder modules); `.github/workflows/release.yml` publishes on a `vX.Y.Z` tag after
+  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`.
+  Deployments wait for a manual "Publish" unless the repository variable `CENTRAL_AUTO_PUBLISH` is `true`.
+- **Versioning**: semver; before 1.0 a minor release may break the API, a patch release never does; `internal`
+  packages carry no compatibility promise. Release notes list schema upgrade scripts.
+- **Javadoc**: making the release build pass fixed type-level `<h3>` headings (now `<h2>`), `@throws` tags on record
+  comments (moved into a sentence about the canonical constructor) and one block-tag-looking continuation line.
+
+### G-REL-01: Test jars are published
+- **Description**: core, runtime and the in-memory transport attach `tests` jars (in-memory doubles, contract suites,
+  the 002 harness), and the release publishes them. They are useful to storage and transport implementers but have no
+  compatibility promise and expose test-only types.
+- **Origin**: release setup (DEC-REL-01).
+- **Status**: open (accepted for 0.x; decide before 1.0 whether to keep, rename to a `*-testkit` module, or stop).
+
+### G-REL-02: "Internal" types are public classes
+- **Description**: several types public only for wiring are visible to users: `runtime.internal.EngineSettings`,
+  `Diagnostics`, `RetrySettings`, `TimeAndIdentity`, `transport.inmemory.internal.TransportInstrumentation`, and the
+  test jars. Only documentation (README "Releasing") says they carry no compatibility promise; no JPMS module
+  descriptor or ArchUnit rule enforces it.
+- **Origin**: release setup (DEC-REL-01).
+- **Status**: open (revisit with JPMS `module-info` or an ArchUnit boundary test before 1.0).
+
+### G-REL-03: Snapshots are not published
+- **Description**: only tagged releases reach Maven Central; `-SNAPSHOT` builds are not published anywhere, so a
+  consumer can try unreleased changes only by building locally (`mvn install`).
+- **Origin**: release setup (DEC-REL-01).
+- **Status**: open (the Central Portal supports snapshot publishing if it is needed).
+
 ## Repository hygiene
 
 ### G-REPO-01: Eclipse files untracked and not ignored

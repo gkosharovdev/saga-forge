@@ -16,12 +16,13 @@ import java.util.Map;
  * <em>shallow</em>: the top-level map is an unmodifiable defensive copy, but nested structured maps are
  * kept by reference. Callers (the engine) are expected to hand over maps they no longer mutate.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code sagaId}, {@code values}, or {@code lastModifiedAt} is
+ *                                  {@code null}, or if {@code values} contains a {@code null} key or value.</p>
+ *
  * @param sagaId         the {@link SagaInstance#sagaId()} this record belongs to; non-null
  * @param values         named context values; an unmodifiable shallow defensive copy, with no
  *                       {@code null} keys or values (consistent with {@code SagaContext} rejecting nulls)
  * @param lastModifiedAt time of the last write to the context; non-null
- * @throws IllegalArgumentException if {@code sagaId}, {@code values}, or {@code lastModifiedAt} is
- *                                  {@code null}, or if {@code values} contains a {@code null} key or value
  */
 public record SagaContextRecord(String sagaId, Map<String, Object> values, Instant lastModifiedAt) {
 

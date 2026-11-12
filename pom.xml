@@ -11,6 +11,36 @@
 
     <name>Saga Forge</name>
     <description>A declarative Java framework for orchestrating long-running, multi-step business processes (sagas)</description>
+    <url>https://github.com/gkosharovdev/saga-forge</url>
+    <inceptionYear>2026</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>gkosharovdev</id>
+            <name>Georgi Kosharov</name>
+            <url>https://github.com/gkosharovdev</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/gkosharovdev/saga-forge.git</connection>
+        <developerConnection>scm:git:git@github.com:gkosharovdev/saga-forge.git</developerConnection>
+        <url>https://github.com/gkosharovdev/saga-forge</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/gkosharovdev/saga-forge/issues</url>
+    </issueManagement>
 
     <modules>
         <module>saga-forge-core</module>
@@ -35,6 +65,8 @@
         <assertj.version>3.27.3</assertj.version>
         <!-- The version Spring Boot 4.1.x manages, so applications get one API version (010 research §10) -->
         <opentelemetry.version>1.62.0</opentelemetry.version>
+        <!-- Release profile: whether a validated deployment is published without a manual step in the portal -->
+        <central.autoPublish>false</central.autoPublish>
     </properties>
 
     <dependencyManagement>
@@ -67,4 +99,90 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+    <profiles>
+        <!--
+          Builds what Maven Central requires and publishes through the Sonatype Central Portal (see README "Releasing"):
+          sources and Javadoc jars, GPG signatures, one deployment bundle. The examples and the placeholder modules are
+          left out of the bundle. Credentials come from the "central" server in settings.xml; the release workflow writes
+          it from the CENTRAL_TOKEN_* secrets.
+        -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.12.0</version>
+                        <configuration>
+                            <!-- Missing comments on obvious accessors are not release blockers; broken HTML and references are. -->
+                            <doclint>all,-missing</doclint>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                                <configuration>
+                                    <!-- The passphrase comes from MAVEN_GPG_PASSPHRASE; loopback lets gpg read it non-interactively. -->
+                                    <gpgArguments>
+                                        <arg>--pinentry-mode</arg>
+                                        <arg>loopback</arg>
+                                    </gpgArguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.8.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <!-- false: the deployment waits in the portal for a manual "Publish"; true publishes once validated. -->
+                            <autoPublish>${central.autoPublish}</autoPublish>
+                            <waitUntil>validated</waitUntil>
+                            <excludeArtifacts>
+                                <artifact>saga-forge-example</artifact>
+                                <artifact>saga-forge-example-spring</artifact>
+                                <artifact>saga-forge-storage-mysql</artifact>
+                                <artifact>saga-forge-storage-mongodb</artifact>
+                                <artifact>saga-forge-transport-kafka</artifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

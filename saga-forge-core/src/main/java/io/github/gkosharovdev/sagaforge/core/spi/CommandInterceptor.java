@@ -8,7 +8,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * fixture uses it to record commands, to answer commands whose handler a test did not register, and to make commands
  * fail. At most one is registered with an engine; the default {@link #proceeding()} leaves behaviour unchanged.</p>
  *
- * <h3>Obligations of the engine</h3>
+ * <h2>Obligations of the engine</h2>
  * <ol>
  *   <li>{@link #intercept} is called exactly once per handling of a command: a command sent from a step or a
  *       compensation, a command sent outside a unit of work, and an outbox command delivered through

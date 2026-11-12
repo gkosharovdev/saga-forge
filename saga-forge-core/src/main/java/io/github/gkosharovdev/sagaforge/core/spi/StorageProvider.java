@@ -11,7 +11,7 @@ import java.util.Optional;
  * depends only on {@code saga-forge-core} and the respective database driver, following the
  * pluggable module boundary pattern.</p>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <ul>
  *   <li>{@link #save(SagaInstance, List)} — implementations must throw
  *       {@link IllegalArgumentException} if {@code instance} or {@code newEntries} is {@code null}, if
@@ -29,7 +29,7 @@ import java.util.Optional;
  *       {@link IllegalArgumentException} if {@code sagaId} is {@code null}.</li>
  * </ul>
  *
- * <h3>Engine writes</h3>
+ * <h2>Engine writes</h2>
  * <p>The saga engine writes an instance three ways, each with the lifecycle entries that belong to it, through
  * {@link #save(SagaInstance, List)}:</p>
  * <ul>
@@ -44,7 +44,7 @@ import java.util.Optional;
  * </ul>
  * <p>The provider records exactly the entries it is given, in the order given, and derives none.</p>
  *
- * <h3>Transactions</h3>
+ * <h2>Transactions</h2>
  * <p>A provider built with the host's {@link TransactionBoundary} joins the transaction active on the calling thread
  * for every operation (reads included) by asking it for its resource by type, and never commits, rolls back or
  * closes that resource. With no transaction active, or built without a boundary, every operation runs in its own

@@ -15,6 +15,8 @@ import java.util.UUID;
  * <p>A command sent outside a saga step gets an {@linkplain #unscoped(String) unscoped} identity: a random value
  * that carries no guarantee.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a component violates the rules above.</p>
+ *
  * @param sagaId      the saga instance; non-blank if {@code sagaScoped}, otherwise {@code null}
  * @param stepName    the step that sent the command; non-blank if {@code sagaScoped}, otherwise {@code null}
  * @param commandType fully qualified class name of the command; non-blank
@@ -22,7 +24,6 @@ import java.util.UUID;
  *                    {@code sagaScoped}, otherwise 0
  * @param value       the identity value; non-blank
  * @param sagaScoped  whether the command was sent from a saga step
- * @throws IllegalArgumentException if a component violates the rules above
  */
 public record CommandId(String sagaId, String stepName, String commandType, int ordinal, String value,
         boolean sagaScoped) {
