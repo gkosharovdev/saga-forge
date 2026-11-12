@@ -242,6 +242,23 @@ saga-forge.enabled=false
 - **An event a step of its own saga runs is not passed on to other saga types.** Give the second saga an event of its
   own (memory.md G-ENG-24).
 
+## Testing
+
+Test a saga without a context, database or transport with the saga test fixture (`saga-forge-test`, test scope).
+Hand it the beans it needs, built by hand with test doubles or taken from a context:
+
+```java
+SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class, Order.class)
+        .handlers(new PaymentService(provider))
+        .build();
+fixture.givenAggregates(Order.create("o-1", true))
+        .when(new OrderCreatedEvent("o-1", amount))
+        .expectEndedWith("completeOrder");
+```
+
+`OrderSagaFixtureTest` in `saga-forge-example-spring` is the complete test. A helper that builds the fixture from an
+application context is not available yet (memory.md G-009-01).
+
 ## When startup fails
 
 Every misconfiguration stops the application with Spring Boot's failure analysis, naming the class, bean, property or

@@ -947,6 +947,66 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Final checkpoint (T057, 2026-11-12)**: `mvn -B -Pcontainer-tests clean verify` green for the whole build, 1,502
   tests (core 465, runtime 678, in-memory transport 51, Postgres 212, starter 81, example 13, Spring example 2).
 
+## Saga test fixture (009)
+
+### G-009-01: Spring helper and test slice for the saga test fixture deferred
+- **Description**: 009's fixture is framework-neutral: a test hands it saga and handler instances, which it may take
+  from a Spring context itself. Not covered: a helper that builds the fixture from an application context's beans
+  (sagas, handler hosts, `AggregateResolver`s, parameter resolvers), and a test slice annotation that starts a context
+  without a database or transport.
+- **Origin**: `specs/009-saga-test-fixture/spec.md` Clarifications (Q2, option A chosen over B and C), FR-013.
+- **Remark**: build the helper on the starter's host SPIs (`SpringSagaObjectProvider`, `SpringHandlerInstanceProvider`,
+  `SpringHandlerParameterResolver`, `SpringDataAggregateResolver`) rather than a parallel lookup; decide it together
+  with Spring Modulith `Scenario` support (G-008-01) so the two do not compete.
+- **Status**: open (deferred).
+
+### G-009-02: The fixture's in-memory plug-ins duplicate the runtime's test doubles
+- **Description**: `saga-forge-test` ships its own in-memory transaction boundary, storage provider and context store as
+  main code; the runtime keeps `InMemoryTransactionBoundary`, `TransactionalInMemoryStorageProvider` and
+  `ConcurrentSagaContextStore` in its test-jar. Maven forbids the runtime's tests depending on the fixture (cycle), so
+  the two copies can drift.
+- **Origin**: `specs/009-saga-test-fixture/research.md` §6.
+- **Status**: open (accepted; revisit with a shared testkit module if a Quarkus host needs the same plug-ins).
+
+### G-009-03: The durable `SagaContext` value rule is duplicated from Postgres
+- **Description**: the fixture checks `SagaContext` values against the types every supported durable store persists,
+  today Postgres's `JsonCodec` rule, re-implemented in the fixture because it must not depend on a storage module.
+- **Origin**: `specs/009-saga-test-fixture/research.md` §8, contracts/context-value-rule.md.
+- **Status**: open (guarded by `DurableContextValueContractTest` in `saga-forge-storage-postgres`; each new storage
+  module must add the same test and narrow the rule if it accepts less).
+
+### G-009-04: Record-and-answer still needs a handler class for outbox commands
+- **Description**: the runtime refuses to store a `@Command(delivery = OUTBOX)` command whose type has no handler route
+  (`NoCommandHandlerException` at `send`, rule R23 at validation). The command interceptor sees outbox commands only
+  when they are delivered, so in record-and-answer mode a saga that sends one fails unless the test registers the
+  handler's class with `register(...)` (the handler is then still not run unless passed to `handlers(...)`).
+- **Origin**: `specs/009-saga-test-fixture` implementation (`EngineCommandGateway.sendWithin`), contracts/command-interceptor.md
+  obligation 1.
+- **Status**: open (documented in the fixture README; relax only together with R23).
+
+### G-009-05: The fixture's aggregate store copies only aggregates with a no-argument constructor
+- **Description**: the in-memory aggregate store hands handlers a field-by-field copy so a rolled-back unit of work
+  leaves the stored aggregate untouched. A class without a no-argument constructor (the canonical `Order`, Spring
+  Data aggregates with a `@PersistenceCreator`) cannot be copied generically and is shared, so a change a handler made
+  in a rolled-back unit of work stays visible in `fixture.aggregate(...)`.
+- **Origin**: `specs/009-saga-test-fixture` implementation (`AggregateStore`, `Model.shallowCopy`), research §7.
+- **Status**: open (documented; a copy hook on the builder could close it).
+
+### G-009-06: The fixture does not emulate Postgres's number read-back
+- **Description**: Postgres reads an integral `SagaContext` value inside the `int` range back as `Integer`
+  (G-003-07), so `getState(key, Long.class)` on a small `Long` fails there; the fixture's context store keeps the
+  `Long`, so a fixture test does not catch it. The value check (FR-019) only rejects types storage cannot persist.
+- **Origin**: `specs/009-saga-test-fixture` implementation, `DurableContextValueContractTest` (which normalizes
+  numbers for that reason).
+- **Status**: open (decide with G-003-07: emulate in the fixture, or make storage keep the declared type).
+
+### G-009-07: Outbox commands are reported at delivery, not at send
+- **Description**: the fixture records an outbox command when the runtime delivers it through `CommandReceiver`, so in
+  `result().commands()` it follows the commands handled inside the sending unit of work, whatever the order the step
+  sent them in. Its `CommandId` still names the sending step.
+- **Origin**: `specs/009-saga-test-fixture` implementation (`FixtureCommandInterceptor`, `LoopBackTransport`).
+- **Status**: open (accepted).
+
 ## Repository hygiene
 
 ### G-REPO-01: Eclipse files untracked and not ignored

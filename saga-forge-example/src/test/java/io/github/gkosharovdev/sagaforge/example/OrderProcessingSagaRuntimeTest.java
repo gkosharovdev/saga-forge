@@ -119,7 +119,7 @@ class OrderProcessingSagaRuntimeTest {
         assertThat(instance.status()).isEqualTo(SagaStatus.FAILED);
         assertThat(instance.steps().values()).extracting(StepRecord::status).containsOnly(StepStatus.NOT_RUN);
         assertThat(contextStore.find(result.sagaId())).map(SagaContextRecord::values)
-                .hasValueSatisfying(values -> assertThat(values).containsEntry("orderAmount", AMOUNT));
+                .hasValueSatisfying(values -> assertThat(values).containsEntry("orderAmount", AMOUNT.toPlainString()));
     }
 
     @Test

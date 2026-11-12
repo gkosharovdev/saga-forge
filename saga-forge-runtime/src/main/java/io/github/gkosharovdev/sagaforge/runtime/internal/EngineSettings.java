@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
@@ -34,6 +35,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * @param outbox            receives committed units of work's buffered events
  * @param outboxTiming      {@code outbox.timing()}, read once when the engine was built
  * @param sources            clock and id suppliers
+ * @param retry              retry limits and the pause between attempts
+ * @param commandInterceptor sees every command handling; {@link CommandInterceptor#proceeding()} by default
  */
 public record EngineSettings(
         StorageProvider storage,
@@ -47,7 +50,8 @@ public record EngineSettings(
         Outbox outbox,
         Outbox.Timing outboxTiming,
         TimeAndIdentity sources,
-        RetrySettings retry) {
+        RetrySettings retry,
+        CommandInterceptor commandInterceptor) {
 
     /**
      * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -63,14 +67,21 @@ public record EngineSettings(
         requireNonNull(outboxTiming, "outboxTiming");
         requireNonNull(sources, "sources");
         requireNonNull(retry, "retry");
+        requireNonNull(commandInterceptor, "commandInterceptor");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
         parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
     }
 
-    /**
-     * The provider used when no registered class hosts a service handler, loader or saver; it is never asked, and
-     * fails with {@link IllegalStateException} if it is.
-     */
+    /** Settings with the {@linkplain CommandInterceptor#proceeding() proceeding} interceptor. */
+    public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
+            EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
+            List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
+            Optional<SagaObjectProvider> sagaObjects, Outbox outbox, Outbox.Timing outboxTiming,
+            TimeAndIdentity sources, RetrySettings retry) {
+        this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
+                parameterResolvers, sagaObjects, outbox, outboxTiming, sources, retry, CommandInterceptor.proceeding());
+    }
+
     /** Settings with {@link RetrySettings#defaults()}. */
     public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
             EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
@@ -81,6 +92,10 @@ public record EngineSettings(
                 parameterResolvers, sagaObjects, outbox, outboxTiming, sources, RetrySettings.defaults());
     }
 
+    /**
+     * The provider used when no registered class hosts a service handler, loader or saver; it is never asked, and
+     * fails with {@link IllegalStateException} if it is.
+     */
     public static HandlerInstanceProvider noHandlerInstances() {
         return handlerType -> {
             throw new IllegalStateException("No HandlerInstanceProvider was registered; cannot supply "

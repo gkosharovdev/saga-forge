@@ -67,6 +67,13 @@
         </dependency>
 
         <!-- Test dependencies -->
+        <!-- Fixture tests of the saga with the application's own beans, no database (009 US5, SC-006) -->
+        <dependency>
+            <groupId>io.github.gkosharovdev</groupId>
+            <artifactId>saga-forge-test</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

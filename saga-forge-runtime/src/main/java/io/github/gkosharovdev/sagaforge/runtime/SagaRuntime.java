@@ -5,6 +5,7 @@ import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner;
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
@@ -215,6 +216,7 @@ public final class SagaRuntime implements EventReceiver {
         private System.Logger logger = System.getLogger(DEFAULT_LOGGER_NAME);
         private Duration maxTotalRetryBackoff = RetrySettings.DEFAULT_MAX_TOTAL_BACKOFF;
         private RetryPause retryPause = RetryPause.sleeping();
+        private CommandInterceptor commandInterceptor;
 
         private Builder() {
         }
@@ -328,6 +330,23 @@ public final class SagaRuntime implements EventReceiver {
             return this;
         }
 
+        /**
+         * Optional: sees every command the engine is about to handle, and may fail it, complete it without its
+         * handler, or let it proceed ({@code specs/009-saga-test-fixture}, Property 36). At most one; default
+         * {@link CommandInterceptor#proceeding()}, which leaves behaviour unchanged.
+         *
+         * @throws IllegalArgumentException if {@code commandInterceptor} is {@code null}
+         * @throws IllegalStateException    if an interceptor was already set
+         */
+        public Builder commandInterceptor(CommandInterceptor commandInterceptor) {
+            requireNonNull(commandInterceptor, "commandInterceptor");
+            if (this.commandInterceptor != null) {
+                throw new IllegalStateException("A CommandInterceptor was already set; an engine has at most one");
+            }
+            this.commandInterceptor = commandInterceptor;
+            return this;
+        }
+
         /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
         public Builder logger(System.Logger logger) {
             this.logger = requireNonNull(logger, "logger");
@@ -368,7 +387,8 @@ public final class SagaRuntime implements EventReceiver {
             return new EngineSettings(storage, contextStore, transactions, dispatcher, instances, aggregateResolvers,
                     parameterResolvers, Optional.ofNullable(sagaObjects), effectiveOutbox, timing,
                     new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
-                    new RetrySettings(maxTotalRetryBackoff, retryPause::pause));
+                    new RetrySettings(maxTotalRetryBackoff, retryPause::pause),
+                    commandInterceptor != null ? commandInterceptor : CommandInterceptor.proceeding());
         }
 
         private static String randomId() {

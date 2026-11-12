@@ -22,6 +22,8 @@ import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandInvocation;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
@@ -65,6 +67,13 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  *       {@link NonSagaUnitOfWork} (FR-016).</li>
  * </ul>
  *
+ * <h2>Interception ({@code specs/009-saga-test-fixture}, Property 36)</h2>
+ * <p>Every handling of a command, in a saga or non-saga unit of work or delivered through the
+ * {@code CommandReceiver}, goes through the {@link CommandInterceptor} exactly once, with the command's identity
+ * bound; the route runs only if the interceptor {@linkplain CommandInvocation#proceed() proceeds}. A skipped command
+ * (identity already committed) and an outbox command at the time it is stored are not handed over. The interceptor's
+ * exception is handled as the handler's.</p>
+ *
  * <p>Immutable; thread-safe if the host plug-ins and client handlers are.</p>
  */
 final class EngineCommandGateway implements CommandGateway {
@@ -99,14 +108,17 @@ final class EngineCommandGateway implements CommandGateway {
     private final boolean outboxStoresCommands;
     private final Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork;
     private final Diagnostics diagnostics;
+    private final CommandInterceptor interceptor;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
-            boolean outboxStoresCommands, Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics) {
+            boolean outboxStoresCommands, Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics,
+            CommandInterceptor interceptor) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
         this.outboxStoresCommands = outboxStoresCommands;
         this.nonSagaUnitsOfWork = nonSagaUnitsOfWork;
         this.diagnostics = diagnostics;
+        this.interceptor = interceptor;
     }
 
     /**
@@ -132,7 +144,7 @@ final class EngineCommandGateway implements CommandGateway {
         }
         return new EngineCommandGateway(routes, settings.transactions(), settings.outbox().supportsCommands(),
                 () -> new NonSagaUnitOfWork(settings,
-                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics);
+                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics, settings.commandInterceptor());
     }
 
     @Override
@@ -149,8 +161,11 @@ final class EngineCommandGateway implements CommandGateway {
     private void sendWithin(UnitOfWork unitOfWork, Object command) {
         try {
             requireCommand(command);
-            CommandRoute route = routeFor(command);
+            CommandRoute route = routes.get(command.getClass());
             boolean logged = isOutbox(command);
+            if (logged && route == null) {
+                throw new NoCommandHandlerException(command.getClass());
+            }
             if (logged && !outboxStoresCommands) {
                 throw new IllegalStateException("Command " + command.getClass().getName() + " is delivered OUTBOX, "
                         + "but the engine's Outbox does not support commands; use a transport whose outbox does, "
@@ -167,10 +182,7 @@ final class EngineCommandGateway implements CommandGateway {
                 unitOfWork.commandHandled(id);
                 return;
             }
-            CommandIds.withBound(id, () -> {
-                route.handle(command);
-                return null;
-            });
+            intercept(command, id, route);
             unitOfWork.commandHandled(id);
         } catch (RuntimeException | Error failure) {
             transactions.current().ifPresent(LocalTransaction::setRollbackOnly);
@@ -195,12 +207,9 @@ final class EngineCommandGateway implements CommandGateway {
             throw new IllegalStateException("CommandReceiver.receive was called inside a unit of work; a transport "
                     + "delivers outbox commands from its own threads");
         }
-        CommandRoute route = routeFor(command);
+        CommandRoute route = routes.get(command.getClass());
         nonSagaUnitsOfWork.get().run(() -> {
-            CommandIds.withBound(delivery.commandId(), () -> {
-                route.handle(command);
-                return null;
-            });
+            intercept(command, delivery.commandId(), route);
             LocalTransaction transaction = transactions.current().orElseThrow(() -> new IllegalStateException(
                     "no transaction is active in the unit of work handling " + delivery.commandId()));
             delivery.inTransaction().accept(transaction);
@@ -211,12 +220,54 @@ final class EngineCommandGateway implements CommandGateway {
         return command.getClass().getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX;
     }
 
-    private CommandRoute routeFor(Object command) {
-        CommandRoute route = routes.get(command.getClass());
-        if (route == null) {
-            throw new NoCommandHandlerException(command.getClass());
+    /** Hands one handling to the interceptor with {@code id} bound; {@code route} is {@code null} if none exists. */
+    private void intercept(Object command, CommandId id, CommandRoute route) {
+        CommandIds.withBound(id, () -> {
+            interceptor.intercept(new Invocation(command, id, route));
+            return null;
+        });
+    }
+
+    /** The {@link CommandInvocation} of one handling; {@link #proceed()} runs at most once. */
+    private static final class Invocation implements CommandInvocation {
+
+        private final Object command;
+        private final CommandId commandId;
+        private final CommandRoute route;
+        private boolean proceeded;
+
+        private Invocation(Object command, CommandId commandId, CommandRoute route) {
+            this.command = command;
+            this.commandId = commandId;
+            this.route = route;
         }
-        return route;
+
+        @Override
+        public Object command() {
+            return command;
+        }
+
+        @Override
+        public CommandId commandId() {
+            return commandId;
+        }
+
+        @Override
+        public boolean hasHandler() {
+            return route != null;
+        }
+
+        @Override
+        public void proceed() {
+            if (proceeded) {
+                throw new IllegalStateException("proceed() was already called for " + commandId);
+            }
+            proceeded = true;
+            if (route == null) {
+                throw new NoCommandHandlerException(command.getClass());
+            }
+            route.handle(command);
+        }
     }
 
     private static void requireCommand(Object command) {

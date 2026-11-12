@@ -193,7 +193,8 @@ final or exhausted step failure, in reverse completion order, and resumes after 
 from a durable message store written in the same transaction as the saga state, so unconsumed messages survive a
 restart. The Spring Boot starter (feature 008) assembles and starts the runtime from the application's beans,
 `DataSource` and Spring Data repositories, publishes saga events to Spring Modulith's module listeners, and reports
-the message store through Actuator. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
+the message store through Actuator. The saga test fixture (feature 009, `saga-forge-test`) runs a saga's given/when/then
+tests on the shipped runtime, in memory, with no database, transport or Spring context. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
 Quarkus extension. See
 [docs/architecture.md](docs/architecture.md) for the target design and
 [docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
@@ -210,7 +211,8 @@ historical planning artifacts, superseded by the docs above where they conflict.
 | `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
 | `saga-forge-transport-inmemory` | In-process transport with a durable message store (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
 | `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
-| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-runtime` (test scope) |
+| `saga-forge-test` | Test fixture for applications (test scope): given/when/then over the shipped runtime, in memory; record-and-answer or real handlers; failure rules, a controllable clock, deterministic ids. See [its README](saga-forge-test/README.md) | `saga-forge-runtime` |
+| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-runtime`, `saga-forge-test` (test scope) |
 | `saga-forge-example-spring` | The canonical saga as a Spring Boot application: Spring Data JDBC aggregate, service beans, no Saga Forge assembly code | the starter, `saga-forge-storage-postgres` |
 
 ## Getting started
@@ -268,6 +270,47 @@ A command type can opt into the log, so it is handled after the sending step com
 @Command(delivery = CommandDelivery.OUTBOX)
 public record ChargeCard(@AggregateIdentifier String invoiceId) { }
 ```
+
+
+## Testing sagas
+
+Add the fixture in test scope:
+
+```xml
+<dependency>
+    <groupId>io.github.gkosharovdev</groupId>
+    <artifactId>saga-forge-test</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+A test states the history a saga has seen, the event that arrives next, and what the saga must do. Here the saga is
+the canonical `OrderProcessingSaga` from `saga-forge-example`, whose steps associate events by `orderId`:
+`handleOrderCreated` (`@StartSaga`), `processPayment`, then `completeOrder` (`@EndSaga`) or `rejectOrder`
+(`@StartCompensation`).
+
+```java
+BigDecimal AMOUNT = new BigDecimal("10.00");
+
+SagaFixture.of(OrderProcessingSaga.class).build()
+        .given(new OrderCreatedEvent("o-1", AMOUNT))
+        .when(new PaymentProcessedEvent("payment-1", "o-1", AMOUNT))
+        .expectCommands(new ReserveStockCommand("o-1"))
+        .expectContext("paymentId", "payment-1")
+        .expectCompletedStep("processPayment")
+        .expectStatus(SagaStatus.RUNNING);
+```
+
+The fixture runs the shipped runtime over in-memory parts of its own, so routing by association, the unit of work,
+retries and compensation behave as in production. By default no command handler runs: each command a step sends is
+recorded and the test answers it by publishing the resulting event. With `.handlers(new PaymentService(provider))`
+the application's own handlers and aggregates run as well. `.failCommand(...)` makes a command fail, retry waits
+advance the fixture's clock instead of sleeping, and saga ids are `saga-1`, `saga-2`, ..., so command identities are
+predictable. A `SagaContext` value Postgres cannot store, such as a `BigDecimal`, fails the test at the step that
+wrote it. A failed expectation names the saga, the association value, the event, the steps that ran and the
+expected and actual values. The reference tests are `OrderProcessingSagaFixtureTest` in `saga-forge-example`; the
+[fixture README](saga-forge-test/README.md) covers every expectation.
 
 ## Vocabulary
 
