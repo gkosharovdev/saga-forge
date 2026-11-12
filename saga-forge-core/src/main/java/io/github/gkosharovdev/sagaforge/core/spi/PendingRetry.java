@@ -10,12 +10,13 @@ import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
  * the policy allows. Cleared when a unit of work triggered by
  * {@code triggerStep} commits.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a component violates the rules above.</p>
+ *
  * @param triggerStep     the step the triggering event runs; non-blank
  * @param attemptsStarted the attempt number claimed so far; at least 2
  * @param lastFailure     the last recorded failure, classified {@link FailureClassification#TRANSIENT}; of attempt
  *                        {@code attemptsStarted - 1}, or of an earlier attempt when a redelivery claimed the next one
  *                        after a crash ({@code lastFailure.attempts() < attemptsStarted})
- * @throws IllegalArgumentException if a component violates the rules above
  */
 public record PendingRetry(String triggerStep, int attemptsStarted, SagaFailure lastFailure) {
 

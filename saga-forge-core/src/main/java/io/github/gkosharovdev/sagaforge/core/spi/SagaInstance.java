@@ -11,6 +11,16 @@ import java.util.Map;
  * {@code failure} and the {@link SagaStatus#FAILED} status are written after a rollback, in their own
  * write. {@code SagaContext} values are not held here; they live in a {@link SagaContextRecord}.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code steps} is {@code null} or contains a {@code null} key or value,
+ *                                  if {@code outcome} is present without {@code COMPLETED} (or absent with it),
+ *                                  if {@code failure} is present without {@code FAILED} (or absent with it), or if
+ *                                  {@code pendingRetry} is present on an instance that is not {@code CREATED} or
+ *                                  {@code RUNNING}, if
+ *                                  {@code compensationTrigger} breaks its rule, if a step has a compensation state
+ *                                  outside compensation, if a {@code COMPENSATED} instance has a step not yet
+ *                                  compensated or failed, or if a {@code REQUIRES_INTERVENTION} instance does not
+ *                                  have exactly one failed compensation.</p>
+ *
  * @param sagaId           unique identifier
  * @param sagaType         fully qualified class name of the @Saga class
  * @param state            reserved; not populated by the engine. Values that must survive between steps belong
@@ -32,15 +42,6 @@ import java.util.Map;
  *                         {@code COMPENSATING}, {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}
  *                         ({@code specs/006-saga-compensation} FR-017). Written once, by the write that enters
  *                         {@code COMPENSATING}
- * @throws IllegalArgumentException if {@code steps} is {@code null} or contains a {@code null} key or value,
- *                                  if {@code outcome} is present without {@code COMPLETED} (or absent with it),
- *                                  if {@code failure} is present without {@code FAILED} (or absent with it), or if
- *                                  {@code pendingRetry} is present on an instance that is not {@code CREATED} or
- *                                  {@code RUNNING}, if
- *                                  {@code compensationTrigger} breaks its rule, if a step has a compensation state
- *                                  outside compensation, if a {@code COMPENSATED} instance has a step not yet
- *                                  compensated or failed, or if a {@code REQUIRES_INTERVENTION} instance does not
- *                                  have exactly one failed compensation
  */
 public record SagaInstance(
     String sagaId,

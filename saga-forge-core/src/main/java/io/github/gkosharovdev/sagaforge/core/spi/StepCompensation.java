@@ -6,12 +6,13 @@ import java.time.Instant;
 /**
  * Compensation state of one completed step ({@code specs/006-saga-compensation} FR-017).
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
+ *
  * @param status  non-null
  * @param at      when the status was reached; {@code null} if and only if {@code status == NOT_ATTEMPTED}
  * @param failure why the compensation failed, classified {@code FINAL}, {@code UNCLASSIFIED} or, for a transient
  *                cause that was not retried, {@code EXHAUSTED} after its single attempt; non-null if and only if
  *                {@code status == FAILED}
- * @throws IllegalArgumentException if a rule above is violated
  */
 public record StepCompensation(CompensationStatus status, Instant at, SagaFailure failure) {
 

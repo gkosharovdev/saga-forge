@@ -7,14 +7,14 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <p><strong>Implemented by the engine</strong> ({@code SagaRuntime.commandReceiver()}); called by transports.</p>
  *
- * <h3>Effect</h3>
+ * <h2>Effect</h2>
  * <p>Synchronously, on the calling thread: opens a new non-saga unit of work, runs the single {@code @CommandHandler}
  * for the command's type with {@link OutboxCommand#commandId()} bound for a {@code CommandId} parameter, then calls
  * {@link OutboxCommand#inTransaction()} with that unit of work's transaction, then commits. Events the handler records
  * go to the {@link Outbox} as for any non-saga unit of work. If anything throws, the unit of work rolls back and the
  * exception propagates; the transport redelivers.</p>
  *
- * <h3>Failures</h3>
+ * <h2>Failures</h2>
  * <ul>
  *   <li>{@link IllegalArgumentException} for a {@code null} delivery or a command whose class is not
  *       {@code @Command}-annotated.</li>

@@ -9,20 +9,20 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *
  * <p><strong>Implemented by the engine (default), a later outbox, or tests; never by client code.</strong></p>
  *
- * <h3>Which events</h3>
+ * <h2>Which events</h2>
  * <p>Every event recorded in the unit of work (through {@code DomainEvents.record} or {@code EventPublisher} on its
  * thread) that no step of the owning instance ran in-process: events of other saga types or instances, events
  * triggering a {@code @StartSaga} step, events no step reacts to, and events still queued when an {@code @EndSaga}
  * step ended the unit of work. For a non-saga unit of work, every recorded event. Each event exactly once. Never for
  * a unit of work that rolled back or lost a write-time conflict; an empty batch is not stored in the outbox.</p>
  *
- * <h3>Order and identity</h3>
+ * <h2>Order and identity</h2>
  * <p>Events are in recording order. {@link OutgoingMessages#unitOfWorkId()} is unique per unit of work, saga-scoped
  * or not; together with an event's index in {@link OutgoingMessages#events()} it identifies the event uniquely,
  * which an outbox can use as a key. Saga type and id are present for a saga-scoped unit of work and absent for a
  * non-saga one.</p>
  *
- * <h3>Timing</h3>
+ * <h2>Timing</h2>
  * <ul>
  *   <li>{@link Timing#AFTER_COMMIT} (default): {@link #store(OutgoingMessages)} is called after the commit
  *       returned, after the instance lock was released, on the unit-of-work thread, with no engine transaction
@@ -38,7 +38,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *       non-saga unit of work, rollback and the exception rethrown from {@code CommandGateway.send}.</li>
  * </ul>
  *
- * <h3>Delivery guarantee and the outbox</h3>
+ * <h2>Delivery guarantee and the outbox</h2>
  * <p>{@code AFTER_COMMIT} delivery is at most once: events of a committed unit of work are lost if the process
  * stops before or during the outbox, and nothing redelivers them. A transactional outbox closes that window with
  * an {@code IN_TRANSACTION} implementation that inserts one row per event keyed by {@code (unitOfWorkId, index)}

@@ -8,14 +8,15 @@ import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
  * Persisted description of the failure that moved a saga instance to {@link SagaStatus#FAILED}, or of a failed
  * attempt the engine retried.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code stepName}, {@code causeType}, {@code failedAt} or
+ *                                  {@code classification} is {@code null}, or {@code attempts < 1}.</p>
+ *
  * @param stepName       the step that failed; non-null
  * @param causeType      fully qualified class name of the failure; non-null
  * @param message        the failure's message; nullable
  * @param failedAt       when the failure was recorded; non-null
  * @param classification how the engine classified the failure; non-null ({@code specs/005-step-retry} FR-008)
  * @param attempts       the number of the attempt that failed, counting the first as 1; at least 1
- * @throws IllegalArgumentException if {@code stepName}, {@code causeType}, {@code failedAt} or
- *                                  {@code classification} is {@code null}, or {@code attempts < 1}
  */
 public record SagaFailure(String stepName, String causeType, String message, Instant failedAt,
         FailureClassification classification, int attempts) {

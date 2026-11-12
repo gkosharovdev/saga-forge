@@ -73,7 +73,7 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  * ({@code validateAll} only):
  * <ul>
  *   <li>{@code validateIdentifierFields} — exactly one @AggregateIdentifier field on each @Aggregate and
- *       @DomainEvent type, at most one on each @Command type</li>
+ *       {@code @DomainEvent} type, at most one on each @Command type</li>
  *   <li>{@code validateEventAggregate} — @DomainEvent.aggregate names an @Aggregate class</li>
  * </ul>
  * Model rules across all hosts ({@code validateAll} only, reported as model errors):

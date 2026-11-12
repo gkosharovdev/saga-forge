@@ -5,6 +5,9 @@ import java.time.Duration;
 /**
  * Tuning of an {@link InMemoryTransport} ({@code specs/007-in-memory-transport} contracts/in-memory-transport.md).
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a count is not positive, a duration is not positive, or
+ *                                  {@code maxBackoff < initialBackoff}.</p>
+ *
  * @param workers                delivery threads; messages with the same ordering key always use the same one
  * @param maxAttempts            failed deliveries before a message is set aside (FR-015)
  * @param initialBackoff         wait after the first failure; doubled per further failure
@@ -15,8 +18,6 @@ import java.time.Duration;
  * @param retention              how long consumed messages are kept (FR-019)
  * @param retentionSweepInterval how often consumed messages older than {@code retention} are removed
  * @param heartbeatInterval      how often this transport refreshes its heartbeat (FR-021)
- * @throws IllegalArgumentException if a count is not positive, a duration is not positive, or
- *                                  {@code maxBackoff < initialBackoff}
  */
 public record TransportSettings(int workers, int maxAttempts, Duration initialBackoff, Duration maxBackoff,
         Duration leaseDuration, Duration pollInterval, int leaseBatchSize, Duration retention,

@@ -9,6 +9,8 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * A message as stored in the {@link MessageStore}, returned by leases and queries
  * ({@code specs/007-in-memory-transport} data-model.md).
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
+ *
  * @param position       assigned at append, strictly increasing per log
  * @param messageId      see {@link NewMessage#messageId()}; non-blank
  * @param kind           non-null
@@ -29,7 +31,6 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * @param consumedAt     non-null if and only if {@code status} is {@link MessageStatus#CONSUMED}
  * @param setAsideReason non-null if and only if {@code status} is {@link MessageStatus#SET_ASIDE}
  * @param externalRef    in Spring Modulith interop mode the registry's publication identity; otherwise {@code null}
- * @throws IllegalArgumentException if a rule above is violated
  */
 public record StoredMessage(long position, String messageId, MessageKind kind, String payloadType, Object payload,
         CommandId commandId, String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt,

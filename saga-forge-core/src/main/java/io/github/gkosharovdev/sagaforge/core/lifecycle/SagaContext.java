@@ -20,12 +20,12 @@ import java.util.Optional;
  * <p>No production implementation ships in {@code saga-forge-core}; implementations are provided by
  * the engine runtime, the same posture as {@code StorageProvider} and {@code EventDispatcher}.</p>
  *
- * <h3>Scoping invariant (FR-010)</h3>
+ * <h2>Scoping invariant (FR-010)</h2>
  * <p>A {@code SagaContext} instance is bound to exactly one saga instance for its entire lifetime. No
  * operation on it can read or write another saga instance's state, regardless of saga type: two
  * different instances writing under the same {@code name} never observe each other's values.</p>
  *
- * <h3>Representation</h3>
+ * <h2>Representation</h2>
  * <p>Named values (structured values as nested {@code Map<String, Object>}) are persisted as their own
  * {@code SagaContextRecord}, through the {@code SagaContextStore} SPI, referencing the saga instance by
  * its saga id. They are <em>not</em> stored in {@code SagaInstance.state}, which keeps only the saga
@@ -35,7 +35,7 @@ import java.util.Optional;
  * committed or rolled back. A {@code SagaContext} does not call {@code SagaContextStore} itself; the
  * engine persists the values. The value semantics described here are unchanged.</p>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <ul>
  *   <li>{@link #getState(String, Class)} — implementations must throw
  *       {@link IllegalArgumentException} if {@code name} is {@code null} or blank, or if

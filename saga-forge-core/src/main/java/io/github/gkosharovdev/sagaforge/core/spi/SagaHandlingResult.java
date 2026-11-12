@@ -5,6 +5,11 @@ import java.util.List;
 /**
  * The result of handling one event for one saga type or instance, as reported in a {@link HandlingReport}.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code sagaType}, {@code outcome} or {@code outboxFailures} is {@code null},
+ *                                  if {@code outboxFailures} contains {@code null} or is non-empty for another
+ *                                  outcome, or if {@code outcomeStep} or {@code failure} is present or absent
+ *                                  inconsistently with {@code outcome}.</p>
+ *
  * @param sagaType        fully qualified class name of the {@code @Saga} class; non-null
  * @param sagaId          the instance; {@code null} for {@link HandlingOutcome#UNMATCHED}, for
  *                        {@link HandlingOutcome#DUPLICATE_START} and for a start that raised before its creation
@@ -21,10 +26,6 @@ import java.util.List;
  * @param outboxFailures the exceptions thrown by the after-commit outboxs of the committed units of work; non-null,
  *                        no {@code null} element, non-empty only for {@code WAITING}, {@code COMPLETED},
  *                        {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}; an unmodifiable defensive copy
- * @throws IllegalArgumentException if {@code sagaType}, {@code outcome} or {@code outboxFailures} is {@code null},
- *                                  if {@code outboxFailures} contains {@code null} or is non-empty for another
- *                                  outcome, or if {@code outcomeStep} or {@code failure} is present or absent
- *                                  inconsistently with {@code outcome}
  */
 public record SagaHandlingResult(
     String sagaType,

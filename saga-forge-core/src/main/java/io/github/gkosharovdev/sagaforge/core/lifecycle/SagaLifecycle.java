@@ -22,7 +22,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
  * <p>No production implementation ships in {@code saga-forge-core}; implementations are provided by the
  * engine runtime, the same posture as {@code StorageProvider} and {@code EventDispatcher}.</p>
  *
- * <h3>Status transitions</h3>
+ * <h2>Status transitions</h2>
  * <p>Transitions are expressed purely in terms of the existing {@link SagaStatus} enum:</p>
  * <pre>
  * start                                   --&gt; CREATED   (every step NOT_RUN)
@@ -44,7 +44,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
  *       forward-compatibility placeholder for the not-yet-built compensation-dispatch feature.</li>
  * </ul>
  *
- * <h3>Relationship to other contracts</h3>
+ * <h2>Relationship to other contracts</h2>
  * <ul>
  *   <li>The engine resolves which instance an incoming event correlates to, through
  *       {@code StorageProvider.findByAssociation} behind {@code EventReceiver}; having resolved a target,
@@ -57,7 +57,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
  *       the {@code FAILED} write.</li>
  * </ul>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <p>Implementations must throw {@link IllegalArgumentException} if any argument is {@code null}:</p>
  * <ul>
  *   <li>{@link #start(Class, String, String)} — {@code sagaType}, {@code associationProperty},

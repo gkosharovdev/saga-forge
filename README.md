@@ -410,3 +410,41 @@ saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 Saga Forge borrows its vocabulary from EventStorming / DDD rather than inventing new terms. See
 [docs/architecture.md § Vocabulary](docs/architecture.md#vocabulary) for the full glossary (Command,
 Event, Aggregate, Policy, Projection, Saga, Step, Compensation).
+
+## Releasing
+
+Saga Forge is published to Maven Central as `io.github.gkosharovdev:saga-forge-*`. Published modules:
+`saga-forge-core`, `saga-forge-runtime`, `saga-forge-test`, `saga-forge-transport-inmemory`,
+`saga-forge-storage-postgres` and `saga-forge-spring-boot-starter`, each with sources and Javadoc. Core, runtime and
+the in-memory transport also publish their `tests` jars, which hold the in-memory test doubles and the contract suites
+a storage or transport implementation can reuse. The examples and the placeholder modules (MySQL, MongoDB, Kafka) are
+not published.
+
+**Versions** follow semantic versioning. Before 1.0, a minor release (0.x.0) may break the API and a patch release
+(0.x.y) never does. Classes in packages named `internal` are public only for wiring between modules and carry no
+compatibility promise. Each release's notes list any schema upgrade script (for example `schema-upgrade-010.sql`).
+
+**To release** version X.Y.Z, push a tag from master:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The `Release` workflow takes the version from the tag, runs the full build with the container suites, signs every
+artifact and uploads one bundle to the Sonatype Central Portal, then creates the GitHub release. Master stays on the
+next `-SNAPSHOT` version. By default the deployment waits in the portal (central.sonatype.com, Deployments) for a
+manual **Publish**; set the repository variable `CENTRAL_AUTO_PUBLISH` to `true` to publish validated deployments
+automatically. A published version can never be changed or removed.
+
+The workflow needs four repository secrets: `CENTRAL_TOKEN_USERNAME` and `CENTRAL_TOKEN_PASSWORD` (a Central Portal
+user token), `GPG_PRIVATE_KEY` (the armored private key, whose public half is on `keyserver.ubuntu.com`) and
+`GPG_PASSPHRASE`. To check the release build locally without signing or uploading:
+
+```bash
+mvn -P release -Dgpg.skip -DskipTests install
+```
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).
+

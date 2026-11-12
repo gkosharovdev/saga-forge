@@ -7,6 +7,11 @@ import java.util.List;
  * buffered events and, since {@code specs/007-in-memory-transport}, the {@code @Command(delivery = OUTBOX)} commands
  * sent in it. Named {@code HandedOffEvents} before 007.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code unitOfWorkId}, {@code events}, {@code commands} or an element of them is
+ *                                  {@code null}, if {@code events}, {@code commands} and {@code recordedEvents} are all
+ *                                  empty, or if exactly
+ *                                  one of {@code sagaType} and {@code sagaId} is present.</p>
+ *
  * @param unitOfWorkId the unit of work's identifier, unique per unit of work, saga-scoped or not; non-null
  * @param sagaType     fully qualified {@code @Saga} class name of the owning instance; non-null if and only if the
  *                     unit of work is saga-scoped
@@ -19,10 +24,6 @@ import java.util.List;
  *                     owning instance ran in process; a superset of {@code events} (since
  *                     {@code specs/008-spring-boot-starter}); non-null, no {@code null} element; an unmodifiable
  *                     defensive copy
- * @throws IllegalArgumentException if {@code unitOfWorkId}, {@code events}, {@code commands} or an element of them is
- *                                  {@code null}, if {@code events}, {@code commands} and {@code recordedEvents} are all
- *                                  empty, or if exactly
- *                                  one of {@code sagaType} and {@code sagaId} is present
  */
 public record OutgoingMessages(String unitOfWorkId, String sagaType, String sagaId, List<Object> events,
         List<OutgoingCommand> commands, List<Object> recordedEvents) {

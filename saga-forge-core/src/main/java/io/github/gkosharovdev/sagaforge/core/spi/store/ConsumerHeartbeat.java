@@ -6,11 +6,12 @@ import java.time.Instant;
  * A relay's sign of life, used to warn about a second running instance ({@code specs/007-in-memory-transport}
  * FR-021).
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
+ *
  * @param consumerId random per transport start; non-blank
  * @param host       host name, informational; non-blank
  * @param startedAt  non-null
  * @param lastSeenAt non-null, not before {@code startedAt}
- * @throws IllegalArgumentException if a rule above is violated
  */
 public record ConsumerHeartbeat(String consumerId, String host, Instant startedAt, Instant lastSeenAt) {
 

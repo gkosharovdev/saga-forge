@@ -10,7 +10,7 @@ import java.util.Optional;
  * {@code saga-forge-storage-mongodb}, {@code saga-forge-storage-mysql}), next to their
  * {@link StorageProvider}. The only consumer is the saga engine.</p>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <ul>
  *   <li>{@link #find(String)} — implementations must throw
  *       {@link IllegalArgumentException} if {@code sagaId} is {@code null}.</li>
@@ -20,19 +20,19 @@ import java.util.Optional;
  *       {@link IllegalArgumentException} if {@code sagaId} is {@code null}.</li>
  * </ul>
  *
- * <h3>Independence from the saga-scoped unit of work</h3>
+ * <h2>Independence from the saga-scoped unit of work</h2>
  * <p>A {@link #save(SagaContextRecord)} MUST NOT join the saga-scoped unit of work's transaction, so
  * context values written by a step stay queryable by later steps whether that step's unit of work
  * committed or rolled back. Postgres and MySQL modules store records in their own table and write them in
  * a separate transaction; the MongoDB module uses its own collection.</p>
  *
- * <h3>Write order</h3>
+ * <h2>Write order</h2>
  * <p>A record is saved only after its instance's creation write committed: the engine commits the new
  * {@link SagaStatus#CREATED} instance in its own write before the first unit of work runs. A store therefore may
  * rely on the instance record existing (Postgres: the {@code saga_context} foreign key). It never joins the unit of
  * work's transaction.</p>
  *
- * <h3>Reference and values</h3>
+ * <h2>Reference and values</h2>
  * <p>{@code record.sagaId()} equals the {@link SagaInstance#sagaId()} it belongs to. A record may exist
  * for a saga whose instance record is {@link SagaStatus#FAILED}. Values are stored as given; structured
  * values are nested {@code Map<String, Object>}. Serializing value types is the storage module's concern,

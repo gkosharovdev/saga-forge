@@ -8,6 +8,13 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 /**
  * Persisted record of one {@code @SagaStep} method within a saga instance.
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code status}, {@code touchedAggregates}, {@code handledCommands} or any of
+ *                                  their elements is {@code null}, if aggregates, commands or attempts are given
+ *                                  for a step that is not {@link StepStatus#COMPLETED}, if a completed step has
+ *                                  fewer than 1 attempt, or if {@code handledCommands} holds an unscoped or
+ *                                  duplicate identity, if {@code completionSequence} breaks its rule, or if a
+ *                                  step that is not completed has a {@code compensation}.</p>
+ *
  * @param status            the step's status; non-null
  * @param touchedAggregates aggregates touched by the step, in recording order and without duplicates; an
  *                          unmodifiable defensive copy, empty unless {@code status == COMPLETED}
@@ -23,12 +30,6 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  *                          uniqueness is not checked here ({@code specs/006-saga-compensation} FR-005)
  * @param compensation      the step's compensation state once its instance entered compensation; {@code null}
  *                          unless {@code status == COMPLETED} ({@code specs/006-saga-compensation} FR-017)
- * @throws IllegalArgumentException if {@code status}, {@code touchedAggregates}, {@code handledCommands} or any of
- *                                  their elements is {@code null}, if aggregates, commands or attempts are given
- *                                  for a step that is not {@link StepStatus#COMPLETED}, if a completed step has
- *                                  fewer than 1 attempt, or if {@code handledCommands} holds an unscoped or
- *                                  duplicate identity, if {@code completionSequence} breaks its rule, or if a
- *                                  step that is not completed has a {@code compensation}
  */
 public record StepRecord(StepStatus status, List<AggregateReference> touchedAggregates, int attempts,
         List<CommandId> handledCommands, int completionSequence, StepCompensation compensation) {

@@ -7,7 +7,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * back it with prototype beans. At most one provider is registered; without one, the engine uses the saga class's
  * no-argument constructor (any visibility).</p>
  *
- * <h3>When each method is called</h3>
+ * <h2>When each method is called</h2>
  * <ul>
  *   <li>{@link #supports(Class)} at engine start, for every registered {@code @Saga} class. It must be free of side
  *       effects.</li>
@@ -15,12 +15,12 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  *       the unit of work.</li>
  * </ul>
  *
- * <h3>Fields of the returned object</h3>
+ * <h2>Fields of the returned object</h2>
  * <p>After {@code newInstance} the engine sets the {@code @SagaId} field, the {@code SagaContext}-typed field and the
  * {@code CommandGateway}-typed field, overwriting any value the provider set. Every other field is a dependency: the
  * engine never reads or persists it, and {@link SagaInstance#state()} stays empty.</p>
  *
- * <h3>Null-safety contracts</h3>
+ * <h2>Null-safety contracts</h2>
  * <p>Both methods must throw {@link IllegalArgumentException} if {@code sagaType} is {@code null}.</p>
  */
 public interface SagaObjectProvider {

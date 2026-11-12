@@ -14,6 +14,11 @@ import java.util.List;
  * assigns each entry its position when it inserts it, after every entry already recorded for the instance. There is
  * no tiebreak and no first-save limitation: every completed step gets its entry in true execution order.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code sagaId}, {@code kind}, {@code occurredAt}, {@code touchedAggregates}
+ *                                  or one of its elements is {@code null}, or if {@code stepName},
+ *                                  {@code outcomeStep}, {@code failure}, {@code trigger} or a non-empty {@code touchedAggregates} is
+ *                                  present or absent inconsistently with {@code kind}.</p>
+ *
  * @param sagaId            the owning instance's {@link SagaInstance#sagaId()}; non-null
  * @param kind              the transition; non-null
  * @param stepName          the completed step, for {@code ATTEMPT_FAILED} the step that failed, for
@@ -31,10 +36,6 @@ import java.util.List;
  * @param occurredAt        the clock instant of the transition; non-null
  * @param trigger           the recorded {@link SagaInstance#compensationTrigger()}; non-null if and only if
  *                          {@code kind == COMPENSATION_STARTED}
- * @throws IllegalArgumentException if {@code sagaId}, {@code kind}, {@code occurredAt}, {@code touchedAggregates}
- *                                  or one of its elements is {@code null}, or if {@code stepName},
- *                                  {@code outcomeStep}, {@code failure}, {@code trigger} or a non-empty {@code touchedAggregates} is
- *                                  present or absent inconsistently with {@code kind}
  */
 public record SagaLifecycleEntry(
     String sagaId,

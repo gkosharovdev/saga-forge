@@ -12,6 +12,8 @@ import java.time.Instant;
  * business rules can depend on the cause (for example, refund in full on a rejected delivery). The triggering event
  * itself is not available: data a compensation needs from it travels through {@code SagaContext}.</p>
  *
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
+ *
  * @param kind      what started compensation; non-null
  * @param stepName  the {@code @StartCompensation} step ({@code FAILURE_OUTCOME}) or the step that failed; non-blank
  * @param eventType fully qualified class name of the event the {@code @StartCompensation} step handled; non-null if
@@ -20,7 +22,6 @@ import java.time.Instant;
  *                  {@code EXHAUSTED} for {@code RETRIES_EXHAUSTED}; non-null if and only if
  *                  {@code kind != FAILURE_OUTCOME}
  * @param at        when compensation started; non-null
- * @throws IllegalArgumentException if a rule above is violated
  */
 public record CompensationTrigger(CompensationTriggerKind kind, String stepName, String eventType,
         SagaFailure failure, Instant at) {
