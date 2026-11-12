@@ -625,6 +625,13 @@ Noted only; nothing is bumped until the starter feature decides.
   (`specs/004-saga-engine/research.md` §1), held by plan to Principle I's constraints (no Spring, datastore or
   transport types; no third-party dependency). The amendment should name it, since SLF4J and the JTA API would land
   there rather than in core.
+- **Versions (010)**: `opentelemetry-api` 1.62.0 (brings `opentelemetry-context` and `opentelemetry-common`), from
+  `opentelemetry-bom` 1.62.0 in the root `dependencyManagement`, matching Spring Boot 4.1.x; the Spring example's test
+  scope uses `micrometer-tracing-bridge-otel` 1.7.2 (Boot 4.1.2's line) with its stale `slf4j-api` 1.7 excluded.
+- **Update (010, 2026-11-12)**: the OpenTelemetry API (`io.opentelemetry:opentelemetry-api`, with
+  `opentelemetry-context`) is the first third-party dependency of `saga-forge-runtime` and
+  `saga-forge-transport-inmemory`; core stays dependency-free. The AGENTS.md Module Map is reworded with 010 (task
+  T045).
 
 ## Step retry and command idempotency (005)
 
@@ -897,7 +904,9 @@ Noted only; nothing is bumped until the starter feature decides.
   surface; redelivery over HTTP needs a security decision (who may call it) and an audit trail; metrics (set-aside
   count, oldest unconsumed age, saga outcomes, retries) should mirror what the endpoint reports, and trace context
   should travel through the message store.
-- **Status**: open (deferred to the observability feature).
+- **Update (010)**: metrics and trace context through the message store are covered by `specs/010-otel-observability`
+  (the gauges read `MessageStoreQueries`, the endpoint's source). Write actions and saga-instance views stay open.
+- **Status**: open (deferred to an operations feature).
 
 ### G-008-03: Events published through Spring's own publisher do not reach sagas
 - **Description**: with 008, saga-produced events reach Spring listeners (FR-018a), but not the other way round: an
@@ -1006,6 +1015,59 @@ Noted only; nothing is bumped until the starter feature decides.
   sent them in. Its `CommandId` still names the sending step.
 - **Origin**: `specs/009-saga-test-fixture` implementation (`FixtureCommandInterceptor`, `LoopBackTransport`).
 - **Status**: open (accepted).
+
+## Observability (010)
+
+### G-010-01: Trace context propagation for the Kafka transport not yet built
+- **Description**: 010 stores trace context with each message of the in-memory transport's message store and restores
+  it on delivery. The Kafka transport does not exist yet; when built, it must carry the same carrier (Kafka headers)
+  and open the same `DELIVERY` observation.
+- **Origin**: `specs/010-otel-observability/spec.md` Assumptions, contracts/message-context.md.
+- **Status**: open (deferred to the Kafka transport).
+
+### G-010-02: Telemetry overhead measured only on the in-memory runtime
+- **Description**: SC-004's budget (at most 5% longer units of work) was measured with `TelemetryOverheadTest`
+  (`-Dsaga.performance=true`): 10,000 three-step sagas over the in-memory runtime took 5,072 ms with
+  `OpenTelemetry.noop()` and 5,052 ms with an SDK on a discarding exporter (ratio 0.996, one run, within noise). No
+  separate measurement over Postgres was taken; with database round trips the relative cost can only be lower.
+- **Origin**: `specs/010-otel-observability/research.md` §11, risk R1; tasks.md T042.
+- **Status**: open (accepted: measured within budget in memory; repeat on Postgres if a regression is suspected).
+
+### G-010-03: Spring Modulith listeners' trace continuity depends on Modulith
+- **Description**: saga events published to Spring inside the unit of work reach `@ApplicationModuleListener`s after
+  the commit on Modulith's threads; whether those listeners continue the saga's trace is Spring Modulith's own
+  observability support, not Saga Forge's.
+- **Origin**: `specs/010-otel-observability/research.md` risk R3.
+- **Status**: open (documented; revisit with G-008-01).
+
+### G-010-04: Diagnostics carry trace ids as keys, not through MDC
+- **Description**: the runtime logs through `System.Logger`, which has no MDC; 010 appends `traceId=`/`spanId=` keys to
+  its diagnostic lines, and relies on the log backend's own OpenTelemetry or Micrometer Tracing integration for MDC
+  fields. A switch to SLF4J (G-GOV-01 candidate) would allow MDC directly.
+- **Origin**: `specs/010-otel-observability/research.md` §6.
+- **Status**: open (accepted).
+
+### G-010-05: Saga metrics through the OpenTelemetry API may miss Micrometer-only Spring setups
+- **Description**: 010 records metrics with OpenTelemetry's `Meter`. A Spring Boot application that exports metrics
+  only through a Micrometer `MeterRegistry` (and uses OpenTelemetry for traces only, through Micrometer Tracing's
+  bridge) does not see them unless its OpenTelemetry SDK has a metric exporter.
+- **Origin**: `specs/010-otel-observability/research.md` §4, risk R2 (revised Q1: direct OpenTelemetry API).
+- **Finding (T001, 2026-11-12)**: Spring Boot 4.1's `OpenTelemetrySdkAutoConfiguration` builds the `OpenTelemetrySdk`
+  bean from optional `SdkTracerProvider`, `ContextPropagators`, `SdkLoggerProvider` and `SdkMeterProvider` beans, and
+  Spring Boot configures no `SdkMeterProvider` itself (its own metrics go through Micrometer, e.g.
+  `micrometer-registry-otlp`). So saga spans are exported out of the box, saga metrics only when the application
+  defines an `SdkMeterProvider` with an exporter; the starter README shows one.
+- **Status**: open (documented).
+
+### G-010-06: No Micrometer instrumentation
+- **Description**: Q1 was first answered with an own observation SPI plus OpenTelemetry and Micrometer adapters, then
+  revised to direct OpenTelemetry API instrumentation (2026-11-12, user decision). Micrometer users get saga spans
+  through Micrometer Tracing's OpenTelemetry bridge. If native Micrometer support is added later, it should depend on
+  `micrometer-observation` only (the instrumentation API libraries such as Spring Framework use; `micrometer-core` is
+  needed only to register meters directly), live in its own optional module, and never run beside the OpenTelemetry
+  instrumentation for the same runtime, or bridged applications would record every span twice.
+- **Origin**: `specs/010-otel-observability/spec.md` Clarifications (Q1 revised).
+- **Status**: open (deferred until a user needs Micrometer-native metrics).
 
 ## Repository hygiene
 

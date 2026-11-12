@@ -30,6 +30,8 @@ public class SagaForgeProperties {
 
     private final ApplicationEvents applicationEvents = new ApplicationEvents();
 
+    private final Telemetry telemetry = new Telemetry();
+
     /**
      * Checks values the binder cannot check itself.
      *
@@ -77,6 +79,10 @@ public class SagaForgeProperties {
 
     public ApplicationEvents getApplicationEvents() {
         return applicationEvents;
+    }
+
+    public Telemetry getTelemetry() {
+        return telemetry;
     }
 
     /** {@code saga-forge.storage.*}. */
@@ -157,5 +163,80 @@ public class SagaForgeProperties {
         NEVER,
         /** Create Saga Forge's tables from schema.sql when they do not exist yet; never alters existing tables. */
         ALWAYS
+    }
+
+    /** OpenTelemetry instrumentation of the runtime and the transport ({@code specs/010-otel-observability}). */
+    public static class Telemetry {
+
+        /** Whether the application's OpenTelemetry instance is handed to the runtime and the transport. */
+        private boolean enabled = true;
+
+        /** Record saga event and command contents ({@code toString}, at most 1,000 characters) on spans. */
+        private boolean recordContents;
+
+        /** Record association values (an order id, say) on spans. */
+        private boolean recordAssociationValues;
+
+        /** Record failure messages and exception events on spans; the failure's type is always recorded. */
+        private boolean recordFailureMessages;
+
+        private final Signal tracing = new Signal();
+
+        private final Signal metrics = new Signal();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isRecordContents() {
+            return recordContents;
+        }
+
+        public void setRecordContents(boolean recordContents) {
+            this.recordContents = recordContents;
+        }
+
+        public boolean isRecordAssociationValues() {
+            return recordAssociationValues;
+        }
+
+        public void setRecordAssociationValues(boolean recordAssociationValues) {
+            this.recordAssociationValues = recordAssociationValues;
+        }
+
+        public boolean isRecordFailureMessages() {
+            return recordFailureMessages;
+        }
+
+        public void setRecordFailureMessages(boolean recordFailureMessages) {
+            this.recordFailureMessages = recordFailureMessages;
+        }
+
+        public Signal getTracing() {
+            return tracing;
+        }
+
+        public Signal getMetrics() {
+            return metrics;
+        }
+    }
+
+    /** One telemetry signal that can be switched off. */
+    public static class Signal {
+
+        /** Whether this signal is recorded. */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
     }
 }

@@ -64,6 +64,7 @@ public final class Relay {
     private final Clock clock;
     private final Logger logger;
     private final Executor hostExecutor;
+    private final TransportInstrumentation instrumentation;
     private final String consumerId = UUID.randomUUID().toString();
     private final Map<String, StoredMessage> inFlight = new ConcurrentHashMap<>();
     private final List<Consumer<StoredMessage>> deliveredListeners = new CopyOnWriteArrayList<>();
@@ -84,13 +85,14 @@ public final class Relay {
     private enum State { CREATED, RUNNING, STOPPING, STOPPED }
 
     public Relay(MessageStore messageStore, TransactionBoundary transactions, TransportSettings settings, Clock clock,
-            Logger logger, Executor hostExecutor) {
+            Logger logger, Executor hostExecutor, TransportInstrumentation instrumentation) {
         this.messageStore = messageStore;
         this.transactions = transactions;
         this.settings = settings;
         this.clock = clock;
         this.logger = logger;
         this.hostExecutor = hostExecutor;
+        this.instrumentation = instrumentation;
     }
 
     // ----- appending -----------------------------------------------------------------------------------------
@@ -99,7 +101,7 @@ public final class Relay {
     public void store(OutgoingMessages batch) {
         LocalTransaction tx = transactions.current().orElseThrow(() -> new IllegalStateException(
                 "the in-memory transport's outbox needs the unit of work's transaction to be active"));
-        messageStore.append(tx, LogAppender.entries(batch, clock.instant()));
+        messageStore.append(tx, LogAppender.entries(batch, clock.instant(), instrumentation.currentContext()));
     }
 
     /**
@@ -110,7 +112,7 @@ public final class Relay {
         if (event == null) {
             throw new IllegalArgumentException("domainEvent must not be null");
         }
-        NewMessage entry = LogAppender.published(event, clock.instant());
+        NewMessage entry = LogAppender.published(event, clock.instant(), instrumentation.currentContext());
         var active = transactions.current();
         if (active.isPresent()) {
             messageStore.append(active.get(), List.of(entry));
@@ -328,6 +330,7 @@ public final class Relay {
     // ----- delivery ------------------------------------------------------------------------------------------
 
     private void deliver(StoredMessage message) {
+        TransportInstrumentation.Delivery span = instrumentation.startDelivery(message);
         try {
             if (message.kind() == MessageKind.EVENT) {
                 events.receive(message.payload());
@@ -345,8 +348,10 @@ public final class Relay {
         } catch (LeaseLostException lost) {
             logger.log(Level.WARNING, () -> "saga.transport.leaseLost message=" + message.messageId());
         } catch (RuntimeException | Error failure) {
+            span.fail(failure);
             failed(message, failure);
         } finally {
+            span.close();
             inFlight.remove(message.messageId());
             signal();
         }

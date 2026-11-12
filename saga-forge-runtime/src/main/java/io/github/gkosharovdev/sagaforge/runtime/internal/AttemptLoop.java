@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.opentelemetry.api.common.Attributes;
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -65,7 +66,7 @@ final class AttemptLoop {
             int attempt = 1;
             boolean firstOfCall = true;
             while (true) {
-                AttemptResult result = new SagaUnitOfWork(trigger, with, attempt, firstOfCall).run();
+                AttemptResult result = tracedAttempt(trigger, attempt, firstOfCall);
                 firstOfCall = false;
                 switch (result) {
                     case Finished finished -> {
@@ -107,6 +108,7 @@ final class AttemptLoop {
                         }
                         long wait = Backoff.waitBefore(policy, next);
                         with.diagnostics().unitOfWorkRetrying(failed.correlation(), transientFailure, next, wait);
+                        retryScheduled(trigger, failed.step(), next, wait);
                         if (!pause(wait)) {
                             with.diagnostics().retryInterrupted(failed.correlation(), next);
                             return notHandled(trigger, failed.correlation());
@@ -137,6 +139,7 @@ final class AttemptLoop {
 
     private SagaHandlingResult exhausted(Trigger trigger, Resume resume, Lease instanceLease) {
         PendingRetry claimed = resume.retry();
+        retryExhausted(trigger, claimed.lastFailure().stepName());
         SagaFailure failure = claimed.lastFailure().classifiedAs(FailureClassification.EXHAUSTED,
                 claimed.attemptsStarted());
         return finalOrFailed(trigger, resume.correlation(), failure, null, instanceLease);
@@ -147,6 +150,9 @@ final class AttemptLoop {
         FailureClassification recorded = classification == FailureClassification.TRANSIENT
                 ? FailureClassification.EXHAUSTED
                 : classification;
+        if (recorded == FailureClassification.EXHAUSTED) {
+            retryExhausted(trigger, failed.step());
+        }
         SagaFailure failure = SagaFailure.of(failed.step(), failed.cause(), settings.sources().now(), recorded,
                 failed.attempt());
         return finalOrFailed(trigger, failed.correlation(), failure, failed.cause(), instanceLease);
@@ -185,6 +191,7 @@ final class AttemptLoop {
         }
         Summary summary;
         List<Throwable> outboxFailures = new ArrayList<>();
+        with.instrumentation().event("saga_forge.compensation.started", Attributes.empty());
         try {
             summary = new CompensationRun(with).run(trigger.saga(), trigger.sagaId(), about, outboxs,
                     triggerUnitOfWorkId);
@@ -200,6 +207,46 @@ final class AttemptLoop {
 
     private static Correlation compensationCorrelation(Trigger trigger) {
         return Correlation.of(trigger.event()).forSaga(trigger.saga().typeName()).instance(trigger.sagaId());
+    }
+
+    /** One attempt inside a {@code saga_forge.attempt} span (010 research §2). */
+    private AttemptResult tracedAttempt(Trigger trigger, int attempt, boolean firstOfCall) {
+        try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.ATTEMPT)) {
+            span.set(SagaInstrumentation.SAGA_TYPE, trigger.saga().typeName())
+                    .set(SagaInstrumentation.SAGA_ID, trigger.sagaId())
+                    .set(SagaInstrumentation.ATTEMPT_NUMBER, (long) attempt);
+            AttemptResult result;
+            try {
+                result = new SagaUnitOfWork(trigger, with, attempt, firstOfCall).run();
+            } catch (RuntimeException | Error failure) {
+                span.fail(failure);
+                throw failure;
+            }
+            switch (result) {
+                case Committed committed -> span.set(SagaInstrumentation.ATTEMPT_RESULT, "committed")
+                        .set(SagaInstrumentation.UNIT_OF_WORK_ID, committed.unitOfWorkId());
+                case Failed failed -> span.set(SagaInstrumentation.ATTEMPT_RESULT, "rolled_back")
+                        .set(SagaInstrumentation.STEP_NAME, failed.step())
+                        .set(SagaInstrumentation.FAILURE_CLASSIFICATION, FailureClassifier.classify(failed.cause(),
+                                trigger.saga().retryPolicyOf(failed.step())).name())
+                        .fail(failed.cause());
+                default -> span.set(SagaInstrumentation.ATTEMPT_RESULT, "not_run");
+            }
+            return result;
+        }
+    }
+
+    private void retryScheduled(Trigger trigger, String step, int nextAttempt, long waitMillis) {
+        SagaInstrumentation telemetry = with.instrumentation();
+        telemetry.event("saga_forge.retry.scheduled", Attributes.of(SagaInstrumentation.ATTEMPT_NUMBER,
+                (long) nextAttempt, SagaInstrumentation.RETRY_WAIT, waitMillis));
+        telemetry.count(SagaInstrumentation.RETRY_SCHEDULED_COUNTER, Attributes.of(SagaInstrumentation.SAGA_TYPE,
+                trigger.saga().typeName(), SagaInstrumentation.STEP_NAME, step));
+    }
+
+    private void retryExhausted(Trigger trigger, String step) {
+        with.instrumentation().count(SagaInstrumentation.RETRY_EXHAUSTED_COUNTER, Attributes.of(
+                SagaInstrumentation.SAGA_TYPE, trigger.saga().typeName(), SagaInstrumentation.STEP_NAME, step));
     }
 
     /** Waits {@code millis}; {@code false} if interrupted, with the interrupt flag restored. */

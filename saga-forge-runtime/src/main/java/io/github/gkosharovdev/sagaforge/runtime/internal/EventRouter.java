@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.opentelemetry.api.common.Attributes;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
@@ -98,7 +99,11 @@ final class EventRouter {
         requireDomainEvent(event);
         List<Reaction> reactions = reactionsTo(event);
         if (reactions.isEmpty()) {
-            with.diagnostics().eventIgnored(event);
+            try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.EVENT_IGNORED)) {
+                span.set(SagaInstrumentation.EVENT_TYPE, event.getClass().getName())
+                        .set(SagaInstrumentation.CONTENT, with.instrumentation().content(event));
+                with.diagnostics().eventIgnored(event);
+            }
             return new HandlingReport(event, List.of());
         }
         Attempts attempts = new Attempts();
@@ -121,7 +126,7 @@ final class EventRouter {
 
     private void handle(Reaction reaction, Attempts attempts) {
         if (reaction.step().start()) {
-            attempts.attempt(() -> start(reaction)).ifPresent(attempts.results::add);
+            attempts.attempt(() -> traced(reaction, null, () -> start(reaction))).ifPresent(attempts.results::add);
         } else {
             attempts.attempt(() -> correlatedInstances(reaction))
                     .ifPresent(correlated -> resume(reaction, correlated, attempts));
@@ -192,16 +197,18 @@ final class EventRouter {
                 .filter(instance -> !EngineSagaLifecycle.isTerminal(instance.status()))
                 .toList();
         if (!active.isEmpty()) {
-            active.forEach(instance -> attempts.attempt(() -> runUnitOfWork(reaction, instance.sagaId(), false,
-                            instanceLocks.acquire(instance.sagaId())))
+            active.forEach(instance -> attempts.attempt(() -> traced(reaction, instance.sagaId(),
+                            () -> runUnitOfWork(reaction, instance.sagaId(), false,
+                                    instanceLocks.acquire(instance.sagaId()))))
                     .ifPresent(attempts.results::add));
         } else if (!correlated.isEmpty()) {
             SagaInstance latest = correlated.get(correlated.size() - 1);
-            attempts.results.add(SagaUnitOfWork.isCompleted(latest, reaction.step().name())
-                    ? duplicate(reaction, latest.sagaId())
-                    : unexpected(reaction, latest.sagaId()));
+            attempts.results.add(traced(reaction, latest.sagaId(),
+                    () -> SagaUnitOfWork.isCompleted(latest, reaction.step().name())
+                            ? duplicate(reaction, latest.sagaId())
+                            : unexpected(reaction, latest.sagaId())));
         } else {
-            attempts.results.add(unmatched(reaction));
+            attempts.results.add(traced(reaction, null, () -> unmatched(reaction)));
         }
     }
 
@@ -214,6 +221,63 @@ final class EventRouter {
         try (instanceLease) {
             Trigger trigger = new Trigger(reaction.saga(), reaction.step(), reaction.event(), sagaId, started);
             return new AttemptLoop(with).run(trigger, instanceLease);
+        }
+    }
+
+    /**
+     * Runs {@code work} inside a {@code saga_forge.handle} span for one saga type or instance, and counts its outcome
+     * ({@code specs/010-otel-observability} research §2, §4).
+     */
+    private SagaHandlingResult traced(Reaction reaction, String sagaId, Supplier<SagaHandlingResult> work) {
+        SagaInstrumentation telemetry = with.instrumentation();
+        try (SagaInstrumentation.Traced span = telemetry.start(SagaInstrumentation.HANDLE)) {
+            span.set(SagaInstrumentation.SAGA_TYPE, reaction.saga().typeName())
+                    .set(SagaInstrumentation.EVENT_TYPE, reaction.event().getClass().getName())
+                    .set(SagaInstrumentation.SAGA_ID, sagaId)
+                    .set(SagaInstrumentation.ASSOCIATION_VALUE,
+                            telemetry.associationValue(reaction.associationValue()))
+                    .set(SagaInstrumentation.CONTENT, telemetry.content(reaction.event()));
+            SagaHandlingResult result;
+            try {
+                result = work.get();
+            } catch (RuntimeException | Error failure) {
+                span.fail(failure);
+                throw failure;
+            }
+            span.set(SagaInstrumentation.SAGA_ID, result.sagaId())
+                    .set(SagaInstrumentation.HANDLING_OUTCOME, result.outcome().name())
+                    .set(SagaInstrumentation.SAGA_STARTED, result.started());
+            if (result.failure() != null) {
+                span.set(SagaInstrumentation.FAILURE_CLASSIFICATION, result.failure().classification() == null
+                        ? null : result.failure().classification().name())
+                        .failType(result.failure().causeType(), result.failure().message());
+            }
+            countOutcome(telemetry, span, result);
+            return result;
+        }
+    }
+
+    private static void countOutcome(SagaInstrumentation telemetry, SagaInstrumentation.Traced span,
+            SagaHandlingResult result) {
+        Attributes sagaType = Attributes.of(SagaInstrumentation.SAGA_TYPE, result.sagaType());
+        telemetry.count(SagaInstrumentation.EVENT_HANDLED_COUNTER, sagaType.toBuilder()
+                .put(SagaInstrumentation.HANDLING_OUTCOME, result.outcome().name()).build());
+        if (result.started() && result.outcome() != HandlingOutcome.DUPLICATE_START) {
+            telemetry.count(SagaInstrumentation.SAGA_STARTED_COUNTER, sagaType);
+            span.event(SagaInstrumentation.SAGA_STARTED_COUNTER, Attributes.empty());
+        }
+        String ended = switch (result.outcome()) {
+            case COMPLETED -> "completed:" + result.outcomeStep();
+            case FAILED -> "failed";
+            case COMPENSATED -> "compensated";
+            case REQUIRES_INTERVENTION -> "requires_intervention";
+            default -> null;
+        };
+        if (ended != null) {
+            Attributes outcome = sagaType.toBuilder().put(SagaInstrumentation.SAGA_OUTCOME, ended).build();
+            telemetry.count(SagaInstrumentation.SAGA_ENDED_COUNTER, outcome);
+            span.event(SagaInstrumentation.SAGA_ENDED_COUNTER,
+                    Attributes.of(SagaInstrumentation.SAGA_OUTCOME, ended));
         }
     }
 

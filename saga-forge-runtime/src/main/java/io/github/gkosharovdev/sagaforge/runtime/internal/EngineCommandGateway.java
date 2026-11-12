@@ -109,16 +109,23 @@ final class EngineCommandGateway implements CommandGateway {
     private final Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork;
     private final Diagnostics diagnostics;
     private final CommandInterceptor interceptor;
+    private final SagaInstrumentation instrumentation;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
             boolean outboxStoresCommands, Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics,
-            CommandInterceptor interceptor) {
+            CommandInterceptor interceptor, SagaInstrumentation instrumentation) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
         this.outboxStoresCommands = outboxStoresCommands;
         this.nonSagaUnitsOfWork = nonSagaUnitsOfWork;
         this.diagnostics = diagnostics;
         this.interceptor = interceptor;
+        this.instrumentation = instrumentation;
+    }
+
+    /** The runtime's instrumentation, built once per engine from its settings (010). */
+    SagaInstrumentation instrumentation() {
+        return instrumentation;
     }
 
     /**
@@ -144,7 +151,8 @@ final class EngineCommandGateway implements CommandGateway {
         }
         return new EngineCommandGateway(routes, settings.transactions(), settings.outbox().supportsCommands(),
                 () -> new NonSagaUnitOfWork(settings,
-                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics, settings.commandInterceptor());
+                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics, settings.commandInterceptor(),
+                new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics));
     }
 
     @Override
@@ -174,6 +182,9 @@ final class EngineCommandGateway implements CommandGateway {
             CommandId id = unitOfWork.nextCommandId(command.getClass());
             if (unitOfWork.alreadyHandled(id)) {
                 diagnostics.commandSkipped(id);
+                try (SagaInstrumentation.Traced span = commandSpan(command, id, "in_unit_of_work")) {
+                    span.set(SagaInstrumentation.COMMAND_RESULT, "skipped");
+                }
                 return;
             }
             if (logged) {
@@ -182,7 +193,7 @@ final class EngineCommandGateway implements CommandGateway {
                 unitOfWork.commandHandled(id);
                 return;
             }
-            intercept(command, id, route);
+            intercept(command, id, route, "in_unit_of_work");
             unitOfWork.commandHandled(id);
         } catch (RuntimeException | Error failure) {
             transactions.current().ifPresent(LocalTransaction::setRollbackOnly);
@@ -209,7 +220,7 @@ final class EngineCommandGateway implements CommandGateway {
         }
         CommandRoute route = routes.get(command.getClass());
         nonSagaUnitsOfWork.get().run(() -> {
-            intercept(command, delivery.commandId(), route);
+            intercept(command, delivery.commandId(), route, "outbox");
             LocalTransaction transaction = transactions.current().orElseThrow(() -> new IllegalStateException(
                     "no transaction is active in the unit of work handling " + delivery.commandId()));
             delivery.inTransaction().accept(transaction);
@@ -221,11 +232,30 @@ final class EngineCommandGateway implements CommandGateway {
     }
 
     /** Hands one handling to the interceptor with {@code id} bound; {@code route} is {@code null} if none exists. */
-    private void intercept(Object command, CommandId id, CommandRoute route) {
-        CommandIds.withBound(id, () -> {
-            interceptor.intercept(new Invocation(command, id, route));
-            return null;
-        });
+    private void intercept(Object command, CommandId id, CommandRoute route, String delivery) {
+        try (SagaInstrumentation.Traced span = commandSpan(command, id, delivery)) {
+            try {
+                CommandIds.withBound(id, () -> {
+                    interceptor.intercept(new Invocation(command, id, route));
+                    return null;
+                });
+                span.set(SagaInstrumentation.COMMAND_RESULT, "handled");
+            } catch (RuntimeException | Error failure) {
+                span.set(SagaInstrumentation.COMMAND_RESULT, "failed").fail(failure);
+                throw failure;
+            }
+        }
+    }
+
+    /** A {@code saga_forge.command} span for one handling (010 research §2). */
+    private SagaInstrumentation.Traced commandSpan(Object command, CommandId id, String delivery) {
+        return instrumentation.start(SagaInstrumentation.COMMAND)
+                .set(SagaInstrumentation.COMMAND_TYPE, command.getClass().getName())
+                .set(SagaInstrumentation.COMMAND_DELIVERY, delivery)
+                .set(SagaInstrumentation.COMMAND_ID, id.value())
+                .set(SagaInstrumentation.STEP_NAME, id.sagaScoped() ? id.stepName() : null)
+                .set(SagaInstrumentation.SAGA_ID, id.sagaScoped() ? id.sagaId() : null)
+                .set(SagaInstrumentation.CONTENT, instrumentation.content(command));
     }
 
     /** The {@link CommandInvocation} of one handling; {@link #proceed()} runs at most once. */

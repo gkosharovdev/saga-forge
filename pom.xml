@@ -33,6 +33,8 @@
         <junit.version>5.11.4</junit.version>
         <jqwik.version>1.9.2</jqwik.version>
         <assertj.version>3.27.3</assertj.version>
+        <!-- The version Spring Boot 4.1.x manages, so applications get one API version (010 research §10) -->
+        <opentelemetry.version>1.62.0</opentelemetry.version>
     </properties>
 
     <dependencyManagement>
@@ -41,6 +43,13 @@
                 <groupId>org.junit</groupId>
                 <artifactId>junit-bom</artifactId>
                 <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

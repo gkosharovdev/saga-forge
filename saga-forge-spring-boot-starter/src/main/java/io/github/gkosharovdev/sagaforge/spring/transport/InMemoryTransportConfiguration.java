@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetry;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
@@ -49,9 +50,12 @@ public class InMemoryTransportConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public InMemoryTransport sagaForgeInMemoryTransport(MessageStore messageStore, TransactionBoundary transactions,
-            TransportProperties properties, ThreadPoolTaskExecutor sagaForgeTransportExecutor) {
+            TransportProperties properties, ThreadPoolTaskExecutor sagaForgeTransportExecutor,
+            ObjectProvider<SagaForgeTelemetry> telemetry) {
+        SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
         return InMemoryTransport.builder().messageStore(messageStore).transactions(transactions)
-                .settings(properties.toSettings()).executor(sagaForgeTransportExecutor).build();
+                .settings(properties.toSettings()).executor(sagaForgeTransportExecutor)
+                .openTelemetry(resolved.openTelemetry()).telemetry(resolved.settings()).build();
     }
 
     @Bean

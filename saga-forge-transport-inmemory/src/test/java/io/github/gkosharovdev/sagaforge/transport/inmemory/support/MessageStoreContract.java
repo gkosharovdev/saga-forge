@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory.support;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Map;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -245,6 +246,23 @@ public abstract class MessageStoreContract {
         appendCommitted(event("a", "k1"));
 
         assertThatThrownBy(() -> appendCommitted(event("a", "k2"))).isInstanceOf(DuplicateMessageException.class);
+    }
+
+    @Test
+    @DisplayName("010: the trace context round-trips through append, lease and queries; none stays empty")
+    void traceContext() {
+        Map<String, String> context = Map.of("traceparent",
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "tracestate", "vendor=value");
+        NewMessage traced = event("t", "k1");
+        appendCommitted(new NewMessage(traced.messageId(), traced.kind(), traced.payloadType(), traced.payload(),
+                traced.commandId(), traced.orderingKey(), traced.sourceSagaType(), traced.sourceSagaId(),
+                traced.recordedAt(), context), event("u", "k2"));
+
+        LeasedMessages leased = log().lease("c", T0, LEASE, 10);
+
+        assertThat(leased.readable()).extracting(StoredMessage::traceContext).containsExactly(context, Map.of());
+        assertThat(log().query(MessageQuery.builder().build())).extracting(StoredMessage::traceContext)
+                .containsExactly(context, Map.of());
     }
 
     @Test

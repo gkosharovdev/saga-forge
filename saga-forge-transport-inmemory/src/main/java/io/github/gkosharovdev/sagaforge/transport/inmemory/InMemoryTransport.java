@@ -1,5 +1,8 @@
 package io.github.gkosharovdev.sagaforge.transport.inmemory;
 
+import io.opentelemetry.api.OpenTelemetry;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.TransportInstrumentation;
+import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import java.lang.System.Logger;
 import java.time.Clock;
 import java.time.Duration;
@@ -49,10 +52,17 @@ public final class InMemoryTransport {
     private final EventDispatcher dispatcher;
     private final Outbox outbox;
     private final MessageStoreQueries queries;
+    private final TransportInstrumentation instrumentation;
+    private final TransportSettings settings;
+    private final Clock clock;
+    private AutoCloseable gauges;
 
     private InMemoryTransport(Builder builder) {
+        this.instrumentation = new TransportInstrumentation(builder.openTelemetry, builder.telemetry, builder.logger);
+        this.settings = builder.settings;
+        this.clock = builder.clock;
         this.relay = new Relay(builder.messageStore, builder.transactions, builder.settings, builder.clock, builder.logger,
-                builder.executor);
+                builder.executor, instrumentation);
         this.dispatcher = new TransportDispatcher(relay);
         this.outbox = new TransportOutbox(relay);
         this.queries = new MessageStoreQueries(builder.messageStore, relay, builder.clock);
@@ -92,6 +102,14 @@ public final class InMemoryTransport {
      */
     public void start(EventReceiver events, CommandReceiver commands) {
         relay.start(events, commands);
+        synchronized (this) {
+            if (gauges == null) {
+                gauges = instrumentation.gauges(() -> {
+                    MessageStoreQueries.Status status = queries.status();
+                    return new TransportInstrumentation.BacklogStatus(status.counts(), status.oldestUnconsumed());
+                }, settings.pollInterval(), clock);
+            }
+        }
     }
 
     /**
@@ -103,6 +121,16 @@ public final class InMemoryTransport {
             throw new IllegalArgumentException("timeout must not be null or negative");
         }
         relay.stop(timeout);
+        synchronized (this) {
+            if (gauges != null) {
+                try {
+                    gauges.close();
+                } catch (Exception ignored) {
+                    // Closing an OpenTelemetry gauge does not fail; nothing to do if it does.
+                }
+                gauges = null;
+            }
+        }
     }
 
     /** @return whether the transport is delivering */
@@ -180,6 +208,8 @@ public final class InMemoryTransport {
         private TransportSettings settings = TransportSettings.defaults();
         private Clock clock = Clock.systemUTC();
         private Logger logger = System.getLogger("io.github.gkosharovdev.sagaforge.transport");
+        private OpenTelemetry openTelemetry = OpenTelemetry.noop();
+        private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
 
         private Builder() {
         }
@@ -217,6 +247,22 @@ public final class InMemoryTransport {
         /** Optional: where the transport logs; default {@code io.github.gkosharovdev.sagaforge.transport}. */
         public Builder logger(Logger value) {
             this.logger = requireNonNull(value, "logger");
+            return this;
+        }
+
+        /**
+         * Optional: where the transport's spans and metrics go ({@code specs/010-otel-observability}); pass the same
+         * instance as the runtime's. The transport stores the trace context with each message and continues it on
+         * delivery. Default {@link OpenTelemetry#noop()}: nothing is recorded.
+         */
+        public Builder openTelemetry(OpenTelemetry value) {
+            this.openTelemetry = requireNonNull(value, "openTelemetry");
+            return this;
+        }
+
+        /** Optional: what is recorded; default {@link SagaTelemetrySettings#defaults()}. */
+        public Builder telemetry(SagaTelemetrySettings value) {
+            this.telemetry = requireNonNull(value, "telemetry");
             return this;
         }
 

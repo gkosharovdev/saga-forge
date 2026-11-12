@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS saga_message_store (
     consumed_at       TIMESTAMPTZ,
     set_aside_reason  VARCHAR(4096),
     external_ref      VARCHAR(255),
+    -- Propagated trace context (specs/010-otel-observability contracts/message-context.md); NULL when none.
+    trace_context     JSONB,
     CONSTRAINT command_id_iff_command CHECK ((kind = 'COMMAND') = (command_id IS NOT NULL)),
     CONSTRAINT lease_together CHECK ((leased_by IS NULL) = (leased_until IS NULL)),
     CONSTRAINT consumed_at_iff_consumed CHECK ((status = 'CONSUMED') = (consumed_at IS NOT NULL)),

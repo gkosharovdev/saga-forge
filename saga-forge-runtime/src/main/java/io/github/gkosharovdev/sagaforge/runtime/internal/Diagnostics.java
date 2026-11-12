@@ -6,6 +6,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.util.List;
@@ -16,6 +18,10 @@ import java.util.List;
  * <p>Each message is a fixed event name followed by {@code key=value} pairs separated by single spaces; a key
  * whose value is unknown is omitted. Messages below {@code INFO} are built lazily. Free-text values ({@code cause})
  * come last, so a reader splitting on {@code " key="} recovers every pair.</p>
+ *
+ * <p>Since 010, a message written while a recording OpenTelemetry span is current carries {@code traceId} and
+ * {@code spanId} right after the event name, so log lines can be joined with traces; without one (no SDK installed)
+ * every line is unchanged (FR-011).</p>
  *
  * <p><strong>Not API.</strong> Public only so that {@code SagaRuntime} can log its startup outcome; hosts route
  * diagnostics through {@code SagaRuntime.builder().logger(...)} or a {@code System.LoggerFinder}.</p>
@@ -201,6 +207,11 @@ public final class Diagnostics {
                 .instance(about).toString(), cause);
     }
 
+    /** {@code saga.telemetry.failed}: Saga Forge's own instrumentation failed; logged once per kind (010 FR-012). */
+    void telemetryFailed(String kind, Throwable cause) {
+        logger.log(Level.WARNING, Line.of("saga.telemetry.failed").with("kind", kind).cause(cause).toString(), cause);
+    }
+
     void eventNotHandled(Object event, Throwable cause) {
         logger.log(Level.ERROR, Line.of("saga.event.notHandled").with("event", event.getClass().getName())
                 .toString(), cause);
@@ -217,6 +228,10 @@ public final class Diagnostics {
 
         private Line(String eventName) {
             this.text = new StringBuilder(eventName);
+            SpanContext current = Span.current().getSpanContext();
+            if (current.isValid()) {
+                with("traceId", current.getTraceId()).with("spanId", current.getSpanId());
+            }
         }
 
         static Line of(String eventName) {

@@ -49,7 +49,7 @@ final class CompensationRun {
         String last = ranBefore;
         while (true) {
             CompensationUnitOfWork unitOfWork = new CompensationUnitOfWork(saga, sagaId, with, about);
-            Result result = unitOfWork.run();
+            Result result = traced(saga, sagaId, unitOfWork);
             switch (result) {
                 case Committed committed -> {
                     last = committed.unitOfWorkId();
@@ -71,6 +71,36 @@ final class CompensationRun {
                     return new Summary(outcomeOf(stopped.status()), last);
                 }
             }
+        }
+    }
+
+    /** One compensation unit of work inside a {@code saga_forge.compensation} span (010 research §2). */
+    private Result traced(SagaModel saga, String sagaId, CompensationUnitOfWork unitOfWork) {
+        try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.COMPENSATION)) {
+            span.set(SagaInstrumentation.SAGA_TYPE, saga.typeName()).set(SagaInstrumentation.SAGA_ID, sagaId)
+                    .set(SagaInstrumentation.UNIT_OF_WORK_ID, unitOfWork.unitOfWorkId());
+            Result result;
+            try {
+                result = unitOfWork.run();
+            } catch (RuntimeException | Error failure) {
+                span.fail(failure);
+                throw failure;
+            }
+            switch (result) {
+                case Committed committed -> {
+                    span.set(SagaInstrumentation.STEP_NAME, committed.step())
+                            .set(SagaInstrumentation.COMPENSATION_STATUS, committed.instance().steps()
+                                    .get(committed.step()).compensation().status().name());
+                    if (committed.instance().compensationTrigger() != null) {
+                        span.set(SagaInstrumentation.COMPENSATION_TRIGGER,
+                                committed.instance().compensationTrigger().kind().name());
+                    }
+                }
+                case Failed failed -> span.set(SagaInstrumentation.STEP_NAME, failed.step())
+                        .set(SagaInstrumentation.COMPENSATION_STATUS, "FAILED").fail(failed.cause());
+                default -> span.set(SagaInstrumentation.COMPENSATION_STATUS, "NOT_RUN");
+            }
+            return result;
         }
     }
 

@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -56,7 +58,7 @@ public class PostgresMessageStore implements MessageStore {
     private static final String UNIQUE_VIOLATION = "23505";
     private static final String COLUMNS = "position, message_id, kind, payload_type, payload, command_id, ordering_key,"
             + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, last_failure,"
-            + " leased_by, leased_until, consumed_at, set_aside_reason, external_ref";
+            + " leased_by, leased_until, consumed_at, set_aside_reason, external_ref, trace_context";
 
     private final DataSource dataSource;
     private final ClassLoader payloadClassLoader;
@@ -112,8 +114,10 @@ public class PostgresMessageStore implements MessageStore {
         Connection connection = tx.resource(Connection.class).orElseThrow(() -> new IllegalStateException(
                 "The active transaction has no java.sql.Connection resource; PostgresMessageStore cannot join it"));
         String sql = "INSERT INTO saga_message_store (message_id, kind, payload_type, payload, command_id, ordering_key,"
-                + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, external_ref)"
-                + " VALUES (?, ?, ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, ?, ?, ?, 'UNCONSUMED', 0, ?, ?)";
+                + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, external_ref,"
+                + " trace_context)"
+                + " VALUES (?, ?, ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, ?, ?, ?, 'UNCONSUMED', 0, ?, ?,"
+                + " CAST(? AS JSONB))";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             for (NewMessage entry : entries) {
                 statement.setString(1, entry.messageId());
@@ -128,6 +132,8 @@ public class PostgresMessageStore implements MessageStore {
                 statement.setObject(9, utc(entry.recordedAt()));
                 statement.setObject(10, utc(entry.recordedAt()));
                 statement.setString(11, externalRef);
+                statement.setString(12, entry.traceContext().isEmpty() ? null
+                        : JsonCodec.encodeObject("trace_context", entry.traceContext()));
                 statement.addBatch();
             }
             statement.executeBatch();
@@ -436,7 +442,17 @@ public class PostgresMessageStore implements MessageStore {
                 MessageStatus.valueOf(r.getString("status")), r.getInt("attempts"), instant(r, "next_attempt_at"),
                 lastFailure == null ? null : PayloadCodec.decodeFailure(lastFailure), r.getString("leased_by"),
                 instant(r, "leased_until"), instant(r, "consumed_at"), r.getString("set_aside_reason"),
-                r.getString("external_ref"));
+                r.getString("external_ref"), traceContext(r.getString("trace_context")));
+    }
+
+    /** The stored trace context; {@code NULL} (no context, or a message stored before 010) reads as empty. */
+    private static Map<String, String> traceContext(String json) {
+        if (json == null) {
+            return Map.of();
+        }
+        Map<String, String> context = new LinkedHashMap<>();
+        JsonCodec.decodeObject("trace_context", json).forEach((key, value) -> context.put(key, String.valueOf(value)));
+        return context;
     }
 
     private static String qualified(String alias) {

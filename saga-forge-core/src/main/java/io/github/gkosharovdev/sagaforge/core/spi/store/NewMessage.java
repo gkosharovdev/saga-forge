@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.core.spi.store;
 
+import java.util.Map;
 import java.time.Instant;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
@@ -23,8 +24,13 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * @throws IllegalArgumentException if a rule above is violated
  */
 public record NewMessage(String messageId, MessageKind kind, String payloadType, Object payload, CommandId commandId,
-        String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt) {
+        String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt,
+        Map<String, String> traceContext) {
 
+    /**
+     * Validates the components; a {@code null} {@code traceContext} becomes empty, and it is stored as an unmodifiable
+     * copy ({@code specs/010-otel-observability} contracts/message-context.md).
+     */
     public NewMessage {
         Checks.nonBlank(messageId, "messageId");
         Checks.nonNull(kind, "kind");
@@ -33,5 +39,13 @@ public record NewMessage(String messageId, MessageKind kind, String payloadType,
         Checks.nonNull(recordedAt, "recordedAt");
         Checks.commandIdMatchesKind(kind, commandId);
         Checks.bothOrNeither(sourceSagaType, sourceSagaId, "sourceSagaType", "sourceSagaId");
+        traceContext = traceContext == null ? Map.of() : Map.copyOf(traceContext);
+    }
+
+    /** A message without trace context (the 007 shape). */
+    public NewMessage(String messageId, MessageKind kind, String payloadType, Object payload, CommandId commandId,
+            String orderingKey, String sourceSagaType, String sourceSagaId, Instant recordedAt) {
+        this(messageId, kind, payloadType, payload, commandId, orderingKey, sourceSagaType, sourceSagaId, recordedAt,
+                Map.of());
     }
 }
