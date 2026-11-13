@@ -1,0 +1,1525 @@
+# Saga Forge user guide (all pages)
+
+Generated from docs/guide/*.md by docs/guide/build-llms-full.sh; do not edit by hand.
+Source: https://github.com/gkosharovdev/saga-forge/tree/master/docs/guide
+
+<!-- docs/guide/README.md -->
+
+# Saga Forge user guide
+
+This guide is for applications that **use** Saga Forge: you add the published artifacts to your build and write sagas,
+command handlers and aggregates. It does not cover how Saga Forge itself is built (specs, gap register, internal
+design); that material lives in the repository's `AGENTS.md`, `docs/architecture.md` and `specs/`.
+
+Every code snippet in this guide is copied from compiling code in this repository; the source file is named under each
+snippet, so you can open it for the imports and the surrounding class.
+
+| Page | Read it when you want to |
+|---|---|
+| [Getting started](getting-started.md) | add Saga Forge 0.1.0 to a Spring Boot 4.1 / Java 21 application and create the schema |
+| [Model reference](model-reference.md) | know where each annotation goes, what it needs next to it, and its attributes |
+| [Validation rules](validation-rules.md) | turn a startup error into a fix |
+| [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
+| [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
+| [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
+| [Limitations](limitations.md) | know what to design around in 0.1.0 |
+
+API reference: the Javadoc of every published module is on
+[javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core) (`saga-forge-core`, `saga-forge-runtime`,
+`saga-forge-test`, `saga-forge-spring-boot-starter`, `saga-forge-storage-postgres`, `saga-forge-transport-inmemory`).
+The starter's own [README](../../saga-forge-spring-boot-starter/README.md) lists everything it assembles and how to
+replace each piece.
+
+## Vocabulary
+
+Saga Forge uses DDD / EventStorming terms (full glossary in
+[architecture.md § Vocabulary](../architecture.md#vocabulary)):
+
+- **Command**: an instruction to change state, handled by exactly one `@CommandHandler`. A saga step sends it through
+  `CommandGateway`; a step never returns one.
+- **Domain event**: a fact about one aggregate that already happened. Recorded by handlers with
+  `DomainEvents.record(...)`, or published by application code with `EventPublisher`.
+- **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate`, identified by one
+  `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
+  `@AggregateLoader`/`@AggregateSaver`).
+- **Policy**: the cross-aggregate rule "when X happens, Y should happen" that a saga encodes.
+- **Saga**: the durable process for one instance of a policy, a `@Saga` class whose instances are correlated by an
+  association property.
+- **Step**: a `@SagaStep` method reacting to one domain event type.
+- **Compensation**: a `@SagaCompensation` method that undoes a committed step when the saga fails after it.
+- **Unit of work**: the transaction in which one or more steps, the commands they send and the handlers' changes commit
+  together, or roll back together.
+
+<!-- docs/guide/getting-started.md -->
+
+# Getting started
+
+Saga Forge 0.1.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
+under the group `io.github.gkosharovdev`.
+
+| Artifact | Use it for | Scope |
+|---|---|---|
+| `saga-forge-spring-boot-starter` | auto-configuration: builds and starts the runtime from your beans; brings `saga-forge-core`, `saga-forge-runtime` and `saga-forge-transport-inmemory` | compile |
+| `saga-forge-storage-postgres` | durable saga storage, `SagaContext` values and the message store on Postgres | compile |
+| `saga-forge-test` | `SagaFixture`, in-memory given/when/then tests | test |
+| `saga-forge-core` | annotations and contracts only, zero dependencies (for a module that declares commands and events but runs no saga) | compile |
+
+## 1. Dependencies
+
+Maven:
+
+```xml
+<dependency>
+    <groupId>io.github.gkosharovdev</groupId>
+    <artifactId>saga-forge-spring-boot-starter</artifactId>
+    <version>0.1.0</version>
+</dependency>
+<dependency>
+    <groupId>io.github.gkosharovdev</groupId>
+    <artifactId>saga-forge-storage-postgres</artifactId>
+    <version>0.1.0</version>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jdbc</artifactId>  <!-- or spring-boot-starter-jdbc -->
+</dependency>
+<dependency>
+    <groupId>io.github.gkosharovdev</groupId>
+    <artifactId>saga-forge-test</artifactId>
+    <version>0.1.0</version>
+    <scope>test</scope>
+</dependency>
+```
+
+Gradle (Kotlin DSL):
+
+```kotlin
+dependencies {
+    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.1.0")
+    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.1.0")
+    implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
+    testImplementation("io.github.gkosharovdev:saga-forge-test:0.1.0")
+}
+```
+
+Compile with `-parameters` (Spring Boot's parent POM and Gradle plugin do this): Spring Data maps constructor
+parameters by name.
+
+## 2. Database and schema
+
+Point Spring Boot at Postgres as usual:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/orders
+spring.datasource.username=orders
+spring.datasource.password=orders
+```
+
+Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_lifecycle_history`,
+`saga_message_store`, `saga_message_store_consumer`) are defined in the classpath resource
+`io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql` inside `saga-forge-storage-postgres`.
+
+- **Development**: let the starter create them in an empty database:
+  `saga-forge.storage.postgres.initialize-schema=always`. It never alters existing tables.
+- **Production**: copy `schema.sql` into your Flyway or Liquibase migrations and keep
+  `initialize-schema=never` (the default). With `never`, startup fails if the tables are missing:
+  `Saga Forge's tables [...] do not exist in the database.`
+
+A database created from the 0.1.0 `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
+[Operations](operations.md#schema-and-upgrades) for when they apply.
+
+## 3. A saga
+
+The starter finds `@Saga`, `@Aggregate` and handler classes in the packages of your `@SpringBootApplication` and starts
+the runtime; there is no configuration class to write. This is the complete canonical saga of
+`saga-forge-example-spring`: pay for an order, reserve its stock, complete it; or refund the payment when the stock is
+unavailable.
+
+```java
+@Saga
+public class OrderProcessingSaga {
+
+    @SagaId
+    private String sagaId;
+
+    private SagaContext context;
+
+    private CommandGateway commandGateway;
+
+    @StartSaga
+    @SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+            multiplier = 2.0, maxBackoffMillis = 1_000))
+    public void handleOrderCreated(OrderCreatedEvent event) {
+        context.putState("orderAmount", event.amount().toPlainString());
+        commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
+    }
+
+    @SagaStep(associationProperty = "orderId")
+    public void processPayment(PaymentProcessedEvent event) {
+        BigDecimal orderAmount = amount();
+        if (orderAmount.compareTo(event.amount()) != 0) {
+            throw new IllegalStateException("Payment " + event.paymentId() + " of " + event.amount()
+                    + " does not match order amount " + orderAmount);
+        }
+        context.putState("paymentId", event.paymentId());
+        commandGateway.send(new ReserveStockCommand(event.orderId()));
+    }
+
+    @EndSaga
+    @SagaStep(associationProperty = "orderId")
+    public void completeOrder(OrderCompletedEvent event) {
+        // Terminal step: the unit of work commits and the saga is COMPLETED.
+    }
+
+    @StartCompensation
+    @SagaStep(associationProperty = "orderId")
+    public void rejectOrder(StockUnavailableEvent event) {
+        // The trigger records why; compensatePayment follows.
+    }
+
+    @SagaCompensation(forStep = "processPayment")
+    public void compensatePayment(CompensationTrigger trigger) {
+        String paymentId = context.getState("paymentId", String.class).orElseThrow();
+        commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount()));
+    }
+
+    private BigDecimal amount() {
+        return new BigDecimal(context.getState("orderAmount", String.class).orElseThrow());
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/OrderProcessingSaga.java`
+(imports: `core.annotation.*`, `core.command.CommandGateway`, `core.compensation.CompensationTrigger`,
+`core.lifecycle.SagaContext`, all under `io.github.gkosharovdev.sagaforge`).
+
+Events and commands are plain records:
+
+```java
+@DomainEvent(aggregate = Order.class)
+public record OrderCreatedEvent(@AggregateIdentifier String orderId, BigDecimal amount) {
+}
+
+@Command
+public record ReserveStockCommand(@AggregateIdentifier String orderId) {
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/events/OrderCreatedEvent.java`,
+`.../commands/ReserveStockCommand.java`.
+
+The aggregate, a Spring Data JDBC entity that extends nothing from Saga Forge, handles a command and records the next
+event. The starter loads it through its `CrudRepository` by the command's `@AggregateIdentifier` and saves it after
+the handler:
+
+```java
+@Aggregate
+@Table("orders")
+public class Order {
+
+    public enum Status { CREATED, COMPLETED, OUT_OF_STOCK }
+
+    @Id
+    @AggregateIdentifier
+    private final String orderId;
+    private final boolean inStock;
+    private Status status;
+    @Version
+    private Long version;
+
+    @PersistenceCreator
+    Order(String orderId, boolean inStock, Status status, Long version) {
+        this.orderId = orderId;
+        this.inStock = inStock;
+        this.status = status;
+        this.version = version;
+    }
+
+    public static Order create(String orderId, boolean inStock) {
+        return new Order(orderId, inStock, Status.CREATED, null);
+    }
+
+    @CommandHandler
+    public void handle(ReserveStockCommand command) {
+        if (status != Status.CREATED) {
+            throw new IllegalStateException("Order " + orderId + " is already " + status);
+        }
+        if (!inStock) {
+            status = Status.OUT_OF_STOCK;
+            DomainEvents.record(new StockUnavailableEvent(orderId));
+            return;
+        }
+        status = Status.COMPLETED;
+        DomainEvents.record(new OrderCompletedEvent(orderId));
+    }
+    // accessors omitted
+}
+
+public interface OrderRepository extends CrudRepository<Order, String> {
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/Order.java`,
+`OrderRepository.java`.
+
+## 4. Start a saga
+
+Publish the start event through Saga Forge's `EventPublisher` bean (never Spring's `ApplicationEventPublisher`). Inside
+a `@Transactional` method the event is stored with your own changes and delivered after the commit:
+
+```java
+@Service
+public class OrderPlacement {
+
+    private final OrderRepository orders;
+    private final EventPublisher events;
+
+    public OrderPlacement(OrderRepository orders, EventPublisher events) {
+        this.orders = orders;
+        this.events = events;
+    }
+
+    @Transactional
+    public void place(String orderId, BigDecimal amount, boolean inStock) {
+        orders.save(Order.create(orderId, inStock));
+        events.publish(new OrderCreatedEvent(orderId, amount));
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/OrderPlacement.java`.
+
+## 5. What happens
+
+1. `OrderCreatedEvent` reaches `handleOrderCreated` (`@StartSaga`): a saga instance is created for `orderId`, and a
+   unit of work begins.
+2. `ProcessPaymentCommand` runs `PaymentService.handle` in the same unit of work; it records `PaymentProcessedEvent`,
+   which triggers `processPayment` of the same instance, still in the same unit of work, and so on.
+3. The unit of work commits at the first `@EndSaga` step (`completeOrder`, saga `COMPLETED`), at a
+   `@StartCompensation` step (`rejectOrder`, saga `COMPENSATING`, then `COMPENSATED` after `compensatePayment`), or
+   when no queued event is left for the instance (saga `RUNNING`, waiting for an event from outside).
+4. Any exception rolls the whole unit of work back. See [Recipes](recipes.md) for retry and compensation.
+
+Next: [Model reference](model-reference.md), [Testing](testing.md).
+
+## Without Spring
+
+The runtime can be assembled by hand in plain Java (no starter); see the
+[root README](../../README.md#without-spring-plain-java) and `OrderProcessingSagaTransportTest` in
+`saga-forge-example`.
+
+<!-- docs/guide/model-reference.md -->
+
+# Model reference
+
+All annotations are in `io.github.gkosharovdev.sagaforge.core.annotation` (`saga-forge-core`). They are retained at
+runtime and validated when the runtime starts; a violation stops startup with the message listed in
+[Validation rules](validation-rules.md) (rule ids `R1` to `R23` below).
+
+Other types a model uses:
+
+| Type | Package (`io.github.gkosharovdev.sagaforge.` + ) | Role |
+|---|---|---|
+| `SagaContext` | `core.lifecycle` | a saga's named business values (`getState`, `putState`, `updateStateAttribute`) |
+| `CommandGateway` | `core.command` | `send(Object command)`: how a step (or any code) dispatches a command |
+| `CommandId` | `core.command` | the stable identity of a command, injected into a handler that declares it |
+| `DomainEvents` | `core.event` | static `record(Object event)`: how handlers and aggregates record events |
+| `EventPublisher` | `core.event` | `publish(Object event)`: how application code publishes events (a Spring bean) |
+| `CompensationTrigger` | `core.compensation` | why compensation started; optional parameter of a compensation |
+| `TransientFailure`, `FinalFailure` | `core.failure` | marker interfaces for exception classes: retry, or compensate without retry |
+| `SagaStatus`, `HandlingOutcome` | `core.spi` | instance status and per-event outcome (used in tests and operations) |
+
+## The saga class
+
+### `@Saga`
+
+- **Where**: on a concrete class (not an interface, not abstract). R1.
+- **Needs**: exactly one `@SagaId` field, exactly one `@StartSaga` step, at least one `@EndSaga` step (R2, R3).
+- **Construction**: a no-argument constructor (any visibility), or, with the starter, a prototype-scoped bean
+  (`@Scope("prototype")`) to inject collaborators. A new saga object is created for every unit of work, so keep no
+  state in plain fields: use `SagaContext`.
+- **Attributes**: none.
+- **Optional fields, recognized by declared type, no annotation**: at most one `SagaContext` field (R7) and at most one
+  `CommandGateway` field (R11). The runtime sets them.
+- **Never** declare a `@CommandHandler` on a saga (R10).
+
+### `@SagaId`
+
+- **Where**: on exactly one field of type `String` of the `@Saga` class (R2). The runtime sets it (`saga-1`-style ids in
+  the test fixture, generated ids in production).
+- **Attributes**: none.
+
+### `@SagaStep`
+
+- **Where**: on a method of the `@Saga` class that returns `void` (R8) and takes exactly one parameter whose type is
+  annotated `@DomainEvent` (R5).
+- **Rules**: no two steps of one saga take the same event type (R9). Steps run in event order, not declaration order.
+  A step never returns a command; it calls `commandGateway.send(...)`.
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `associationProperty` | `String` | required | name of the field (record component) on the event whose value correlates the event to a saga instance, for example `"orderId"`. The event must have a non-null value for it at runtime, or delivery fails with `Event X has no value for association property 'p' of step s of saga S`. |
+  | `retry` | `@RetryPolicy` | `@RetryPolicy` (one attempt, no retry) | how often the step's unit of work may run after a transient failure. |
+
+- The association property need not be the event's `@AggregateIdentifier`: `PaymentProcessedEvent` is about a
+  `Payment` (`paymentId`) but correlates by `orderId`.
+
+### `@StartSaga`
+
+- **Where**: on exactly one method per saga, together with `@SagaStep` (R3, R4). Its event creates a new instance.
+- **Never** together with `@StartCompensation` (R20). A second start event with the same association value while an
+  instance is active is reported `DUPLICATE_START` and changes nothing.
+
+### `@EndSaga`
+
+- **Where**: on one or more methods per saga, together with `@SagaStep` (R3, R4). When it runs, the unit of work
+  commits and the instance is `COMPLETED`; the method's name is the recorded outcome (e.g. `completeOrder`).
+- **Never** together with `@StartCompensation` (R20).
+
+### `@StartCompensation`
+
+- **Where**: on a step that handles a business-failure event (stock unavailable, delivery rejected), together with
+  `@SagaStep`, never with `@StartSaga` or `@EndSaga` (R20).
+- **Effect**: the step runs like any other; when its unit of work commits, the instance becomes `COMPENSATING` and the
+  runtime runs the `@SagaCompensation` of every other completed step, most recently completed first, each in its own
+  unit of work. The method's name is the failure outcome. Data the compensations need from the failure event must be
+  written to `SagaContext` here: the event is not passed to them.
+- **Attributes**: none.
+
+### `@SagaCompensation`
+
+- **Where**: on a method of the `@Saga` class that returns `void` and takes no parameter or one `CompensationTrigger`
+  (R21); not itself a `@SagaStep` (R21).
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `forStep` | `String` | required | the **method name** of the `@SagaStep` it undoes. It must exist (R6), must be a `@SagaStep` (R6), must not be a `@StartCompensation` step (R22); at most one compensation per step (R22). |
+
+- **Runs when**: a `@StartCompensation` step committed, or a step failed `FINAL` (exception implements `FinalFailure`)
+  or `EXHAUSTED` (transient failure, attempts used up) after an earlier unit of work committed. Only steps that
+  completed are compensated. A compensation that throws is never retried: the instance ends `REQUIRES_INTERVENTION`.
+  A compensation can run again after a crash, so the commands it sends must be idempotent (pass `CommandId` on).
+
+### `@RetryPolicy`
+
+- **Where**: only as the value of `@SagaStep(retry = ...)`.
+- **Attributes** (R19):
+
+  | Attribute | Type | Default | Constraint |
+  |---|---|---|---|
+  | `maxAttempts` | `int` | `1` (no retry) | at least 1, attempts including the first |
+  | `initialBackoffMillis` | `long` | `0` | not negative; wait before attempt 2 |
+  | `multiplier` | `double` | `1.0` | finite, at least 1.0 (1.0 = fixed wait) |
+  | `maxBackoffMillis` | `long` | `0` (= `initialBackoffMillis`) | 0 or at least `initialBackoffMillis`; cap on a single wait |
+  | `retryOn` | `Class<? extends Throwable>[]` | `{}` | extra exception types treated as transient; no `Error` types |
+
+- With `maxAttempts = 1`, every other attribute must keep its default.
+- Wait before attempt `k >= 2`: `min(initialBackoffMillis * multiplier^(k-2), cap)`. The runtime waits in-process; the
+  total wait of a policy may not exceed `saga-forge.runtime.max-total-retry-backoff` (default 30 s), checked at
+  startup.
+- Retried: a failure (or a cause in its chain) that implements `TransientFailure` or is an instance of a `retryOn` type,
+  and implements no `FinalFailure`. Retrying re-runs the whole unit of work, not just the step.
+
+## Commands and handlers
+
+### `@Command`
+
+- **Where**: on a command class (usually a record).
+- **Rules**: handled by exactly one `@CommandHandler` across the model (R13); at most one `@AggregateIdentifier` field
+  (R14), and exactly one when an `@Aggregate` instance method handles it (R15): that field selects the aggregate to
+  load.
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `delivery` | `CommandDelivery` | `IN_UNIT_OF_WORK` | `IN_UNIT_OF_WORK`: the handler runs synchronously inside the sender's unit of work; its failure rolls the step back. `OUTBOX`: the command is stored with the sender's unit of work and handled after it commits, in a unit of work of its own; its failure does not roll the step back. An `OUTBOX` command must have a handler among the registered classes (R23) and needs an outbox that stores commands (the in-memory transport's does). |
+
+### `@CommandHandler`
+
+- **Where**: on a method or constructor that takes exactly one `@Command`-typed parameter (R12), in one of:
+  - an `@Aggregate` **instance method**: the target aggregate is loaded first by the command's `@AggregateIdentifier`
+    (through an `@AggregateLoader`, or with the starter the aggregate's Spring Data repository), then saved;
+  - an `@Aggregate` **constructor or static factory**: creates a new aggregate;
+  - a **service** class (with the starter: a Spring bean, `@Component`/`@Service`).
+- **Never** on a `@Saga` (R10).
+- **Extra parameters**: one optional `CommandId` (the command's stable identity; pass `commandId.value()` to outside
+  systems as the idempotency key), and, with the starter, any bean the context can inject (`@Qualifier` honoured).
+- **Attributes**: none. A handler records the resulting events with `DomainEvents.record(...)`.
+
+## Aggregates and events
+
+### `@Aggregate`
+
+- **Where**: on an aggregate class. It extends and implements no Saga Forge type.
+- **Needs**: exactly one `@AggregateIdentifier` field (R14).
+- **Persistence**: with instance-method handlers, the runtime must be able to load it: an `@AggregateLoader` for it, or
+  (starter) a Spring Data repository, or an `AggregateResolver` bean; otherwise startup fails.
+- **Attributes**: none.
+
+### `@AggregateIdentifier`
+
+- **Where**: on a field (a record component works): exactly one on each `@Aggregate` and `@DomainEvent` type, at most
+  one on each `@Command` type (R14). On a command it names the target aggregate. With the starter its type must convert
+  to the repository's id type.
+
+### `@DomainEvent`
+
+- **Where**: on an event class (usually a record) used as a `@SagaStep` parameter or recorded by a handler.
+- **Needs**: exactly one `@AggregateIdentifier` field (R14).
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `aggregate` | `Class<?>` | required | the `@Aggregate` type this event is about (R16). A marker aggregate class with just an identifier is fine when the state lives elsewhere (`Payment` in the examples). |
+
+### `@AggregateLoader`
+
+- **Where**: on a method of a host class (not the aggregate) that takes exactly one parameter, the identifier, and
+  returns an `@Aggregate` type (R17); at most one per aggregate type (R18). Returning `null` fails the unit of work with
+  `AggregateNotFoundException`. With the starter, a loader wins over the Spring Data repository.
+
+### `@AggregateSaver`
+
+- **Where**: on a method of a host class that takes exactly one `@Aggregate`-typed parameter (R17); optional, at most one
+  per aggregate type (R18).
+
+```java
+public class OrderRepository {
+
+    private final Map<String, Order> orders = new ConcurrentHashMap<>();
+
+    @AggregateLoader
+    public Order load(String orderId) {
+        return orders.get(orderId);
+    }
+
+    @AggregateSaver
+    public void save(Order order) {
+        orders.put(order.orderId(), order);
+    }
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/OrderRepository.java`.
+
+## `SagaContext` values
+
+`SagaContext` holds named values per saga instance. They are stored apart from the unit of work: a value written by a
+step stays readable even when that step's unit of work rolled back, and a retried attempt sees what earlier attempts
+wrote, so write values so that writing again is harmless.
+
+- `putState(name, value)`: `null` is rejected; `getState(name, type)` returns `Optional.empty()` only when never
+  written; reading with the wrong type throws `SagaStateTypeMismatchException`.
+- On Postgres, values must be JSON scalars or collections of them: `String`, `Boolean`, `Integer`, `Long`, finite
+  `Double`, `List`, `Map` with `String` keys, nested. **Store a `BigDecimal` as `toPlainString()`**, an `Instant` as
+  its ISO string, an enum as its `name()`. A `Long` in the `int` range reads back as `Integer` on Postgres: read small
+  numbers as `Integer` or store them as strings.
+
+<!-- docs/guide/validation-rules.md -->
+
+# Validation rules: error → fix
+
+The runtime validates the whole model when it starts (`SagaRuntime.start()`; with the starter, while the application
+context starts; with `SagaFixture`, in `build()`). It collects **every** error in one pass and refuses to start with
+`SagaRuntimeStartupException`:
+
+```text
+Saga engine refused to start (2 errors):
+@SagaStep method processPayment in OrderProcessingSaga must return void; dispatch commands through the CommandGateway instead
+Command ChargeCard is delivered through the outbox but has no @CommandHandler
+```
+
+With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
+`{X}` marks a part filled in with a class, method or number. Messages come from
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R23), `StartupChecks` (`saga-forge-runtime`) and the
+starter's configuration checks.
+
+## Saga class rules
+
+| Rule | Error text | What it means | How to fix |
+|---|---|---|---|
+| R1 | `@Saga class {S} must be a concrete class, not an interface or abstract class` | `@Saga` is on an interface or abstract class. | Put `@Saga` on a concrete class. |
+| R2 | `@Saga class {S} must declare exactly one @SagaId field, found {n}` | No `@SagaId` field, or more than one. | Declare exactly one `@SagaId private String sagaId;`. |
+| R2 | `@SagaId field {f} in {S} must be of type String` | The id field is a `UUID`, `long`, ... | Make it `String`. |
+| R3 | `@Saga class {S} must declare exactly one @StartSaga method, found {n}` | Zero or several start steps. | Mark exactly one step `@StartSaga`; split into two sagas if two events can start a process. |
+| R3 | `@Saga class {S} must declare at least one @EndSaga method, found 0` | No terminal step. | Mark the step(s) reacting to the final success event(s) `@EndSaga`. |
+| R4 | `Method {m} in {S} is annotated with @StartSaga but missing @SagaStep` | `@StartSaga` alone. | Add `@SagaStep(associationProperty = "...")` to the same method. |
+| R4 | `Method {m} in {S} is annotated with @EndSaga but missing @SagaStep` | `@EndSaga` alone. | Add `@SagaStep(associationProperty = "...")` to the same method. |
+| R5 | `@SagaStep method {m} in {S} must accept exactly one parameter, found {n}` | A step takes no parameter or several. | Take exactly one event parameter; get other data from `SagaContext` or injected collaborators. |
+| R5 | `@SagaStep method {m} parameter type {T} must be annotated with @DomainEvent` | The step takes a command, a DTO or an unannotated class. | Annotate the event type `@DomainEvent(aggregate = X.class)` with one `@AggregateIdentifier`. Steps react to events, never to commands. |
+| R6 | `@SagaCompensation on {m}: forStep '{name}' does not reference an existing method in {S}` | Typo, or the step was renamed. | Set `forStep` to the exact **method name** of the step it undoes. |
+| R6 | `@SagaCompensation on {m}: forStep '{name}' must reference a @SagaStep method` | `forStep` names a helper method. | Point it at a `@SagaStep` method. |
+| R7 | `@Saga class {S} must declare at most one SagaContext field, found {n}` | Several `SagaContext` fields. | Keep one field; store several values under different names. |
+| R8 | `@SagaStep method {m} in {S} must return void; dispatch commands through the CommandGateway instead` | The step returns a command or a value. | Return `void` and call `commandGateway.send(command)`. |
+| R9 | `@Saga class {S} has more than one @SagaStep reacting to {Event}: {m1}, {m2}` | Two steps take the same event type. | Keep one step per event type and branch inside it, or introduce distinct event types. |
+| R10 | `@Saga class {S} must not declare @CommandHandler method {m}` | A handler is on the saga. | Move the handler to an `@Aggregate` or a service class. |
+| R11 | `@Saga class {S} must declare at most one CommandGateway field, found {n}` | Several gateway fields. | Keep one `private CommandGateway commandGateway;`. |
+| R19 | `@SagaStep method {m} in {S} has an invalid retry policy: {violations}` | See the violations below; several are joined in one line. | Fix the `@RetryPolicy` attributes. |
+| R20 | `Method {m} in {S} is annotated with @StartCompensation but missing @SagaStep` | `@StartCompensation` alone. | Add `@SagaStep(associationProperty = "...")`. |
+| R20 | `@StartCompensation method {m} in {S} cannot also be annotated with @StartSaga` | The start step is also the failure step. | Use a separate step for the failure event. |
+| R20 | `@StartCompensation method {m} in {S} cannot also be annotated with @EndSaga` | One step is both outcomes. | Success is `@EndSaga`, business failure is `@StartCompensation`: separate steps on separate events. |
+| R21 | `@SagaCompensation method {m} in {S} must return void` | Compensation returns a value. | Return `void`; send commands through the gateway. |
+| R21 | `@SagaCompensation method {m} in {S} must declare no parameter or one CompensationTrigger parameter` | Compensation takes the event or other parameters. | Take nothing or `CompensationTrigger trigger`; read the data from `SagaContext` (write it in the step). |
+| R21 | `@SagaCompensation method {m} in {S} cannot also be annotated with @SagaStep` | A step is also a compensation. | Keep them separate methods. |
+| R22 | `@SagaCompensation methods {m1}, {m2} in {S} both compensate step {step}` | Two compensations for one step. | Merge them into one method. |
+| R22 | `@SagaCompensation method {m} in {S} compensates step {step}, which is a @StartCompensation step` | The failure step itself has a compensation. | Remove it: the failure step starts compensation and is never undone. |
+
+R19 violations (after `has an invalid retry policy: `):
+
+| Violation text | Fix |
+|---|---|
+| `maxAttempts must be at least 1, found {n}` | `maxAttempts >= 1`. |
+| `initialBackoffMillis must not be negative, found {n}` | Use `0` or more. |
+| `multiplier must be a finite number of at least 1.0, found {x}` | Use `1.0` (fixed) or more. |
+| `maxBackoffMillis must be 0 or at least initialBackoffMillis {i}, found {n}` | Raise the cap, or use `0`. |
+| `maxBackoffMillis must not be negative, found {n}` | Use `0` or more. |
+| `retryOn must not name Error type {T}` | List `Exception` types only. |
+| `initialBackoffMillis must keep its default when maxAttempts is 1` (also `multiplier`, `maxBackoffMillis`, `retryOn`) | Raise `maxAttempts`, or drop the other attributes. |
+
+## Handler, aggregate, event and command rules (whole model)
+
+| Rule | Error text | What it means | How to fix |
+|---|---|---|---|
+| R12 | `@CommandHandler method {m} in {H} must declare exactly one @Command parameter, found {n}` | The handler takes no `@Command`, or two. For a constructor `{m}` is the class name. | Take exactly one `@Command` parameter (plus optional `CommandId` and injected beans). Annotate the command class `@Command`. |
+| R13 | `Command {C} has more than one @CommandHandler: {H1.m}, {H2.m}` | Two handlers for one command type. | Keep one handler per command type. |
+| R14 | `{T} must declare exactly one @AggregateIdentifier field, found {n}` | An `@Aggregate` or `@DomainEvent` without, or with several, identifiers. | Annotate exactly one field (or record component) `@AggregateIdentifier`. |
+| R14 | `@Command type {C} must declare at most one @AggregateIdentifier field, found {n}` | A command with several identifiers. | Keep at most one. |
+| R15 | `@Command type {C} is handled by @Aggregate instance method {A.m} and must declare an @AggregateIdentifier field` | The runtime cannot know which aggregate to load. | Add `@AggregateIdentifier` to the command's id field, or make the handler a constructor/static factory (creation) or move it to a service. |
+| R16 | `@DomainEvent type {E} names aggregate {X}, which is not annotated @Aggregate` | `aggregate = X.class` points at a non-aggregate. | Annotate `X` with `@Aggregate` (a marker class with one `@AggregateIdentifier` field is fine), or name the right class. |
+| R17 | `@AggregateLoader method {m} in {H} must take exactly one parameter and return an @Aggregate type` | Wrong loader signature. | `@AggregateLoader Order load(String orderId)`. |
+| R17 | `@AggregateSaver method {m} in {H} must take exactly one @Aggregate-typed parameter` | Wrong saver signature. | `@AggregateSaver void save(Order order)`. |
+| R18 | `Aggregate {A} has more than one @AggregateLoader: {H1.m}, {H2.m}` (or `@AggregateSaver`) | Two loaders (or savers) for one aggregate. | Keep one of each per aggregate type. |
+| R23 | `Command {C} is delivered through the outbox but has no @CommandHandler` | An `@Command(delivery = OUTBOX)` type no registered class handles. | Add a handler, make sure its class is in the scanned packages (or a `SagaModelContributor`), or use `IN_UNIT_OF_WORK`. In `SagaFixture` record mode, `register(HandlerClass.class)`. |
+
+## Runtime startup checks
+
+| Error text | What it means | How to fix |
+|---|---|---|
+| `@Aggregate {A} has instance-method @CommandHandler methods but no @AggregateLoader and no AggregateResolver supporting it` | Nothing can load the aggregate. | With the starter: give it a Spring Data repository (`CrudRepository<A, Id>`) or an `@AggregateLoader`. Plain Java: register a loader host or an `AggregateResolver`. |
+| `@CommandHandler {H.m} parameter #{n} {T} cannot be resolved: no HandlerParameterResolver supports it` | An extra handler parameter is neither the command, a `CommandId`, nor resolvable. | With the starter: make `{T}` a bean (or inject it into the handler's constructor instead). Plain Java: register a `HandlerParameterResolver`. |
+| `@CommandHandler {H.m} declares more than one CommandId parameter: #{a}, #{b}` | Two `CommandId` parameters. | Keep one. |
+| `Command {C} handled by @CommandHandler {H.m} is delivered through the outbox, but the Outbox does not support commands` | `OUTBOX` command without a command-capable outbox. | Use the in-memory transport (the starter's default), or switch the command to `IN_UNIT_OF_WORK`. |
+| `@SagaStep {S.m}: total retry backoff {n} ms exceeds the engine maximum {max} ms` | The retry policy waits longer in total than allowed (default 30 000 ms). | Shorten the policy, or raise `saga-forge.runtime.max-total-retry-backoff` (plain Java: `SagaRuntime.Builder.maxTotalRetryBackoff`). Long waits are not supported (see [Limitations](limitations.md)). |
+| `@Saga class {S} must declare a no-argument constructor, or a SagaObjectProvider supporting it must be registered` | The saga cannot be instantiated. | Add a no-argument constructor (any visibility), or with the starter declare it a `@Scope("prototype")` bean. |
+| `@Saga class {S} is not supported by the registered SagaObjectProvider` | A custom provider refuses the saga. | Extend your provider, or drop it. |
+| `EventDispatcher rejected @Saga class {S}: {reason}` | The transport refused the saga type. | Follow `{reason}`. |
+
+## Spring Boot starter failures
+
+Reported by the starter's failure analyzers with a *Description* and an *Action*:
+
+| Description | Action |
+|---|---|
+| `No Saga Forge storage module is on the class path; a saga needs durable storage.` | Add `saga-forge-storage-postgres`, or define your own `StorageProvider` and `SagaContextStore` beans. |
+| `The [postgres] storage module is on the class path, but no storage was assembled: it needs a DataSource and a PlatformTransactionManager bean.` | Configure `spring.datasource.*` with `spring-boot-starter-jdbc`. |
+| `Several Saga Forge storage modules are on the class path: ...` | Set `saga-forge.storage.type`, or remove the others. |
+| `saga-forge.storage.type is {x}, but {artifact} is not on the class path ...` | Add the artifact or change the property. |
+| `Saga Forge's tables [...] do not exist in the database.` | Apply `schema.sql` (Flyway/Liquibase), or set `saga-forge.storage.postgres.initialize-schema=always` in development. |
+| `Saga Forge's schema is incomplete: tables [...] are missing while others exist.` | Apply the matching `schema-upgrade-NNN.sql` scripts. |
+| `No TransactionBoundary is available.` | Configure a `DataSource` and a `PlatformTransactionManager`. |
+| `No Saga Forge transport was assembled.` | Keep `saga-forge-transport-inmemory` (comes with the starter) with a configured storage module. |
+| `Several SagaRuntime beans are defined: ...` | Keep one runtime per application. |
+| `Saga {S} is defined as bean '{b}' with a scope other than prototype; ...` | Annotate the saga class `@Scope("prototype")`, or do not declare it as a bean. |
+| `Saga {S} has several beans: ...` | At most one prototype bean per saga class. |
+| `{H} declares a @CommandHandler, @AggregateLoader or @AggregateSaver method but is not a bean.` | Annotate the host `@Component`/`@Service` (aggregates are exempt: they are loaded, not injected). |
+| `{H} hosts handlers but has several beans: ...` | One bean per handler host class. |
+| `Aggregate {A} has an @AggregateIdentifier of type {X}, but its Spring Data repository uses id type {Y} and no conversion exists.` | Use the same type, or register a converter. |
+| `Saga model class {C} found in package {p} cannot be loaded: ...` | Fix the class's dependencies, or narrow `saga-forge.scan-packages`. |
+| `saga-forge.scan-packages contains '{x}', which is not a Java package name.` | List package names like `com.example.orders`. |
+| `saga-forge.runtime.max-total-retry-backoff must be a positive duration, but is {x}.` | Use a positive duration such as `30s`. |
+
+## Errors while running
+
+| Error text | What it means | How to fix |
+|---|---|---|
+| `Event {E} has no value for association property '{p}' of step {m} of saga {S}` | The event lacks the field named by `associationProperty`, or it is `null`. | Add the field to the event (same name), or fix `associationProperty`. |
+| `{path} has unsupported value type {T}; ...` (Postgres) / `stored SagaContext value '{name}' of type {T}, which durable storage cannot persist` (fixture) | A `SagaContext` value is not a JSON scalar (often `BigDecimal`, `Instant`, a record). | Store `amount.toPlainString()`, `instant.toString()`, `enum.name()`; or a `Map`/`List` of scalars. |
+| `AggregateNotFoundException` | The loader or repository found no aggregate for the command's identifier. | Create the aggregate before sending the command, or use a creating handler (constructor/static factory). |
+| `NoCommandHandlerException` | A command type has no registered handler. | Add the handler and make sure its class is scanned. |
+| Outcome `DUPLICATE_START` | A start event arrived while an instance with the same association value is active. | Expected for redelivery; otherwise use distinct association values. |
+| Outcome `UNMATCHED` | A non-start event found no active instance. | The instance already ended, or the start event never arrived. |
+
+<!-- docs/guide/recipes.md -->
+
+# Recipes
+
+Each recipe is copied from compiling code in this repository; the source file is named under each snippet (Javadoc
+and imports trimmed, code unchanged). Paths are relative to the repository root. Annotations are in
+`io.github.gkosharovdev.sagaforge.core.annotation`.
+
+- [1. Several aggregates in one saga-scoped unit of work](#1-several-aggregates-in-one-saga-scoped-unit-of-work)
+- [2. Compensation](#2-compensation)
+- [3. Retry and idempotent handlers](#3-retry-and-idempotent-handlers)
+- [4. Outbox commands](#4-outbox-commands)
+- [5. Bounded-context modules in one Spring Boot monolith](#5-bounded-context-modules-in-one-spring-boot-monolith)
+
+## 1. Several aggregates in one saga-scoped unit of work
+
+**Problem**: an order's payment and its stock reservation must commit together or not at all.
+
+**Pattern**: chain steps through events. A step sends a command; its handler records an event; when that event triggers
+a further step of the *same* instance, that step runs in the *same* unit of work. The unit of work commits at the first
+`@EndSaga` step, at a `@StartCompensation` step, or when no queued event is left for the instance. Any exception on the
+way rolls everything back: both aggregates, the step records and the recorded events.
+
+The saga (`OrderProcessingSaga`, shown in full in [Getting started](getting-started.md#3-a-saga)):
+`handleOrderCreated` sends `ProcessPaymentCommand`, `processPayment` reacts to `PaymentProcessedEvent` and sends
+`ReserveStockCommand`, `completeOrder` (`@EndSaga`) reacts to `OrderCompletedEvent`.
+
+The first handler is a service bean; it records the event that continues the saga:
+
+```java
+@Service
+public class PaymentService {
+
+    private final PaymentProvider provider;
+
+    public PaymentService(PaymentProvider provider) {
+        this.provider = provider;
+    }
+
+    @CommandHandler
+    public void handle(ProcessPaymentCommand command, CommandId commandId) {
+        String paymentId = provider.charge(commandId.value(), command.amount());
+        DomainEvents.record(new PaymentProcessedEvent(paymentId, command.orderId(), command.amount()));
+    }
+
+    @CommandHandler
+    public void handle(RefundPaymentCommand command) {
+        provider.refund(command.paymentId(), command.amount());
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/PaymentService.java`.
+
+The event belongs to the `Payment` aggregate but correlates by `orderId`; the aggregate can be a marker class when its
+state lives elsewhere:
+
+```java
+@DomainEvent(aggregate = Payment.class)
+public record PaymentProcessedEvent(@AggregateIdentifier String paymentId, String orderId, BigDecimal amount) {
+}
+
+@Aggregate
+public class Payment {
+
+    @AggregateIdentifier
+    private String paymentId;
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/events/PaymentProcessedEvent.java`,
+`Payment.java`.
+
+The second handler is an instance method of the `Order` aggregate (see [Getting started](getting-started.md#3-a-saga));
+the command carries the aggregate's identity so the runtime can load it:
+
+```java
+@Command
+public record ReserveStockCommand(@AggregateIdentifier String orderId) {
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/commands/ReserveStockCommand.java`.
+
+A check that throws in a later step rolls back the whole chain, here including the payment:
+
+```java
+@SagaStep(associationProperty = "orderId")
+public void processPayment(PaymentProcessedEvent event) {
+    BigDecimal orderAmount = amount();
+    if (orderAmount.compareTo(event.amount()) != 0) {
+        throw new IllegalStateException("Payment " + event.paymentId() + " of " + event.amount()
+                + " does not match order amount " + orderAmount);
+    }
+    context.putState("paymentId", event.paymentId());
+    commandGateway.send(new ReserveStockCommand(event.orderId()));
+}
+```
+
+Source: `saga-forge-example-spring/.../OrderProcessingSaga.java`.
+
+Notes:
+
+- An unmarked exception ends the saga `FAILED` with nothing committed in that unit of work. Effects outside the
+  database (a call to a payment provider) are not rolled back: make them idempotent (recipe 3).
+- `SagaContext` values written before the failure stay readable.
+
+## 2. Compensation
+
+**Problem**: after the payment committed, the stock turns out to be unavailable; the payment must be refunded.
+
+**Pattern**: model the business failure as an **event** recorded by the aggregate, handle it in a `@StartCompensation`
+step, and map an undo method to each step that must be reversed with `@SagaCompensation(forStep = "<step method
+name>")`. Compensations run after the failure step commits, most recently completed step first, each in its own unit
+of work. They get no event: keep what they need in `SagaContext`.
+
+The aggregate records the failure instead of throwing:
+
+```java
+@CommandHandler
+public void handle(ReserveStockCommand command) {
+    if (status != Status.CREATED) {
+        throw new IllegalStateException("Order " + orderId + " is already " + status);
+    }
+    if (!inStock) {
+        status = Status.OUT_OF_STOCK;
+        DomainEvents.record(new StockUnavailableEvent(orderId));
+        return;
+    }
+    status = Status.COMPLETED;
+    DomainEvents.record(new OrderCompletedEvent(orderId));
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/Order.java`.
+
+```java
+@DomainEvent(aggregate = Order.class)
+public record StockUnavailableEvent(@AggregateIdentifier String orderId) {
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/events/StockUnavailableEvent.java`.
+
+The saga's failure step and the compensation of `processPayment`:
+
+```java
+@StartCompensation
+@SagaStep(associationProperty = "orderId")
+public void rejectOrder(StockUnavailableEvent event) {
+    // The trigger records why; the compensation reads what it needs from the SagaContext.
+}
+
+@SagaCompensation(forStep = "processPayment")
+public void compensatePayment(CompensationTrigger trigger) {
+    String paymentId = context.getState("paymentId", String.class).orElseThrow();
+    commandGateway.send(new RefundPaymentCommand(sagaId, paymentId, amount()));
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSaga.java`.
+
+The refund handler passes its `CommandId` on, because a compensation interrupted by a crash runs again:
+
+```java
+@CommandHandler
+public void handle(RefundPaymentCommand command, CommandId commandId) {
+    provider.refund(commandId.value(), command.paymentId(), command.amount());
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/PaymentService.java`.
+
+Outcome: `rejectOrder` commits, the instance is `COMPENSATING`, `compensatePayment` runs, the instance ends
+`COMPENSATED` with `rejectOrder` as its trigger.
+
+What starts compensation, and what does not:
+
+| Situation | Result |
+|---|---|
+| A `@StartCompensation` step committed | compensate every other completed step → `COMPENSATED` |
+| A step throws an exception implementing `FinalFailure`, after an earlier unit of work committed | compensate → `COMPENSATED` |
+| A transient failure runs out of attempts (`EXHAUSTED`), after an earlier unit of work committed | compensate → `COMPENSATED` |
+| Any failure while nothing committed yet | nothing to undo → `FAILED` |
+| An unmarked exception (`UNCLASSIFIED`) | no compensation → `FAILED`, committed effects stay |
+| A compensation throws | never retried → `REQUIRES_INTERVENTION` |
+
+A `FinalFailure` is a marker interface on your exception class:
+
+```java
+public final class CourierRejected extends RuntimeException implements FinalFailure {
+    public CourierRejected(String message) {
+        super(message);
+    }
+}
+```
+
+Source: `saga-forge-runtime/src/test/java/io/github/gkosharovdev/sagaforge/runtime/fixtures/retry/CourierRejected.java`.
+
+## 3. Retry and idempotent handlers
+
+**Problem**: the payment provider sometimes times out; retrying must never charge twice.
+
+**Pattern**: classify the failure as transient (exception implements `TransientFailure`, or is listed in
+`retryOn`), give the step a `@RetryPolicy`, and have every handler that calls an outside system take a `CommandId`
+parameter and pass `commandId.value()` on as the idempotency key. A retry re-runs the whole unit of work; every command
+keeps its identity across retries and redeliveries.
+
+```java
+public class PaymentGatewayTimeoutException extends RuntimeException implements TransientFailure {
+
+    public PaymentGatewayTimeoutException(String message) {
+        super(message);
+    }
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/PaymentGatewayTimeoutException.java`.
+
+```java
+@StartSaga
+@SagaStep(associationProperty = "orderId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+        multiplier = 2.0, maxBackoffMillis = 1_000))
+public void handleOrderCreated(OrderCreatedEvent event) {
+    context.putState("orderAmount", event.amount().toPlainString());
+    commandGateway.send(new ProcessPaymentCommand(event.orderId(), event.amount()));
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSaga.java`
+(up to 3 attempts, 200 ms then 400 ms apart).
+
+```java
+@CommandHandler
+public void handle(ProcessPaymentCommand command, CommandId commandId) {
+    String paymentId = provider.charge(commandId.value(), command.amount());
+    DomainEvents.record(new PaymentProcessedEvent(paymentId, command.orderId(), command.amount()));
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/PaymentService.java`.
+
+The provider honours the key: charging again with a key it has seen returns the first payment:
+
+```java
+public String charge(String idempotencyKey, BigDecimal amount) {
+    String paymentId = paymentsByKey.computeIfAbsent(idempotencyKey, key -> "payment-" + key);
+    amounts.putIfAbsent(paymentId, amount);
+    if (timeoutsLeft > 0) {
+        timeoutsLeft--;
+        throw new PaymentGatewayTimeoutException("payment provider did not answer for key " + idempotencyKey);
+    }
+    return paymentId;
+}
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/PaymentProvider.java`.
+
+A third-party exception you cannot mark goes into `retryOn`:
+
+```java
+@SagaStep(associationProperty = "bookingId", retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200,
+        multiplier = 2.0, maxBackoffMillis = 1_000, retryOn = CourierTimeout.class))
+public void onCharged(DeliveryCharged event) {
+    int tries = context.getState(CONTEXT_TRIES, Integer.class).orElse(0);
+    context.putState(CONTEXT_TRIES, tries + 1);
+    commandGateway.send(new BookCourier(event.bookingId()));
+}
+```
+
+Source: `saga-forge-runtime/src/test/java/io/github/gkosharovdev/sagaforge/runtime/fixtures/retry/RetrySaga.java`.
+
+Notes:
+
+- The policy of the **failing step's** unit of work applies (the step whose unit of work was running).
+- Waits are in-process and block the delivering thread; the total wait is capped by
+  `saga-forge.runtime.max-total-retry-backoff` (30 s by default). No minutes-long or scheduled retries (see
+  [Limitations](limitations.md)).
+- `SagaContext` writes are not rolled back between attempts (the counter above sees earlier attempts).
+- A redelivered event for a step that already completed is reported `DUPLICATE` and runs nothing.
+
+## 4. Outbox commands
+
+**Problem**: a command's handler must not run inside the sending step's transaction (a slow card charge), and its
+failure must not roll the step back.
+
+**Pattern**: mark the command type `@Command(delivery = CommandDelivery.OUTBOX)`. `send` stores the command with the
+sender's unit of work, with its `CommandId` assigned at send time; it is handled after that unit of work commits, in a
+unit of work of its own, at least once (retried with backoff by the in-memory transport, set aside after
+`saga-forge.transport.max-attempts`). It is never handled if the sender rolls back. The handler should pass the
+`CommandId` on, since it can run more than once.
+
+```java
+@Command(delivery = CommandDelivery.OUTBOX)
+public record ChargeCard(@AggregateIdentifier String invoiceId) {
+}
+```
+
+Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/sagaforge/transport/inmemory/fixtures/ChargeCard.java`.
+
+```java
+@Saga
+public final class BillingSaga {
+
+    @SagaId
+    private String sagaId;
+
+    private CommandGateway commandGateway;
+
+    @StartSaga
+    @SagaStep(associationProperty = "invoiceId")
+    public void onInvoiceIssued(InvoiceIssued event) {
+        commandGateway.send(new ChargeCard(event.invoiceId()));
+    }
+
+    @EndSaga
+    @SagaStep(associationProperty = "invoiceId")
+    public void onCardCharged(CardCharged event) {
+        // Outcome step.
+    }
+}
+```
+
+Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/sagaforge/transport/inmemory/fixtures/BillingSaga.java`.
+
+```java
+@CommandHandler
+public void handle(ChargeCard command, CommandId commandId) {
+    charges.add(new Charge(command.invoiceId(), commandId, Thread.currentThread().getName()));
+    if (failures.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+        throw new IllegalStateException("card provider unavailable");
+    }
+    DomainEvents.record(new CardCharged(command.invoiceId()));
+}
+```
+
+Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/sagaforge/transport/inmemory/fixtures/CardService.java`.
+
+`onInvoiceIssued` commits with the stored `ChargeCard` (saga `RUNNING`); the transport then runs `CardService.handle`,
+whose `CardCharged` event starts the next unit of work and ends the saga.
+
+Notes:
+
+- The handler must be among the registered classes (rule R23); with the starter, a bean in the scanned packages.
+- The default `IN_UNIT_OF_WORK` delivery is what you want when the handler's change must commit atomically with the
+  step (recipe 1).
+
+## 5. Bounded-context modules in one Spring Boot monolith
+
+**Problem**: one Spring Boot application, one Java package (module) per bounded context, integrated through events
+only, no broker.
+
+**Pattern**: each module exposes its commands and events as its API; the saga lives in the module that owns the
+process; handlers record events with `DomainEvents.record`; application code publishes start events through Saga
+Forge's `EventPublisher`; other modules listen to saga events with Spring Modulith's `@ApplicationModuleListener`.
+The starter scans the packages of the `@SpringBootApplication`, so nothing is registered by hand. Events are delivered
+through the in-memory transport's message store in your Postgres database (at least once, per-aggregate order,
+survives restarts).
+
+Application (three modules: `orders`, `payments`, `notifications`):
+
+```java
+@SpringBootApplication(proxyBeanMethods = false)
+public class ModulithApp {
+
+    @Bean
+    DataSource dataSource() {
+        return StarterPostgres.dataSource();
+    }
+
+    @Bean
+    PlatformTransactionManager transactionManager(DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+```
+
+Source: `saga-forge-spring-boot-starter/src/test/java/io/github/gkosharovdev/sagaforge/spring/modulith/app/ModulithApp.java`
+(the test supplies its `DataSource`; a real application uses `spring.datasource.*`).
+
+`payments` module API: its command, its event and the aggregate the event belongs to:
+
+```java
+public final class PaymentEvents {
+
+    private PaymentEvents() {
+    }
+
+    @Command
+    public record TakePayment(String orderId, BigDecimal amount) {
+    }
+
+    @DomainEvent(aggregate = Payment.class)
+    public record PaymentTaken(@AggregateIdentifier String paymentId, String orderId, BigDecimal amount) {
+    }
+
+    @Aggregate
+    public static class Payment {
+
+        @AggregateIdentifier
+        private String paymentId;
+    }
+}
+```
+
+Source: `.../spring/modulith/app/payments/PaymentEvents.java`.
+
+`payments` handler, a Spring bean:
+
+```java
+@Component
+public class PaymentHandler {
+
+    @CommandHandler
+    public void handle(TakePayment command, CommandId commandId) {
+        DomainEvents.record(new PaymentTaken("payment-" + commandId.value(), command.orderId(), command.amount()));
+    }
+}
+```
+
+Source: `.../spring/modulith/app/payments/PaymentHandler.java`.
+
+`orders` module: its event and the saga that drives the process:
+
+```java
+@DomainEvent(aggregate = OrderPlaced.Order.class)
+public record OrderPlaced(@AggregateIdentifier String orderId, BigDecimal amount) {
+
+    @Aggregate
+    public static class Order {
+
+        @AggregateIdentifier
+        private String orderId;
+    }
+}
+
+@Saga
+public class PaymentSaga {
+
+    @SagaId
+    private String sagaId;
+
+    private CommandGateway commandGateway;
+
+    @StartSaga
+    @SagaStep(associationProperty = "orderId")
+    public void onPlaced(OrderPlaced event) {
+        commandGateway.send(new TakePayment(event.orderId(), event.amount()));
+    }
+
+    @EndSaga
+    @SagaStep(associationProperty = "orderId")
+    public void onPaid(PaymentTaken event) {
+        if (event.amount().signum() < 0) {
+            throw new IllegalStateException("negative payment for " + event.orderId());
+        }
+    }
+}
+```
+
+Source: `.../spring/modulith/app/orders/OrderPlaced.java`, `.../orders/PaymentSaga.java`.
+
+`notifications` module: reacts to the saga's event after the commit, in its own transaction:
+
+```java
+@Component
+public class PaymentNotifier {
+
+    @ApplicationModuleListener
+    public void on(PaymentTaken event) {
+        inTransaction.add(TransactionSynchronizationManager.isActualTransactionActive());
+        if (failuresLeft.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+            throw new IllegalStateException("notification failed for " + event.orderId());
+        }
+        notified.add(event.orderId());
+    }
+}
+```
+
+Source: `.../spring/modulith/app/notifications/PaymentNotifier.java` (test bookkeeping fields omitted).
+
+Starting the process from application code, in the same transaction as your own change (from
+`saga-forge-example-spring`):
+
+```java
+@Transactional
+public void place(String orderId, BigDecimal amount, boolean inStock) {
+    orders.save(Order.create(orderId, inStock));
+    events.publish(new OrderCreatedEvent(orderId, amount));
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/OrderPlacement.java`
+(`events` is the injected `io.github.gkosharovdev.sagaforge.core.event.EventPublisher`).
+
+Rules for this setup:
+
+- **Publish saga events with `EventPublisher` or `DomainEvents.record`, never with Spring's
+  `ApplicationEventPublisher`**: events published through Spring do not reach sagas.
+- Saga events are also published as Spring application events inside the unit of work
+  (`saga-forge.application-events.mode=in-transaction`). A plain `@EventListener` therefore runs **inside** the saga's
+  transaction and its failure rolls the saga back; other modules should use `@ApplicationModuleListener` or
+  `@TransactionalEventListener`.
+- With Spring Modulith's JDBC event publication registry on the classpath (`spring-modulith-starter-jdbc`), the
+  transport keeps its messages there: one outbox for the application, and
+  `ApplicationModules.of(App.class).verify()` keeps passing.
+- An event that continues a saga instance is not handed to a *different* saga type that also reacts to it; give the
+  second saga an event of its own.
+- Run one application instance per database for now (see [Limitations](limitations.md)).
+
+<!-- docs/guide/testing.md -->
+
+# Testing with `SagaFixture`
+
+`saga-forge-test` (test scope) runs a saga's given/when/then tests on the shipped `SagaRuntime` over in-memory parts:
+routing by association, the unit of work, duplicates, retries and compensation behave as in production. No database,
+transport or Spring context, no JUnit extension: a failed expectation throws `SagaExpectationError` (an
+`AssertionError`). Public API: package `io.github.gkosharovdev.sagaforge.test`.
+
+```xml
+<dependency>
+    <groupId>io.github.gkosharovdev</groupId>
+    <artifactId>saga-forge-test</artifactId>
+    <version>0.1.0</version>
+    <scope>test</scope>
+</dependency>
+```
+
+## Record and answer (the saga's own logic)
+
+By default no command handler runs. Each command a step sends is recorded and counts as handled; the test answers it by
+publishing the event the handler would have recorded.
+
+```java
+class OrderProcessingSagaFixtureTest {
+
+    private static final BigDecimal AMOUNT = new BigDecimal("10.00");
+
+    @Test
+    @DisplayName("happy path: the payment reserves the stock")
+    void paymentReservesStock() {
+        SagaFixture.of(OrderProcessingSaga.class).build()
+                .given(new OrderCreatedEvent("o-1", AMOUNT))
+                .when(new PaymentProcessedEvent("payment-1", "o-1", AMOUNT))
+                .expectCommands(new ReserveStockCommand("o-1"))
+                .expectContext("paymentId", "payment-1")
+                .expectCompletedStep("processPayment")
+                .expectStatus(SagaStatus.RUNNING);
+    }
+
+    @Test
+    @DisplayName("compensation path: missing stock refunds the payment")
+    void missingStockRefundsThePayment() {
+        SagaFixture.of(OrderProcessingSaga.class).build()
+                .given(new OrderCreatedEvent("o-2", AMOUNT), new PaymentProcessedEvent("payment-2", "o-2", AMOUNT))
+                .when(new StockUnavailableEvent("o-2"))
+                .expectCompensations("compensatePayment")
+                .expectCommands(new RefundPaymentCommand("saga-1", "payment-2", AMOUNT))
+                .expectCompensatedAfter("rejectOrder");
+    }
+}
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
+
+Given events run exactly like the event under test, but only what the event under test causes counts for the
+expectations. A fixture is one scenario: a later `when` continues from the state the earlier ones reached. Saga ids
+are `saga-1`, `saga-2`, ..., so command identities and commands carrying the saga id are predictable.
+
+## Handler mode (handlers and aggregates run)
+
+```java
+class OrderSagaFixtureTest {
+
+    private final PaymentProvider provider = new PaymentProvider();
+    private final SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class, Order.class)
+            .handlers(new PaymentService(provider))
+            .build();
+
+    @Test
+    @DisplayName("an in-stock order is paid for and completed in one call")
+    void completes() {
+        BigDecimal amount = new BigDecimal("25.00");
+
+        fixture.givenAggregates(Order.create("o-1", true))
+                .when(new OrderCreatedEvent("o-1", amount))
+                .expectCommands(new ProcessPaymentCommand("o-1", amount), new ReserveStockCommand("o-1"))
+                .expectContext("orderAmount", "25.00")
+                .expectEndedWith("completeOrder");
+
+        assertThat(fixture.aggregate(Order.class, "o-1").orElseThrow().status()).isEqualTo(Order.Status.COMPLETED);
+        assertThat(provider.charges()).containsValue(amount);
+    }
+
+    @Test
+    @DisplayName("an out-of-stock order is refunded")
+    void refunds() {
+        fixture.givenAggregates(Order.create("o-2", false))
+                .when(new OrderCreatedEvent("o-2", new BigDecimal("9.50")))
+                .expectCompensations("compensatePayment")
+                .expectCompensatedAfter("rejectOrder")
+                .expectStatus(SagaStatus.COMPENSATED);
+
+        assertThat(provider.refunds()).containsValue(new BigDecimal("9.50"));
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/test/java/io/github/gkosharovdev/sagaforge/example/spring/OrderSagaFixtureTest.java`.
+This tests the Spring application's saga with its own `@Service` built by hand: no Spring context.
+
+- `SagaFixture.of(SagaClass.class, AggregateClass.class, ...)` registers the model classes.
+- `handlers(...)` runs the `@CommandHandler`, `@AggregateLoader` and `@AggregateSaver` methods of the objects passed,
+  and the handlers of registered `@Aggregate` classes. A command whose handler is not registered is only recorded.
+- Aggregates without a loader/saver live in an in-memory store: seed with `givenAggregates(...)`, read with
+  `fixture.aggregate(type, id)`.
+- Sagas with constructor dependencies: `sagaObjects(MySaga.class, () -> new MySaga(collaborator))`.
+
+## Retries and failures
+
+```java
+@Test
+@DisplayName("retried payment: two provider timeouts, one charge, the same idempotency key")
+void retriedPayment() {
+    PaymentProvider provider = new PaymentProvider();
+    provider.timeOutNext(2);
+    SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class).handlers(new PaymentService(provider)).build();
+
+    Then then = fixture.when(new OrderCreatedEvent("o-3", AMOUNT))
+            .expectAttempts("handleOrderCreated", 3)
+            .expectCommands(new ProcessPaymentCommand("o-3", AMOUNT), new ReserveStockCommand("o-3"));
+
+    assertThat(then.result().allAttempts()).filteredOn(c -> c.command() instanceof ProcessPaymentCommand)
+            .extracting(RecordedCommand::commandId).hasSize(3).containsOnly(then.result().commands().get(0)
+                    .commandId());
+    assertThat(provider.charges()).hasSize(1);
+}
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
+
+- Retry waits advance `fixture.clock()` instead of sleeping.
+- `failCommand(type, () -> exception)` fails every handling of a command type; add a count to fail the next n, or a
+  predicate to match content. Failures are classified by the runtime's rules (`TransientFailure`, `FinalFailure`,
+  `retryOn`).
+- `result().commands()` holds the commands of the attempts that committed; `result().allAttempts()` every attempt.
+
+## Expectations
+
+| Method | Checks |
+|---|---|
+| `expectCommands(Object...)` | exactly these commands, in order (`equals`) |
+| `expectCommandsMatching(Predicate...)` / `expectCommand(Class, Predicate)` / `expectNoCommands()` | commands by predicate / at least one match / none |
+| `expectHandled()` / `expectUnhandled()` / `expectStarted()` | some / no instance handled the event / it started the instance |
+| `expectOutcome(HandlingOutcome)` | `WAITING`, `COMPLETED`, `DUPLICATE`, `DUPLICATE_START`, `UNMATCHED`, ... |
+| `expectCompletedStep(String)` / `expectAttempts(String, int)` | the step completed / how often its unit of work ran |
+| `expectStatus(SagaStatus)` / `expectEndedWith(String)` / `expectCompensatedAfter(String)` | final status / `COMPLETED` at that `@EndSaga` / `COMPENSATED` after that trigger |
+| `expectCompensations(String...)` | these compensations ran, in order |
+| `expectFailure(Class, FailureClassification)` | the recorded failure |
+| `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value or its absence |
+| `instance(Class, String)` | switch to the instance with that association value (several sagas reacting) |
+| `result()` | the `EventResult`, for your own assertions |
+
+## What the fixture catches before production
+
+- An invalid model fails `build()` with the same `SagaRuntimeStartupException` as production
+  ([Validation rules](validation-rules.md)).
+- A `SagaContext` value Postgres cannot store (a `BigDecimal`, say) fails the test at the step that wrote it, with
+  `Store it as a String (for example amount.toPlainString())`.
+
+## Gotchas
+
+- One event at a time on the test thread: no concurrency, redelivery, leases or cross-aggregate ordering.
+- In record mode, a saga that sends an `@Command(delivery = OUTBOX)` command needs the handler's class registered
+  (`register(HandlerClass.class)`), or `build()` fails rule R23.
+- A `Long` stays a `Long` in the fixture, while Postgres reads a small one back as `Integer`.
+- Aggregates without a no-argument constructor are not copied by the in-memory store, so a rolled-back change to one
+  stays visible.
+
+The full API is in the [fixture README](../../saga-forge-test/README.md) and the
+[Javadoc](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-test).
+
+<!-- docs/guide/operations.md -->
+
+# Operations
+
+## Properties
+
+All properties of the Spring Boot starter (your IDE completes them from its configuration metadata). The starter's
+[README](../../saga-forge-spring-boot-starter/README.md) describes what each assembled piece is and how to replace it
+with your own bean.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `saga-forge.enabled` | `true` | Whether Saga Forge's auto-configuration is active. |
+| `saga-forge.scan-packages` | none | Packages scanned for saga model classes in addition to the application's packages. |
+| `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
+| `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
+| `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
+| `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
+| `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
+| `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |
+| `saga-forge.transport.initial-backoff` | `1s` | Wait after a message's first failed delivery, doubled per further failure. |
+| `saga-forge.transport.max-backoff` | `1m` | Longest wait between delivery attempts. |
+| `saga-forge.transport.lease-duration` | `5m` | How long a leased message is reserved for this instance before another may take it. |
+| `saga-forge.transport.poll-interval` | `500ms` | Longest wait between polls when nothing signals new messages. |
+| `saga-forge.transport.lease-batch-size` | `100` | Most messages leased at once. |
+| `saga-forge.transport.retention` | `7d` | How long consumed messages are kept. |
+| `saga-forge.transport.retention-sweep-interval` | `1h` | How often consumed messages older than the retention are removed. |
+| `saga-forge.transport.heartbeat-interval` | `30s` | How often this instance refreshes its heartbeat in the message store. |
+| `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
+| `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
+| `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |
+| `saga-forge.telemetry.metrics.enabled` | `true` | Whether saga metrics are recorded. |
+| `saga-forge.telemetry.record-association-values` | `false` | Record association values (an order id, say) on spans. |
+| `saga-forge.telemetry.record-contents` | `false` | Record saga event and command contents (`toString`, at most 1,000 characters) on spans. |
+| `saga-forge.telemetry.record-failure-messages` | `false` | Record failure messages and exception events on spans; the failure's type is always recorded. |
+
+
+## Schema and upgrades
+
+- `saga-forge-storage-postgres` ships its DDL as classpath resources under
+  `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`.
+- A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
+  `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
+- The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
+  applies to in its header comment. Run each once, in one transaction, while no runtime is running. Release notes list
+  any new upgrade script.
+- Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
+  startup fails if tables are missing, naming them.
+
+## Actuator
+
+With `spring-boot-starter-actuator` on the classpath:
+
+```properties
+management.endpoints.web.exposure.include=health,sagaforge
+```
+
+- `GET /actuator/sagaforge` (read-only) returns the message store's counts per status (capped at 1,000 each) and the
+  age of the oldest unconsumed message:
+
+  ```json
+  { "counts": { "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+  ```
+
+- The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
+  delivery that failed `saga-forge.transport.max-attempts` times).
+- Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
+- There is no endpoint for saga instances and no write action yet; inspect `saga_instance`, `saga_context` and
+  `saga_lifecycle_history` directly.
+
+## OpenTelemetry
+
+The runtime and the in-memory transport instrument themselves with the OpenTelemetry API. Without an SDK nothing is
+recorded. With Spring Boot, nothing to add if the application already traces with OpenTelemetry
+(`spring-boot-starter-opentelemetry`, or Micrometer Tracing's `micrometer-tracing-bridge-otel`): the starter passes the
+application's `OpenTelemetry` bean on. Each unit of work, step, command and compensation becomes a span in the trace of
+the code that published the start event, also across the message store and restarts.
+
+**Metrics** are recorded through OpenTelemetry's metrics API. Spring Boot exports them only when the application
+defines an `SdkMeterProvider` bean with an exporter, for example with `opentelemetry-exporter-otlp`:
+
+```java
+@Bean
+SdkMeterProvider sdkMeterProvider(Resource resource) {
+    return SdkMeterProvider.builder().setResource(resource)
+            .registerMetricReader(PeriodicMetricReader.builder(OtlpHttpMetricExporter.getDefault()).build())
+            .build();
+}
+```
+
+Source: `saga-forge-spring-boot-starter/README.md` ("With OpenTelemetry"). Without it, spans are exported and saga
+metrics are dropped.
+
+**Privacy**: spans carry saga types, step and command names, generated ids, outcomes and failure types. Association
+values, contents and failure messages are recorded only when switched on (`saga-forge.telemetry.record-*`).
+
+### Telemetry reference
+
+Spans (instrumentation scope `io.github.gkosharovdev.sagaforge`):
+
+| Span | Kind | One per | Attributes (always) | Details |
+|---|---|---|---|---|
+| `saga_forge.handle` | internal | saga type and instance an event reaches | `saga_forge.saga.type`, `saga_forge.event.type`, `saga_forge.handling.outcome`, `saga_forge.saga.started`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`; association value\*, content\* |
+| `saga_forge.attempt` | internal | attempt of a unit of work | `saga_forge.saga.type`, `saga_forge.attempt.result`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id`, `saga_forge.attempt.number` |
+| `saga_forge.step` | internal | step run | `saga_forge.saga.type`, `saga_forge.step`, `error.type` | `saga_forge.saga.id` |
+| `saga_forge.command` | internal | command handling | `saga_forge.command.type`, `saga_forge.command.delivery`, `saga_forge.command.result`, `error.type` | `saga_forge.command.id`, `saga_forge.step`, `saga_forge.saga.id`, content\* |
+| `saga_forge.compensation` | internal | compensation | `saga_forge.saga.type`, `saga_forge.step`, `saga_forge.compensation.status`, `saga_forge.compensation.trigger` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id` |
+| `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt` |
+| `saga_forge.event.ignored` | internal | event no saga type reacts to | `saga_forge.event.type` | content\* |
+
+Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.saga.ended` (`saga_forge.saga.outcome`),
+`saga_forge.retry.scheduled` (`saga_forge.attempt.number`, `saga_forge.retry.wait` in ms),
+`saga_forge.compensation.started`. \* off by default; failure messages (`saga_forge.failure.message` and exception
+events) likewise.
+
+Metrics:
+
+| Metric | Instrument | Unit | Attributes |
+|---|---|---|---|
+| `saga_forge.handle.duration`, `.attempt.duration`, `.step.duration`, `.command.duration`, `.compensation.duration`, `.delivery.duration` | histogram | s | the span's low-cardinality attributes |
+| `saga_forge.saga.started` | counter | — | `saga_forge.saga.type` |
+| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `requires_intervention`) |
+| `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
+| `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
+| `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
+| `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+
+Runtime log lines written inside a unit of work carry `traceId=` and `spanId=`.
+
+Example alerts, in PromQL, assuming the OpenTelemetry-to-Prometheus name translation (dots become underscores,
+counters gain `_total`, units become suffixes):
+
+```promql
+# Sagas failing or needing intervention, per saga type
+sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|requires_intervention"}[5m])) > 0
+
+# Compensations as a share of finished sagas
+sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]))
+  / sum(rate(saga_forge_saga_ended_total[15m])) > 0.05
+
+# Retries exhausted
+sum by (saga_forge_saga_type, saga_forge_step) (increase(saga_forge_retry_exhausted_total[15m])) > 0
+
+# Messages set aside for an operator
+saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
+
+# Delivery falling behind
+saga_forge_message_store_oldest_unconsumed_age_seconds > 60
+```
+
+
+## Statuses an operator sees
+
+| `SagaStatus` | Meaning | Action |
+|---|---|---|
+| `RUNNING` | committed, waiting for the next event | none; a saga waits indefinitely (no timeouts) |
+| `COMPLETED` | ended at an `@EndSaga` step (the outcome is its name) | none |
+| `COMPENSATING` | compensations are being run | resumes on the next event for the instance |
+| `COMPENSATED` | all committed steps undone | none |
+| `FAILED` | an unclassified failure; committed effects stay in place | investigate; no resume path |
+| `REQUIRES_INTERVENTION` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
+| `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | investigate |
+
+<!-- docs/guide/limitations.md -->
+
+# Limitations to design around (0.1.0)
+
+These are known limits of the current release, most important first for a Spring Boot monolith on Postgres and the
+in-memory transport. Each has an id in the project's gap register (`.specify/memory/memory.md`), so you can follow its
+status in later releases.
+
+| # | Limitation | Design around it |
+|---|---|---|
+| 1 | **One running application instance per database** (G-007-09). The in-memory transport's relay assumes it is the only consumer of its message store; a second instance is detected and logged, not coordinated. | Run one replica, or put sagas in a single-replica deployment. Blue/green deploys must stop the old instance before the new one delivers. |
+| 2 | **No operator path out of `REQUIRES_INTERVENTION`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=requires_intervention}`; repair by hand. |
+| 3 | **No deadlines or scheduled waits** (G-ENG-25, G-005-01). A saga waits for its next event forever; retry backoff is in-process and capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Run a scheduled job that finds stale instances and publishes a timeout event the saga has a step for. Keep retry policies short. |
+| 4 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
+| 5 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
+| 6 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |
+| 7 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
+| 8 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
+
+Further constraints of the model:
+
+- **`SagaContext` values must be JSON scalars on Postgres** (`String`, `Boolean`, `Integer`, `Long`, finite `Double`,
+  `List`, `Map` with `String` keys). Store `BigDecimal` as a string; a small `Long` reads back as `Integer` (G-003-07).
+- **`SagaContext` values survive rollbacks and retries**: write them so that writing again is harmless.
+- **Outside effects are not rolled back**: any handler that calls an outside system takes a `CommandId` parameter and
+  passes `commandId.value()` on as the idempotency key (G-005-03). The triggering request itself is not deduplicated
+  before a saga exists (G-005-04).
+- **Compensation**: no wait for an undo's confirmation event (G-006-02); a `COMPENSATING` instance with no further event
+  never resumes (G-006-05); a compensation sees the trigger's event type, not the event (G-006-06) — keep what it needs
+  in `SagaContext`; a failed compensation is never retried (G-006-09); compensations can run again after a crash, so
+  their commands must be idempotent.
+- **An unmarked exception ends the saga `FAILED` without compensation**; mark exceptions `TransientFailure` or
+  `FinalFailure` (or list them in `retryOn`) when the difference matters.
+- **Delivery order is per aggregate, not per saga instance** (G-007-04); the transport is at least once.
+- **Not available**: Kafka transport, MySQL and MongoDB storage, a Quarkus extension, programmatic abort, Spring test
+  slices for the fixture (G-009-01).

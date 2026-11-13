@@ -31,6 +31,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Check llms-full.txt matches the guide
+        run: docs/guide/build-llms-full.sh && git diff --exit-code llms-full.txt
+
       - name: Build and run unit tests
         run: mvn -B -ntp clean verify
 

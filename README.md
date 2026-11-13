@@ -3,6 +3,7 @@
 [![CI](https://github.com/gkosharovdev/saga-forge/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/gkosharovdev/saga-forge/actions/workflows/ci.yml)
 [![Release](https://github.com/gkosharovdev/saga-forge/actions/workflows/release.yml/badge.svg)](https://github.com/gkosharovdev/saga-forge/actions/workflows/release.yml)
 [![Maven Central](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Frepo1.maven.org%2Fmaven2%2Fio%2Fgithub%2Fgkosharovdev%2Fsaga-forge-core%2Fmaven-metadata.xml&label=Maven%20Central)](https://central.sonatype.com/namespace/io.github.gkosharovdev)
+[![Javadoc](https://javadoc.io/badge2/io.github.gkosharovdev/saga-forge-core/javadoc.svg)](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F)](saga-forge-spring-boot-starter/README.md)
@@ -184,78 +185,92 @@ The saga programming model is inspired by [AxonIQ's Axon Framework](https://axon
 
 Saga Forge is an independent, zero-dependency implementation designed for JDK 21+.
 
+## Documentation
+
+The **[user guide](docs/guide/README.md)** is written for applications that use Saga Forge. Every snippet in it is
+copied from compiling code in this repository. It is also published as a site at
+[gkosharovdev.github.io/saga-forge](https://gkosharovdev.github.io/saga-forge/).
+
+| Page | Covers |
+|---|---|
+| [Getting started](docs/guide/getting-started.md) | Maven/Gradle coordinates, Postgres schema, the canonical saga end to end |
+| [Model reference](docs/guide/model-reference.md) | every annotation: where it goes, what it needs, attributes and defaults |
+| [Validation rules](docs/guide/validation-rules.md) | each startup error text, what it means and how to fix it |
+| [Recipes](docs/guide/recipes.md) | multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, modular monolith |
+| [Testing](docs/guide/testing.md) | `SagaFixture` given/when/then tests, in memory |
+| [Operations](docs/guide/operations.md) | properties, Actuator, OpenTelemetry spans and metrics, schema upgrades |
+| [Limitations](docs/guide/limitations.md) | what to design around in 0.1.0 |
+
+API reference: [Javadoc on javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core). Spring Boot
+details: the [starter README](saga-forge-spring-boot-starter/README.md). Design: [docs/architecture.md](docs/architecture.md),
+[docs/use-cases.md](docs/use-cases.md).
+
+## For AI coding agents
+
+Saga Forge ships material for coding agents working in an application that uses it:
+
+- [`llms.txt`](llms.txt) ([llmstxt.org](https://llmstxt.org) format): a summary with links to every guide page, and
+  [`llms-full.txt`](llms-full.txt): the whole guide in one file, for a single fetch.
+- [`docs/agents/saga-forge/SKILL.md`](docs/agents/saga-forge/SKILL.md): a drop-in [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills)
+  with the do/don't rules and the most common startup errors. It triggers on Saga Forge work.
+- [`docs/agents/AGENTS-snippet.md`](docs/agents/AGENTS-snippet.md): a short section to paste into your own
+  `AGENTS.md` or `CLAUDE.md`.
+
+Install the skill in your project (or in `~/.claude/skills/` for all projects):
+
+```bash
+mkdir -p .claude/skills/saga-forge && curl -fsSL -o .claude/skills/saga-forge/SKILL.md https://raw.githubusercontent.com/gkosharovdev/saga-forge/master/docs/agents/saga-forge/SKILL.md
+```
+
+Other agents: point them at `https://raw.githubusercontent.com/gkosharovdev/saga-forge/master/llms-full.txt`, or paste
+the snippet into `AGENTS.md`.
+
 ## Status
 
-This is an early-stage framework. The annotation model, SPI contracts, and module layout exist and
-are tested (`saga-forge-core`). The step, command-handler, and unit-of-work contracts (`CommandGateway`,
-`DomainEvents`, `@CommandHandler`, `@Aggregate`) are defined, first proven by a test-only harness (feature 002).
-The saga runtime exists in `saga-forge-runtime` (feature 004): event routing by association, the
-saga-scoped unit of work in the host's local transaction (`TransactionBoundary`), one unit of work per instance at
-a time, an outbox SPI (`Outbox`, default `ImmediateDispatchOutbox` after commit), and fail-fast startup validation. It is verified by unit tests over
-in-memory doubles. Postgres storage (`StorageProvider`, `SagaContextStore`) is implemented (feature 003), and its
-`StorageProvider` joins the runtime's transaction (feature 004). Step retry with failure classification, stable
-command identities and duplicate-event detection are implemented in the runtime and persisted by Postgres (feature
-005). Compensation (feature 006) runs `@SagaCompensation` methods after a `@StartCompensation` business failure or a
-final or exhausted step failure, in reverse completion order, and resumes after a crash. The in-memory transport
-(feature 007) delivers events — and commands marked `@Command(delivery = OUTBOX)` — between the modules of one process,
-from a durable message store written in the same transaction as the saga state, so unconsumed messages survive a
-restart. The Spring Boot starter (feature 008) assembles and starts the runtime from the application's beans,
-`DataSource` and Spring Data repositories, publishes saga events to Spring Modulith's module listeners, and reports
-the message store through Actuator. The saga test fixture (feature 009, `saga-forge-test`) runs a saga's given/when/then
-tests on the shipped runtime, in memory, with no database, transport or Spring context. The runtime and the
-in-memory transport instrument themselves with the OpenTelemetry API (feature 010): saga spans join the request's trace,
-also across the message store and restarts, and saga metrics feed dashboards and alerts. Not implemented yet: the Kafka transport, MySQL and MongoDB storage, and a
-Quarkus extension. See
-[docs/architecture.md](docs/architecture.md) for the target design and
-[docs/use-cases.md](docs/use-cases.md) for the examples driving prioritization. Treat
-`docs/Saga_Framework_Epic.md`, `docs/Saga_User_Stories.md`, and `docs/Saga_Technical_Tasks.md` as
-historical planning artifacts, superseded by the docs above where they conflict.
+0.1.0 is the first release, in production use in one Spring Boot monolith. It ships the annotation model with startup
+validation, the saga runtime (event routing by association, the saga-scoped unit of work in your transaction, step
+retry with stable command identities, compensation), Postgres storage, the in-memory transport with a durable message
+store (at least once, survives restarts, no broker), the Spring Boot starter (Spring Modulith and Actuator support),
+OpenTelemetry instrumentation and the `SagaFixture` test fixture. Not available yet: the Kafka transport, MySQL and
+MongoDB storage, a Quarkus extension. See [Limitations](docs/guide/limitations.md) for what to design around.
 
 ## Modules
 
-| Module | Role | Depends on |
-|---|---|---|
-| `saga-forge-core` | Annotations, scanner (`validate`, `validateAll` → `ValidationReport`), `SagaContext`/`SagaLifecycle` contracts (no implementation), `CommandGateway`, `DomainEvents`/`EventPublisher`, SPI (`StorageProvider`, `EventDispatcher`, `SagaContextStore`, `AggregateResolver`, `HandlerInstanceProvider`, `SagaInstance` step records, `SagaLifecycleEntry`) | nothing |
-| `saga-forge-runtime` | Saga runtime over the core SPI: `SagaRuntime` (an `EventReceiver`) routes events, runs saga-scoped units of work in the host's transactions, hands committed events off, validates the model at startup | `saga-forge-core` |
-| `saga-forge-spring-boot-starter` | Auto-configuration: collects the saga model, detects storage and transport, builds and starts the runtime, Spring host SPIs (beans, parameters, Spring Data aggregates), Spring Modulith delivery, Actuator. See [its README](saga-forge-spring-boot-starter/README.md) | `saga-forge-runtime`, `saga-forge-transport-inmemory`; Postgres, Spring Data, Modulith, Actuator (optional) |
-| `saga-forge-storage-postgres` / `-mysql` / `-mongodb` | Durable `StorageProvider` + `SagaContextStore` implementations. Postgres ships both (JDBC, JSONB, lifecycle history; host applies `schema.sql`); MySQL and MongoDB are still placeholders | `saga-forge-core` |
-| `saga-forge-transport-inmemory` | In-process transport with a durable message store (transactional outbox + relay, at-least-once, survives restarts); no Spring dependency | `saga-forge-core` |
-| `saga-forge-transport-kafka` | `EventDispatcher` over Kafka topics | `saga-forge-core` |
-| `saga-forge-test` | Test fixture for applications (test scope): given/when/then over the shipped runtime, in memory; record-and-answer or real handlers; failure rules, a controllable clock, deterministic ids. See [its README](saga-forge-test/README.md) | `saga-forge-runtime` |
-| `saga-forge-example` | Runnable example saga used as a living spec | `saga-forge-core`; `saga-forge-runtime`, `saga-forge-test` (test scope) |
-| `saga-forge-example-spring` | The canonical saga as a Spring Boot application: Spring Data JDBC aggregate, service beans, no Saga Forge assembly code | the starter, `saga-forge-storage-postgres` |
+| Module | Role |
+|---|---|
+| `saga-forge-core` | Annotations, startup validation, `CommandGateway`, `DomainEvents`/`EventPublisher`, `SagaContext`, SPI. No dependencies. |
+| `saga-forge-runtime` | The saga runtime (`SagaRuntime`): routing, units of work, retry, compensation. |
+| `saga-forge-spring-boot-starter` | Auto-configuration for Spring Boot 4.1; see [its README](saga-forge-spring-boot-starter/README.md). |
+| `saga-forge-storage-postgres` | Postgres storage for saga instances, `SagaContext` values and the message store. |
+| `saga-forge-transport-inmemory` | In-process transport over a durable message store (transactional outbox and relay). |
+| `saga-forge-test` | `SagaFixture`, for tests; see [its README](saga-forge-test/README.md). |
+| `saga-forge-example`, `saga-forge-example-spring` | The canonical order saga, in plain Java and as a Spring Boot application (not published). |
+
+The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules are placeholders.
 
 ## Getting started
 
-In a Spring Boot 4.1 application, add the starter and the Postgres storage module:
+In a Spring Boot 4.1 application on Java 21, add the starter and the Postgres storage module:
 
 ```xml
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
-Point Spring Boot at your database as usual:
-
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/orders
-spring.datasource.username=orders
-spring.datasource.password=orders
-saga-forge.storage.postgres.initialize-schema=always   # development only
-```
-
-That is all the configuration there is. The starter finds the saga, handler and aggregate classes in your
-application's packages, builds the runtime over your `DataSource` and transactions, delivers events through the
-in-memory transport, and starts it. Publish the first event through the `EventPublisher` bean. See the
-[starter README](saga-forge-spring-boot-starter/README.md) for what it assembles, the Spring Modulith and Actuator
-setups, every property and how to replace each piece; `saga-forge-example-spring` is the complete application.
+Point Spring Boot at your database as usual (`spring.datasource.*`) and create Saga Forge's tables
+(`saga-forge.storage.postgres.initialize-schema=always` in development, `schema.sql` in your migrations in
+production). The starter finds the saga, handler and aggregate classes in your application's packages and starts the
+runtime; publish the first event through the `EventPublisher` bean. Continue with
+[Getting started](docs/guide/getting-started.md) (Gradle, schema, the complete example) and
+[Testing](docs/guide/testing.md).
 
 ### Without Spring (plain Java)
 
@@ -282,136 +297,13 @@ public record ChargeCard(@AggregateIdentifier String invoiceId) { }
 ```
 
 
-## Testing sagas
-
-Add the fixture in test scope:
-
-```xml
-<dependency>
-    <groupId>io.github.gkosharovdev</groupId>
-    <artifactId>saga-forge-test</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
-    <scope>test</scope>
-</dependency>
-```
-
-A test states the history a saga has seen, the event that arrives next, and what the saga must do. Here the saga is
-the canonical `OrderProcessingSaga` from `saga-forge-example`, whose steps associate events by `orderId`:
-`handleOrderCreated` (`@StartSaga`), `processPayment`, then `completeOrder` (`@EndSaga`) or `rejectOrder`
-(`@StartCompensation`).
-
-```java
-BigDecimal AMOUNT = new BigDecimal("10.00");
-
-SagaFixture.of(OrderProcessingSaga.class).build()
-        .given(new OrderCreatedEvent("o-1", AMOUNT))
-        .when(new PaymentProcessedEvent("payment-1", "o-1", AMOUNT))
-        .expectCommands(new ReserveStockCommand("o-1"))
-        .expectContext("paymentId", "payment-1")
-        .expectCompletedStep("processPayment")
-        .expectStatus(SagaStatus.RUNNING);
-```
-
-The fixture runs the shipped runtime over in-memory parts of its own, so routing by association, the unit of work,
-retries and compensation behave as in production. By default no command handler runs: each command a step sends is
-recorded and the test answers it by publishing the resulting event. With `.handlers(new PaymentService(provider))`
-the application's own handlers and aggregates run as well. `.failCommand(...)` makes a command fail, retry waits
-advance the fixture's clock instead of sleeping, and saga ids are `saga-1`, `saga-2`, ..., so command identities are
-predictable. A `SagaContext` value Postgres cannot store, such as a `BigDecimal`, fails the test at the step that
-wrote it. A failed expectation names the saga, the association value, the event, the steps that ran and the
-expected and actual values. The reference tests are `OrderProcessingSagaFixtureTest` in `saga-forge-example`; the
-[fixture README](saga-forge-test/README.md) covers every expectation.
-
-
 ## Observability
 
-The runtime and the in-memory transport instrument themselves with the OpenTelemetry API
-(`io.opentelemetry:opentelemetry-api`). Without an OpenTelemetry SDK nothing is recorded and nothing changes. With
-one, every saga unit of work, step, command and compensation is a span in the trace of the code that published the
-start event, also when the message store delivers an event later or after a restart. Saga metrics count starts,
-outcomes, retries and compensations, time each step, and report the message store's backlog.
-
-**Spring Boot**: nothing to add if the application already traces with OpenTelemetry (Spring Boot's OpenTelemetry
-setup, or Micrometer Tracing's OpenTelemetry bridge). The starter passes the application's `OpenTelemetry` bean along;
-`saga-forge.telemetry.*` switches tracing, metrics and the optional details (see the
-[starter README](saga-forge-spring-boot-starter/README.md#with-opentelemetry)).
-
-**Plain Java**: give the runtime and the transport the same instance:
-
-```java
-InMemoryTransport transport = InMemoryTransport.builder().messageStore(log).transactions(transactions)
-        .openTelemetry(openTelemetry).build();
-SagaRuntime runtime = SagaRuntime.builder()
-        .register(OrderProcessingSaga.class, Order.class, OrderRepository.class, PaymentService.class)
-        .storage(storage).contextStore(contexts).transactions(transactions)
-        .dispatcher(transport.dispatcher()).outbox(transport.outbox())
-        .openTelemetry(openTelemetry)
-        .telemetry(SagaTelemetrySettings.defaults())          // optional
-        .build();
-```
-
-**Privacy**: spans carry saga types, step and command names, generated ids (saga id, command id), outcomes and the
-failure's type. Association values (an order id), event and command contents, and failure messages are recorded only
-when switched on (`SagaTelemetrySettings.withRecordAssociationValues(true)`, `withRecordContents(true)`,
-`withRecordFailureMessages(true)`). Metrics carry only the saga type, step, command type, outcome and failure
-classification, so their series never grow with traffic.
-
-**Postgres**: the trace context is stored with each message in `saga_message_store.trace_context`; existing databases
-apply `schema-upgrade-010.sql`.
-
-### Telemetry reference
-
-Spans (instrumentation scope `io.github.gkosharovdev.sagaforge`):
-
-| Span | Kind | One per | Attributes (always) | Details |
-|---|---|---|---|---|
-| `saga_forge.handle` | internal | saga type and instance an event reaches | `saga_forge.saga.type`, `saga_forge.event.type`, `saga_forge.handling.outcome`, `saga_forge.saga.started`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`; association value\*, content\* |
-| `saga_forge.attempt` | internal | attempt of a unit of work | `saga_forge.saga.type`, `saga_forge.attempt.result`, `saga_forge.failure.classification`, `error.type` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id`, `saga_forge.attempt.number` |
-| `saga_forge.step` | internal | step run | `saga_forge.saga.type`, `saga_forge.step`, `error.type` | `saga_forge.saga.id` |
-| `saga_forge.command` | internal | command handling | `saga_forge.command.type`, `saga_forge.command.delivery`, `saga_forge.command.result`, `error.type` | `saga_forge.command.id`, `saga_forge.step`, `saga_forge.saga.id`, content\* |
-| `saga_forge.compensation` | internal | compensation | `saga_forge.saga.type`, `saga_forge.step`, `saga_forge.compensation.status`, `saga_forge.compensation.trigger` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id` |
-| `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt` |
-| `saga_forge.event.ignored` | internal | event no saga type reacts to | `saga_forge.event.type` | content\* |
-
-Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.saga.ended` (`saga_forge.saga.outcome`),
-`saga_forge.retry.scheduled` (`saga_forge.attempt.number`, `saga_forge.retry.wait` in ms),
-`saga_forge.compensation.started`. \* off by default; failure messages (`saga_forge.failure.message` and exception
-events) likewise.
-
-Metrics:
-
-| Metric | Instrument | Unit | Attributes |
-|---|---|---|---|
-| `saga_forge.handle.duration`, `.attempt.duration`, `.step.duration`, `.command.duration`, `.compensation.duration`, `.delivery.duration` | histogram | s | the span's low-cardinality attributes |
-| `saga_forge.saga.started` | counter | — | `saga_forge.saga.type` |
-| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `requires_intervention`) |
-| `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
-| `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
-| `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
-| `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
-
-Runtime log lines written inside a unit of work carry `traceId=` and `spanId=`.
-
-Example alerts, in PromQL, assuming the OpenTelemetry-to-Prometheus name translation (dots become underscores,
-counters gain `_total`, units become suffixes):
-
-```promql
-# Sagas failing or needing intervention, per saga type
-sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|requires_intervention"}[5m])) > 0
-
-# Compensations as a share of finished sagas
-sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]))
-  / sum(rate(saga_forge_saga_ended_total[15m])) > 0.05
-
-# Retries exhausted
-sum by (saga_forge_saga_type, saga_forge_step) (increase(saga_forge_retry_exhausted_total[15m])) > 0
-
-# Messages set aside for an operator
-saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
-
-# Delivery falling behind
-saga_forge_message_store_oldest_unconsumed_age_seconds > 60
-```
+The runtime and the in-memory transport instrument themselves with the OpenTelemetry API: every unit of work, step,
+command and compensation is a span in the trace of the code that published the start event, and saga metrics count
+starts, outcomes, retries and compensations. With Spring Boot nothing is needed beyond the application's own
+OpenTelemetry setup. Span and metric names, privacy switches and example alerts:
+[Operations](docs/guide/operations.md#opentelemetry).
 
 ## Vocabulary
 

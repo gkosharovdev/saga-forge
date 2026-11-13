@@ -1167,3 +1167,21 @@ Revisit the order with feedback from booking-service before each release.
   `ValidationReportTest$ValidateAll` until `mvn clean` was run.
 - **Origin**: `saga-forge-*/.classpath`; `saga-forge-core/src/test/.../scanner/ValidationReportTest.java`.
 - **Status**: open.
+
+## Consumer documentation
+
+### G-DOC-01: README pitch example and `@ReadModel` are not backed by compiling code
+- **Description**: the consumer guide (`docs/guide/`) copies every snippet from compiling code, but the README's
+  `CreateBookingSaga` pitch example (with `Inventory`, `PaymentService`) exists only in the README, and
+  `docs/architecture.md#vocabulary` mentions a `@ReadModel` marker that `saga-forge-core` does not define.
+- **Origin**: consumer guide work (`docs/guide/`, 2026-11-13).
+- **Status**: open (either add the booking saga as a compiling example module or test, or replace the README example
+  with the canonical `OrderProcessingSaga`; drop or implement `@ReadModel`).
+
+### G-DOC-02: The guide is checked by hand against the code
+- **Description**: `docs/guide/` snippets were verified line by line against the sources when written, and CI only
+  checks that `llms-full.txt` matches the guide (`docs/guide/build-llms-full.sh`). Nothing fails the build when a
+  snippet's source changes, or when a scanner or startup error text in `validation-rules.md` drifts from
+  `ReflectiveAnnotationScanner`/`StartupChecks`.
+- **Origin**: consumer guide work (`docs/guide/`, 2026-11-13).
+- **Status**: open (a test like the starter's `ReadmePropertiesTest` could check the error texts and snippet lines).

@@ -17,3 +17,6 @@ target/
 .factorypath
 
 .claude/settings.local.json
+
+# MkDocs output
+site/
