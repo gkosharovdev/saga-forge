@@ -1,0 +1,36 @@
+# Saga Forge
+
+> Declarative, annotation-driven saga orchestration for Java 21 and Spring Boot 4.1. A saga is a plain `@Saga` class whose `@SagaStep` methods react to `@DomainEvent`s and dispatch `@Command`s through a `CommandGateway` to `@CommandHandler`s on aggregates or services; the runtime correlates events by an association property, runs steps in a saga-scoped unit of work in the application's Postgres transaction, retries transient failures, and compensates committed steps. Published on Maven Central as `io.github.gkosharovdev:saga-forge-*:0.1.0` (Apache-2.0).
+
+Key rules: steps return `void` and send commands through `CommandGateway` (never return them); handlers and aggregates record events with `DomainEvents.record(...)`; application code publishes with Saga Forge's `EventPublisher`, never Spring's `ApplicationEventPublisher`; exactly one `@SagaId String` field; at most one `SagaContext` and one `CommandGateway` field; `SagaContext` values are JSON scalars (store `BigDecimal` as a String); handlers calling outside systems take a `CommandId` and pass `commandId.value()` as the idempotency key. The model is validated at startup and every error is listed at once.
+
+## Guide
+
+- [Guide index](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/README.md): what each page covers, vocabulary
+- [Getting started](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/getting-started.md): Maven/Gradle coordinates, schema setup, the canonical saga
+- [Model reference](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/model-reference.md): every annotation, where it goes, companions, attributes and defaults
+- [Validation rules](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/validation-rules.md): exact startup error texts mapped to their fix
+- [Recipes](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/recipes.md): multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, modular monolith
+- [Testing](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/testing.md): `SagaFixture` given/when/then tests
+- [Operations](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/operations.md): properties, Actuator, OpenTelemetry, schema upgrades
+- [Limitations](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/limitations.md): what to design around in 0.1.0
+
+## Reference
+
+- [Spring Boot starter README](https://github.com/gkosharovdev/saga-forge/blob/master/saga-forge-spring-boot-starter/README.md): what the starter assembles, every property, overrides
+- [Test fixture README](https://github.com/gkosharovdev/saga-forge/blob/master/saga-forge-test/README.md): full `SagaFixture` API
+- [Javadoc (saga-forge-core)](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core): annotations and contracts
+- [Javadoc (saga-forge-test)](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-test)
+- [Javadoc (saga-forge-spring-boot-starter)](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-spring-boot-starter)
+
+## Agents
+
+- [Agent skill](https://github.com/gkosharovdev/saga-forge/blob/master/docs/agents/saga-forge/SKILL.md): drop-in Claude Code skill with do/don't rules
+- [AGENTS.md snippet](https://github.com/gkosharovdev/saga-forge/blob/master/docs/agents/AGENTS-snippet.md): paste into a consumer repository
+- [llms-full.txt](https://github.com/gkosharovdev/saga-forge/blob/master/llms-full.txt): the whole guide in one file
+
+## Optional
+
+- [Architecture](https://github.com/gkosharovdev/saga-forge/blob/master/docs/architecture.md): design and vocabulary
+- [Use cases](https://github.com/gkosharovdev/saga-forge/blob/master/docs/use-cases.md): worked multi-step examples
+- [Canonical example](https://github.com/gkosharovdev/saga-forge/tree/master/saga-forge-example-spring): the order saga as a Spring Boot application

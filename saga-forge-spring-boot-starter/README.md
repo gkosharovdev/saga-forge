@@ -37,12 +37,12 @@ Every bean backs off when the application defines one of the same type. Two `Sag
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -131,8 +131,8 @@ Nothing to add when the application already traces with OpenTelemetry: the start
 
 Each saga unit of work, step and command becomes a span in the trace of the request that published the start event,
 also when the message store delivers an event later or after a restart. Spans carry no association values, contents
-or failure messages unless switched on below. The span and metric names are in the root README's telemetry
-reference.
+or failure messages unless switched on below. The span and metric names are in the guide's telemetry
+reference (`docs/guide/operations.md`).
 
 **Metrics** are recorded through OpenTelemetry's metrics API. Spring Boot exports them only when the application
 defines an `SdkMeterProvider` bean with an exporter (Spring Boot itself sends its own metrics through Micrometer); for

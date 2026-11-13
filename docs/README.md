@@ -2,6 +2,7 @@
 
 This directory's old "Flow Forge" content has been superseded. Current docs:
 
+- [guide/](guide/README.md) — the user guide for applications that use Saga Forge.
 - [architecture.md](architecture.md) — module responsibilities, autoconfiguration plan, vocabulary.
 - [use-cases.md](use-cases.md) — worked multi-step examples, including failure/retry/compensation.
 

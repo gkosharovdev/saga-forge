@@ -309,6 +309,13 @@
 - Whenever you notice a gap, limitation or deferred decision, record it in `.specify/memory/memory.md` with an
   ID; don't silently fix or ignore it.
 
+## Consumer Documentation
+- `docs/guide/` is the user guide for applications that use Saga Forge (no spec numbers or gap ids in the prose,
+  except `limitations.md`). Every Java snippet there is copied from compiling code and names its source file.
+- When an annotation, a scanner or startup error text, a property or a recipe's source changes, update the matching
+  guide page, `docs/agents/saga-forge/SKILL.md` and `docs/agents/AGENTS-snippet.md`, then run
+  `docs/guide/build-llms-full.sh` (CI fails when `llms-full.txt` is out of date). Gaps: memory.md G-DOC-01, G-DOC-02.
+
 ## Fast Discovery Checklist
 - Read `README.md` for the pitch and the canonical example.
 - Read `docs/architecture.md` for module responsibilities, autoconfiguration detection matrix, and vocabulary.
