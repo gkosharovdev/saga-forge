@@ -1,7 +1,7 @@
 name: CI
 
-# Pushes to any branch run the unit test suites. Pushes to master (a merged pull request) run the unit and the
-# integration suites: the Testcontainers classes tagged "container", enabled by the container-tests profile.
+# Pushes to any branch run the unit tests. Pushes to master (a merged pull request) also run the integration tests,
+# as a separate job in parallel: the Testcontainers classes tagged "container", enabled by the container-tests profile.
 on:
   push:
     branches: ["**"]
@@ -18,7 +18,6 @@ concurrency:
 jobs:
   unit-tests:
     name: Unit tests
-    if: github.ref != 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -45,8 +44,8 @@ jobs:
           path: "**/target/surefire-reports/"
           retention-days: 7
 
-  unit-and-integration-tests:
-    name: Unit and integration tests
+  integration-tests:
+    name: Integration tests
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -60,9 +59,10 @@ jobs:
           java-version: "21"
           cache: maven
 
-      # Testcontainers uses the runner's Docker daemon (postgres:16-alpine).
-      - name: Build and run unit and integration tests
-        run: mvn -B -ntp -Pcontainer-tests clean verify
+      # Testcontainers uses the runner's Docker daemon (postgres:16-alpine). Only the classes tagged "container" run;
+      # the unit tests are the other job's.
+      - name: Build and run integration tests
+        run: mvn -B -ntp -Pcontainer-tests -Dgroups=container clean verify
 
       - name: Upload test reports
         if: failure()
