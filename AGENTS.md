@@ -315,6 +315,8 @@
 - When an annotation, a scanner or startup error text, a property or a recipe's source changes, update the matching
   guide page, `docs/agents/saga-forge/SKILL.md` and `docs/agents/AGENTS-snippet.md`, then run
   `docs/guide/build-llms-full.sh` (CI fails when `llms-full.txt` is out of date). Gaps: memory.md G-DOC-01, G-DOC-02.
+- The site is built from `docs/guide/` by MkDocs Material (`mkdocs.yml`, `.github/workflows/docs.yml`, strict mode, deployed
+  to GitHub Pages from master); `docs/site-hooks/repo_links.py` points links that leave `docs/guide/` at GitHub.
 
 ## Fast Discovery Checklist
 - Read `README.md` for the pitch and the canonical example.

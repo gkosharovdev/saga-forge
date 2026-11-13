@@ -188,7 +188,8 @@ Saga Forge is an independent, zero-dependency implementation designed for JDK 21
 ## Documentation
 
 The **[user guide](docs/guide/README.md)** is written for applications that use Saga Forge. Every snippet in it is
-copied from compiling code in this repository.
+copied from compiling code in this repository. It is also published as a site at
+[gkosharovdev.github.io/saga-forge](https://gkosharovdev.github.io/saga-forge/).
 
 | Page | Covers |
 |---|---|
