@@ -1170,6 +1170,20 @@ Revisit the order with feedback from booking-service before each release.
 
 ## Consumer documentation
 
+### DEC-DOC-01: No synchronous saga results; callers observe domain events
+- **Decision (user, 2026-11-16)**: Saga Forge offers no API for a caller to wait for a saga, or for its first unit of
+  work, and collect its result: no "publish and wait", no step return values, no documented synchronous start for
+  application code. A caller that needs to know how a process went observes the domain events the saga's handlers
+  record as it progresses (with `@ApplicationModuleListener`, `@TransactionalEventListener` or a read model built from
+  them), or saga progress events. Work whose result the response needs, such as a call to an outside system that returns
+  a client secret, is done by the use case before the saga starts.
+- **Why**: a saga is a process that outlives the request; waiting on it couples callers to its internals, holds
+  threads across retries and asynchronous steps, and invites request-reply over the message store. Adopters refactor
+  instead (booking-service, 2026-11-16).
+- **Consequence**: `SagaRuntime.receive` stays a transport-facing `EventReceiver`, not an application entry point. The
+  guide's Recipes ("Telling the caller how it went") and the agent skill state the pattern. Don't add a synchronous
+  result API without revisiting this decision.
+
 ### G-DOC-01: README pitch example and `@ReadModel` are not backed by compiling code
 - **Description**: the consumer guide (`docs/guide/`) copies every snippet from compiling code, but the README's
   `CreateBookingSaga` pitch example (with `Inventory`, `PaymentService`) exists only in the README, and

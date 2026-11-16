@@ -25,5 +25,7 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - Handlers that call outside systems take a `CommandId` and pass `commandId.value()` as the idempotency key.
 - Business failures are events handled by a `@StartCompensation` step; undo steps with
   `@SagaCompensation(forStep = "<step method name>")`.
+- Never make a request wait for a saga's result. Do request-time work in the use case, then publish the start event;
+  clients follow progress through the domain events the handlers record (listeners, read models).
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

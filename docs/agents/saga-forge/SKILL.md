@@ -114,6 +114,9 @@ public class OrderProcessingSaga {
 - Don't rely on long retry waits, deadlines or timeouts (not supported); use a scheduled job that publishes a timeout
   event.
 - Don't expect one event that continues a saga to also start a different saga type; record a separate event.
+- Don't make a caller wait for a saga or collect step results (there is no API for it, by design). Do request-time
+  work (calls whose result the response needs) in the use case before publishing the start event; report progress
+  through the domain events the handlers record, observed by a listener or a read model.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.
 
