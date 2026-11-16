@@ -9,6 +9,7 @@ and imports trimmed, code unchanged). Paths are relative to the repository root.
 - [3. Retry and idempotent handlers](#3-retry-and-idempotent-handlers)
 - [4. Outbox commands](#4-outbox-commands)
 - [5. Bounded-context modules in one Spring Boot monolith](#5-bounded-context-modules-in-one-spring-boot-monolith)
+- [6. Telling the caller how it went](#6-telling-the-caller-how-it-went)
 
 ## 1. Several aggregates in one saga-scoped unit of work
 
@@ -505,3 +506,22 @@ Rules for this setup:
 - An event that continues a saga instance is not handed to a *different* saga type that also reacts to it; give the
   second saga an event of its own.
 - Run one application instance per database for now (see [Limitations](limitations.md)).
+
+## 6. Telling the caller how it went
+
+**Problem**: an HTTP request starts a process, and the client wants to know how it went.
+
+**Pattern**: don't wait for the saga. Saga Forge has no API that blocks the caller until a saga, or its first unit of
+work, finishes, and steps return nothing. A saga is a process that may outlive the request: it can wait for an outside
+event, retry, or compensate. Instead:
+
+- **Do request-time work in the use case.** When the response needs a value from an outside system (a payment
+  provider's client secret, say), the application service obtains it, commits its own change, and publishes the event
+  that starts the saga. The saga handles only the follow-up steps. Recipe 5's `OrderPlacement.place` is that shape:
+  the order is saved and `OrderCreatedEvent` published in one transaction, and the request returns.
+- **Report progress through domain events.** The handlers record events as the saga moves on (`PaymentProcessedEvent`,
+  `OrderCompletedEvent`, `StockUnavailableEvent`). A listener in the module that serves the client reacts to them, as
+  `PaymentNotifier` does in recipe 5, and updates a read model the client polls, or pushes a notification
+  (WebSocket, server-sent events, email).
+- **Answer the request with what is already known**: `202 Accepted` with the order id, or the use case's own result.
+  The client follows the process by that id.

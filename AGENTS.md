@@ -260,6 +260,8 @@
   should write them so that writing again is harmless.
 - Deferred: whether a `@StartSaga` step may also be a `@CommandHandler`. Dropped for now: programmatic abort
   (e.g. `SagaLifecycle.abort()`) — don't add it without a spec.
+- Decided (memory.md DEC-DOC-01): no synchronous saga results. Callers never wait for a saga or collect step results;
+  they observe the domain events the saga's handlers record. Don't propose a "publish and wait" API.
 - No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled
   process (G-ENG-25).
 - First adopter: booking-service. memory.md "Adoption backlog" ranks the gaps that matter for it; check it when
