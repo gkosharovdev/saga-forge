@@ -3,18 +3,17 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.opentelemetry.api.common.Attributes;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
-import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
-import io.github.gkosharovdev.sagaforge.runtime.internal.EngineSagaLifecycle.PendingWrite;
 import io.github.gkosharovdev.sagaforge.runtime.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.runtime.internal.SagaModel.Step;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Collaborators;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Trigger;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Trigger;
+import io.github.gkosharovdev.sagaforge.runtime.internal.UnitOfWork.Collaborators;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +23,7 @@ import java.util.function.Supplier;
  * The {@code EventReceiver.receive} algorithm (contracts/event-receiver.md, FR-001 to FR-006).
  *
  * <ol>
+ *   <li><b>Outcome events</b> (011 FR-017): a {@code SagaOutcome} gets a report with no results; no saga reacts.</li>
  *   <li><b>Validate first</b> (FR-006): a {@code null} or non-{@code @DomainEvent} event, or a missing or empty
  *       association value for any reacting step of any saga type, is an {@link IllegalArgumentException} before
  *       anything runs.</li>
@@ -96,6 +96,10 @@ final class EventRouter {
 
     HandlingReport receive(Object event) {
         ReentrancyGuard.requireNotRunning();
+        if (event instanceof SagaOutcome) {
+            // 011 FR-017: outcome events are framework events; no saga reacts to one, and it is no error.
+            return new HandlingReport(event, List.of());
+        }
         requireDomainEvent(event);
         List<Reaction> reactions = reactionsTo(event);
         if (reactions.isEmpty()) {
@@ -150,14 +154,15 @@ final class EventRouter {
                 return duplicateStart(reaction);
             }
             instanceLease = instanceLocks.acquire(sagaId);
-            commitCreationOrRelease(lifecycle.drain(sagaId), instanceLease);
+            commitCreationOrRelease(reaction.saga(), lifecycle, sagaId, instanceLease);
         }
         return runUnitOfWork(reaction, sagaId, true, instanceLease);
     }
 
-    private void commitCreationOrRelease(PendingWrite creation, Lease instanceLease) {
+    private void commitCreationOrRelease(SagaModel saga, EngineSagaLifecycle lifecycle, String sagaId,
+            Lease instanceLease) {
         try {
-            commitCreation(creation);
+            commitCreation(saga, lifecycle, sagaId);
         } catch (RuntimeException | Error failure) {
             instanceLease.close();
             throw failure;
@@ -169,14 +174,14 @@ final class EventRouter {
                 reaction.associationValue());
     }
 
-    private void commitCreation(PendingWrite creation) {
-        LocalTransaction transaction = settings.transactions().begin();
-        try {
-            settings.storage().save(creation.instance(), creation.entries());
-            transaction.commit();
-        } catch (RuntimeException | Error failure) {
-            LocalTransactions.rollBackAfter(settings.transactions(), transaction, failure);
-            throw failure;
+    /** The creation write: the {@code CREATED} instance and its entry, in a unit of work of its own (FR-012). */
+    private void commitCreation(SagaModel saga, EngineSagaLifecycle lifecycle, String sagaId) {
+        switch (UnitOfWork.forNewInstance(with, saga, lifecycle, sagaId).<Object, Object>run(context -> null)) {
+            case UnitOfWork.Committed<Object, Object> committed -> committed.release();
+            case UnitOfWork.Failed<Object, Object> failed -> throw UnitOfWork.propagate(failed.cause());
+            case UnitOfWork.Conflicted<Object, Object> conflicted -> throw conflicted.conflict();
+            case UnitOfWork.Skipped<Object, Object> skipped -> throw new IllegalStateException(
+                    "The creation write admits no instance: " + skipped.reason());
         }
     }
 
@@ -204,7 +209,7 @@ final class EventRouter {
         } else if (!correlated.isEmpty()) {
             SagaInstance latest = correlated.get(correlated.size() - 1);
             attempts.results.add(traced(reaction, latest.sagaId(),
-                    () -> SagaUnitOfWork.isCompleted(latest, reaction.step().name())
+                    () -> RunSteps.isCompleted(latest, reaction.step().name())
                             ? duplicate(reaction, latest.sagaId())
                             : unexpected(reaction, latest.sagaId())));
         } else {
@@ -270,7 +275,7 @@ final class EventRouter {
             case COMPLETED -> "completed:" + result.outcomeStep();
             case FAILED -> "failed";
             case COMPENSATED -> "compensated";
-            case REQUIRES_INTERVENTION -> "requires_intervention";
+            case COMPENSATION_FAILED -> "compensation_failed";
             default -> null;
         };
         if (ended != null) {

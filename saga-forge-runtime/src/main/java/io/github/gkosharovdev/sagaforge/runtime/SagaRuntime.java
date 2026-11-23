@@ -221,6 +221,7 @@ public final class SagaRuntime implements EventReceiver {
         private CommandInterceptor commandInterceptor;
         private OpenTelemetry openTelemetry = OpenTelemetry.noop();
         private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
+        private boolean outcomeEvents = true;
 
         private Builder() {
         }
@@ -375,6 +376,18 @@ public final class SagaRuntime implements EventReceiver {
             return this;
         }
 
+        /**
+         * Optional: whether the runtime announces how each saga instance ended
+         * ({@code specs/011-saga-outcome-events}). Default {@code true}: every write that stores a terminal status
+         * hands one {@code SagaCompleted}, {@code SagaFailed} or {@code SagaCompensated} to the outbox, as the last
+         * event of that unit of work's batch. Pass {@code false} for an outbox or dispatcher that cannot carry
+         * events other than {@code @DomainEvent}s.
+         */
+        public Builder outcomeEvents(boolean outcomeEvents) {
+            this.outcomeEvents = outcomeEvents;
+            return this;
+        }
+
         /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
         public Builder logger(System.Logger logger) {
             this.logger = requireNonNull(logger, "logger");
@@ -417,7 +430,7 @@ public final class SagaRuntime implements EventReceiver {
                     new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
                     new RetrySettings(maxTotalRetryBackoff, retryPause::pause),
                     commandInterceptor != null ? commandInterceptor : CommandInterceptor.proceeding(),
-                    openTelemetry, telemetry);
+                    openTelemetry, telemetry, outcomeEvents);
         }
 
         private static String randomId() {

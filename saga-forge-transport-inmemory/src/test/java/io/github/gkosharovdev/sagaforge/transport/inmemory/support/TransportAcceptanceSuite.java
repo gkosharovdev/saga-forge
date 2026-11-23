@@ -11,6 +11,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
@@ -153,5 +155,28 @@ public abstract class TransportAcceptanceSuite {
 
         await(() -> setup.hasInstance(FulfilmentSaga.class, "RUNNING"), WAIT, "the saga to start");
         awaitQuiet();
+    }
+
+    @Test
+    @DisplayName("011: each outcome event is stored once, keyed by its instance, delivered and consumed, never set aside")
+    void outcomeEvents() {
+        setup.publish(new OrderPlaced(PaymentService.REFUSED_PREFIX + "o-2"));
+        setup.publish(new OrderPlaced("o-1"));
+        await(() -> setup.hasInstance(FulfilmentSaga.class, "FAILED"), WAIT, "the refused saga to fail");
+        await(() -> setup.hasInstance(FulfilmentSaga.class, "RUNNING"), WAIT, "the saga to start");
+        setup.publish(new PaymentConfirmed("o-1"));
+        await(() -> setup.hasInstance(FulfilmentSaga.class, "COMPLETED"), WAIT, "the saga to complete");
+        awaitQuiet();
+
+        assertThat(messagesOf(SagaFailed.class)).singleElement().satisfies(TransportAcceptanceSuite::consumedOutcome);
+        assertThat(messagesOf(SagaCompleted.class)).filteredOn(m -> FulfilmentSaga.class.getName()
+                .equals(m.sourceSagaType())).singleElement().satisfies(TransportAcceptanceSuite::consumedOutcome);
+    }
+
+    private static void consumedOutcome(StoredMessage message) {
+        assertThat(message.status()).isEqualTo(MessageStatus.CONSUMED);
+        assertThat(message.attempts()).isEqualTo(1);
+        assertThat(message.sourceSagaId()).isNotNull();
+        assertThat(message.orderingKey()).isEqualTo("saga:" + message.sourceSagaId());
     }
 }

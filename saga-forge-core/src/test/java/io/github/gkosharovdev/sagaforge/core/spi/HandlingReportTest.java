@@ -90,15 +90,14 @@ class HandlingReportTest {
         }
 
         @Test
-        @DisplayName("outboxFailures are allowed only for WAITING and COMPLETED, never with a null element")
+        @DisplayName("outboxFailures are allowed only after a commit (since 011 also for FAILED), never with a null element")
         void outboxFailuresOnlyAfterCommit() {
             List<Throwable> failures = List.of(new IllegalStateException("broker down"));
 
             assertThatCode(() -> result(HandlingOutcome.WAITING, null, null, failures)).doesNotThrowAnyException();
             assertThatCode(() -> result(HandlingOutcome.COMPLETED, "completeOrder", null, failures))
                     .doesNotThrowAnyException();
-            assertThatThrownBy(() -> result(HandlingOutcome.FAILED, null, FAILURE, failures))
-                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatCode(() -> result(HandlingOutcome.FAILED, null, FAILURE, failures)).doesNotThrowAnyException();
             assertThatThrownBy(() -> result(HandlingOutcome.NOT_HANDLED, null, null, failures))
                     .isInstanceOf(IllegalArgumentException.class);
             List<Throwable> withNull = Arrays.asList(new IllegalStateException(), null);

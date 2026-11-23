@@ -23,7 +23,7 @@ Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.retry.sche
 messages.
 
 Value sets: `saga_forge.handling.outcome` = `HandlingOutcome` names; `saga_forge.saga.outcome` = `completed:<step>`,
-`failed`, `compensated`, `requires_intervention`; `saga_forge.failure.classification` = `FailureClassification` names;
+`failed`, `compensated`, `requires_intervention` (`compensation_failed` since `specs/011-saga-outcome-events`, which renamed the status); `saga_forge.failure.classification` = `FailureClassification` names;
 `saga_forge.compensation.status` = `CompensationStatus` names; `saga_forge.compensation.trigger` =
 `CompensationTriggerKind` names. Types are fully qualified class names.
 

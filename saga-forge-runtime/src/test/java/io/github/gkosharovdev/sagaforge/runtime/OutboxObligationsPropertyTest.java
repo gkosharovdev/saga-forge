@@ -98,7 +98,8 @@ class OutboxObligationsPropertyTest {
             world.run(sequence.get(index), "id-" + index).ifPresent(expected::add);
         }
 
-        List<OutgoingMessages> committed = world.outbox.committed();
+        // 011: outcome events are stripped; this property is about the events a unit of work buffered.
+        List<OutgoingMessages> committed = world.outbox.committedWithoutOutcomes();
         assertThat(committed).extracting(batch -> new Expected(batch.sagaType(), batch.events()))
                 .containsExactlyElementsOf(expected);
         assertThat(committed).extracting(OutgoingMessages::unitOfWorkId).doesNotHaveDuplicates();

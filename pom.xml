@@ -63,6 +63,7 @@
         <junit.version>5.11.4</junit.version>
         <jqwik.version>1.9.2</jqwik.version>
         <assertj.version>3.27.3</assertj.version>
+        <archunit.version>1.4.1</archunit.version>
         <!-- The version Spring Boot 4.1.x manages, so applications get one API version (010 research §10) -->
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <!-- Release profile: whether a validated deployment is published without a manual step in the portal -->
@@ -95,6 +96,13 @@
                 <groupId>org.assertj</groupId>
                 <artifactId>assertj-core</artifactId>
                 <version>${assertj.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <!-- 011: keeps the runtime's transaction boundary in one class (UnitOfWorkBoundaryTest) -->
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
                 <scope>test</scope>
             </dependency>
         </dependencies>

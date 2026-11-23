@@ -9,6 +9,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.runtime.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.runtime.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
@@ -34,6 +35,7 @@ public final class UnwindFixture {
     private final InMemorySagaContextStore contexts = new InMemorySagaContextStore();
     private final RecordingLogger logger = new RecordingLogger();
     private final AtomicInteger sagaIds = new AtomicInteger();
+    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private SagaRuntime engine;
 
     private UnwindFixture(Class<?> sagaType, Function<Journal, Object> sagas, StorageProvider overStorage) {
@@ -67,6 +69,7 @@ public final class UnwindFixture {
                 .contextStore(contexts)
                 .transactions(boundary)
                 .dispatcher(new RecordingEventDispatcher())
+                .outbox(outbox)
                 .handlerInstances(new MapHandlerInstanceProvider().register(new ChainService()))
                 .sagaObjects(new SagaObjectProvider() {
                     @Override
@@ -115,6 +118,11 @@ public final class UnwindFixture {
 
     public TransactionalInMemoryStorageProvider storage() {
         return storage;
+    }
+
+    /** Every batch the engine's units of work handed on (011: outcome events included). */
+    public CapturingOutbox outbox() {
+        return outbox;
     }
 
     public RecordingLogger logger() {

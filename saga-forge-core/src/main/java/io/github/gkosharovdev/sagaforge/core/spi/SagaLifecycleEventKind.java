@@ -27,10 +27,12 @@ public enum SagaLifecycleEventKind {
     COMPENSATION_STARTED,
     /** One step's {@code @SagaCompensation} committed, in its own unit of work. */
     STEP_COMPENSATED,
-    /** One step's compensation failed; written with the {@code REQUIRES_INTERVENTION} write. */
+    /**
+     * One step's compensation failed: the instance is now {@link SagaStatus#COMPENSATION_FAILED}. The terminal entry of
+     * that instance; before 0.2.0 a separate {@code COMPENSATION_FAILED} entry followed it
+     * ({@code specs/011-saga-outcome-events} FR-021).
+     */
     COMPENSATION_FAILED,
     /** Every applicable compensation committed: the instance is now {@link SagaStatus#COMPENSATED}. */
-    COMPENSATED,
-    /** A compensation failed: the instance is now {@link SagaStatus#REQUIRES_INTERVENTION}. */
-    REQUIRES_INTERVENTION
+    COMPENSATED
 }

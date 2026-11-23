@@ -2,10 +2,13 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.Order;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.OrderPlaced;
@@ -30,6 +33,15 @@ class OrderingKeysTest {
         assertThat(OrderingKeys.ofCommand(new RequestPayment("o-1"), scoped)).isEqualTo("saga:s-1");
         assertThat(OrderingKeys.ofCommand(new RequestPayment("o-1"),
                 CommandId.unscoped(RequestPayment.class.getName()))).isNull();
+    }
+
+    @Test
+    @DisplayName("an outcome event's key is its saga, like the saga's outbox commands (011)")
+    void outcomeEventKey() {
+        SagaCompleted completed = SagaCompleted.of("com.example.OrderSaga", "s-1", Map.of("orderId", "o-1"),
+                Instant.parse("2026-01-01T00:00:00Z"), "done");
+
+        assertThat(OrderingKeys.ofEvent(completed)).isEqualTo("saga:s-1");
     }
 
     @Test

@@ -164,7 +164,7 @@ public final class Diagnostics {
                 .with("step", step).with("status", status).toString());
     }
 
-    /** {@code saga.compensation.failed}: a compensation failed; the instance requires intervention (FR-016). */
+    /** {@code saga.compensation.failed}: a compensation failed; the instance is {@code COMPENSATION_FAILED} (FR-016). */
     void compensationFailed(Correlation about, SagaFailure failure) {
         logger.log(Level.ERROR, Line.of("saga.compensation.failed").saga(about).instance(about).unitOfWork(about)
                 .with("step", failure.stepName()).with("classification", failure.classification())

@@ -2,24 +2,24 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationUnitOfWork.Committed;
-import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationUnitOfWork.Conflicted;
-import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationUnitOfWork.Failed;
-import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationUnitOfWork.Result;
-import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationUnitOfWork.Stopped;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Collaborators;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunCompensation.Committed;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunCompensation.Conflicted;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunCompensation.Failed;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunCompensation.Result;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunCompensation.Stopped;
+import io.github.gkosharovdev.sagaforge.runtime.internal.UnitOfWork.Collaborators;
 import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Runs the remaining compensations of one compensating instance, one {@link CompensationUnitOfWork} each, most
+ * Runs the remaining compensations of one compensating instance, one unit of work running {@link RunCompensation} each, most
  * recently completed step first, until none is left, one fails, one conflicts, or the instance is found no longer
  * compensating (specs/006-saga-compensation contracts/compensation-run.md "run remaining").
  *
  * <p>The caller holds the instance's in-process lock for the whole run and releases it afterwards; the
  * {@code AFTER_COMMIT} outbox of each committed compensation is added to the caller's list, to run after the
- * release in commit order. A failed compensation is recorded by {@link CompensationFailedWrite} and never retried.</p>
+ * release in commit order. A failed compensation is recorded by {@link RecordCompensationFailure} and never retried.</p>
  */
 final class CompensationRun {
 
@@ -40,7 +40,7 @@ final class CompensationRun {
      * @param outboxs where each committed compensation's after-release outbox is added
      * @param ranBefore the unit of work that started compensation in this call, if any; reported when no
      *                  compensation unit of work runs after it
-     * @return {@code COMPENSATED}, {@code REQUIRES_INTERVENTION}, or {@code NOT_HANDLED} if the run lost a conflict
+     * @return {@code COMPENSATED}, {@code COMPENSATION_FAILED}, or {@code NOT_HANDLED} if the run lost a conflict
      *         or found the instance moved on by another process
      * @throws RuntimeException if a locked read or the failed-compensation write fails; what committed before stays
      */
@@ -48,7 +48,7 @@ final class CompensationRun {
             String ranBefore) {
         String last = ranBefore;
         while (true) {
-            CompensationUnitOfWork unitOfWork = new CompensationUnitOfWork(saga, sagaId, with, about);
+            UnitOfWork unitOfWork = UnitOfWork.forInstance(with, saga, sagaId, about.inUnitOfWork(null));
             Result result = traced(saga, sagaId, unitOfWork);
             switch (result) {
                 case Committed committed -> {
@@ -59,9 +59,9 @@ final class CompensationRun {
                     }
                 }
                 case Failed failed -> {
-                    boolean recorded = new CompensationFailedWrite(saga, with.settings(), with.diagnostics())
-                            .record(failed.correlation(), failed.step(), failed.cause());
-                    return new Summary(recorded ? HandlingOutcome.REQUIRES_INTERVENTION : HandlingOutcome.NOT_HANDLED,
+                    boolean recorded = RecordCompensationFailure.record(with, saga, failed.correlation(),
+                            failed.step(), failed.cause(), outboxs);
+                    return new Summary(recorded ? HandlingOutcome.COMPENSATION_FAILED : HandlingOutcome.NOT_HANDLED,
                             unitOfWork.unitOfWorkId());
                 }
                 case Conflicted conflicted -> {
@@ -75,13 +75,13 @@ final class CompensationRun {
     }
 
     /** One compensation unit of work inside a {@code saga_forge.compensation} span (010 research §2). */
-    private Result traced(SagaModel saga, String sagaId, CompensationUnitOfWork unitOfWork) {
+    private Result traced(SagaModel saga, String sagaId, UnitOfWork unitOfWork) {
         try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.COMPENSATION)) {
             span.set(SagaInstrumentation.SAGA_TYPE, saga.typeName()).set(SagaInstrumentation.SAGA_ID, sagaId)
                     .set(SagaInstrumentation.UNIT_OF_WORK_ID, unitOfWork.unitOfWorkId());
             Result result;
             try {
-                result = unitOfWork.run();
+                result = RunCompensation.next(with, saga, unitOfWork);
             } catch (RuntimeException | Error failure) {
                 span.fail(failure);
                 throw failure;
@@ -108,8 +108,8 @@ final class CompensationRun {
         if (status == SagaStatus.COMPENSATED) {
             return HandlingOutcome.COMPENSATED;
         }
-        if (status == SagaStatus.REQUIRES_INTERVENTION) {
-            return HandlingOutcome.REQUIRES_INTERVENTION;
+        if (status == SagaStatus.COMPENSATION_FAILED) {
+            return HandlingOutcome.COMPENSATION_FAILED;
         }
         return HandlingOutcome.NOT_HANDLED;
     }

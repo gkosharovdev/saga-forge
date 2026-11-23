@@ -8,11 +8,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 
 /**
  * Ordering keys ({@code specs/007-in-memory-transport} research §5): messages with the same key are delivered one at
- * a time, in position order. An event's key is its aggregate type and identifier; a command's is its
- * {@code @AggregateIdentifier} value with the command type, else its sending saga, else none.
+ * a time, in position order. An event's key is its aggregate type and identifier; an outcome event's
+ * ({@code specs/011-saga-outcome-events}) is its saga, {@code saga:<sagaId>}, the key of the saga's outbox commands; a
+ * command's is its {@code @AggregateIdentifier} value with the command type, else its sending saga, else none.
  */
 final class OrderingKeys {
 
@@ -22,6 +24,9 @@ final class OrderingKeys {
     }
 
     static String ofEvent(Object event) {
+        if (event instanceof SagaOutcome outcome) {
+            return "saga:" + outcome.sagaId();
+        }
         DomainEvent annotation = event.getClass().getAnnotation(DomainEvent.class);
         Optional<String> id = identifier(event);
         if (annotation == null || id.isEmpty()) {

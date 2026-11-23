@@ -1,16 +1,23 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.booking.CreateBookingSaga;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.Reservation;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ThreeStepSaga;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemoryStorageProvider;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
+import io.github.gkosharovdev.sagaforge.core.outcome.FailurePhase;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
+import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
@@ -18,6 +25,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.UnwindSaga;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineSagaLifecycle.PendingWrite;
 import java.time.Clock;
 import java.time.Duration;
@@ -34,7 +42,7 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link EngineSagaLifecycle}: the 001/002 transition rules applied to a working copy, the lifecycle entries each
  * transition produces, and {@code drain} (specs/004-saga-engine tasks.md T043, data-model.md "Lifecycle entry
- * production").
+ * production"), plus the outcome event each terminal transition hands to {@code drain} (specs/011 T022).
  */
 class EngineSagaLifecycleTest {
 
@@ -372,6 +380,126 @@ class EngineSagaLifecycleTest {
                     new IllegalStateException("final"), START));
 
             assertThat(failed.pendingRetry()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("outcome events (011)")
+    class OutcomeEvents {
+
+        private final EngineSagaLifecycle unwind = new EngineSagaLifecycle(SagaModel.of(UnwindSaga.class), storage,
+                sources);
+
+        private String unwindWithCompleted(String... steps) {
+            String sagaId = unwind.start(UnwindSaga.class, "orderId", ORDER).sagaId();
+            for (String step : steps) {
+                unwind.recordStepCompleted(sagaId, step, List.of());
+            }
+            return sagaId;
+        }
+
+        private CompensationTrigger abort() {
+            return CompensationTrigger.failureOutcome(UnwindSaga.ABORT, "Aborted", START);
+        }
+
+        @Test
+        @DisplayName("complete: SagaCompleted with the outcome step, id sagaId:COMPLETED, cleared by drain")
+        void completed() {
+            String sagaId = started().sagaId();
+            SagaInstance instance = lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
+
+            PendingWrite write = lifecycle.drain(sagaId);
+
+            assertThat(write.outcome()).get().isInstanceOfSatisfying(SagaCompleted.class, completed -> {
+                assertThat(completed.eventId()).isEqualTo(sagaId + ":COMPLETED");
+                assertThat(completed.sagaType()).isEqualTo(ThreeStepSaga.class.getName());
+                assertThat(completed.sagaId()).isEqualTo(sagaId);
+                assertThat(completed.associations()).isEqualTo(Map.of("orderId", ORDER));
+                assertThat(completed.occurredAt()).isEqualTo(instance.lastModifiedAt());
+                assertThat(completed.outcomeStep()).isEqualTo(ThreeStepSaga.END_STEP);
+            });
+            assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("fail: SagaFailed in phase STEP naming the failed step, cause type and attempts, with no trigger")
+        void failed() {
+            String sagaId = started().sagaId();
+            SagaFailure failure = SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("boom"),
+                    START);
+            lifecycle.fail(sagaId, failure);
+
+            assertThat(lifecycle.drain(sagaId).outcome()).get().isInstanceOfSatisfying(SagaFailed.class, failed -> {
+                assertThat(failed.eventId()).isEqualTo(sagaId + ":FAILED");
+                assertThat(failed.phase()).isEqualTo(FailurePhase.STEP);
+                assertThat(failed.failedStep()).isEqualTo(ThreeStepSaga.RESERVED_STEP);
+                assertThat(failed.classification()).isEqualTo(FailureClassification.UNCLASSIFIED);
+                assertThat(failed.causeType()).isEqualTo(IllegalStateException.class.getName());
+                assertThat(failed.attempts()).isEqualTo(failure.attempts());
+                assertThat(failed.compensationTrigger()).isNull();
+            });
+        }
+
+        @Test
+        @DisplayName("compensation ending: SagaCompensated with the persisted trigger")
+        void compensated() {
+            String sagaId = unwindWithCompleted(UnwindSaga.A);
+            unwind.startCompensation(sagaId, abort());
+            assertThat(unwind.drain(sagaId).outcome()).isEmpty();
+
+            unwind.recordCompensated(sagaId, UnwindSaga.A);
+
+            assertThat(unwind.drain(sagaId).outcome()).get().isInstanceOfSatisfying(SagaCompensated.class,
+                    compensated -> {
+                        assertThat(compensated.eventId()).isEqualTo(sagaId + ":COMPENSATED");
+                        assertThat(compensated.trigger().kind())
+                                .isEqualTo(CompensationTriggerKind.FAILURE_OUTCOME);
+                        assertThat(compensated.trigger().stepName()).isEqualTo(UnwindSaga.ABORT);
+                    });
+        }
+
+        @Test
+        @DisplayName("a compensation start with nothing to compensate ends COMPENSATED in the same write")
+        void compensatedAtStart() {
+            String sagaId = unwindWithCompleted();
+            unwind.startCompensation(sagaId, abort());
+
+            assertThat(unwind.drain(sagaId).outcome()).get().isInstanceOf(SagaCompensated.class);
+        }
+
+        @Test
+        @DisplayName("compensation failure: SagaFailed in phase COMPENSATION naming the step and the trigger")
+        void compensationFailed() {
+            String sagaId = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
+            unwind.startCompensation(sagaId, abort());
+            unwind.drain(sagaId);
+            SagaFailure failure = SagaFailure.of(UnwindSaga.B, new IllegalArgumentException("undo failed"), START);
+
+            unwind.recordCompensationFailed(sagaId, UnwindSaga.B, failure);
+
+            PendingWrite write = unwind.drain(sagaId);
+            assertThat(write.outcome()).get().isInstanceOfSatisfying(SagaFailed.class, failed -> {
+                assertThat(failed.eventId()).isEqualTo(sagaId + ":COMPENSATION_FAILED");
+                assertThat(failed.phase()).isEqualTo(FailurePhase.COMPENSATION);
+                assertThat(failed.failedStep()).isEqualTo(UnwindSaga.B);
+                assertThat(failed.causeType()).isEqualTo(IllegalArgumentException.class.getName());
+                assertThat(failed.compensationTrigger().stepName()).isEqualTo(UnwindSaga.ABORT);
+            });
+        }
+
+        @Test
+        @DisplayName("non-terminal transitions produce no outcome")
+        void nonTerminalTransitions() {
+            String sagaId = started().sagaId();
+            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
+            lifecycle.advance(sagaId);
+            assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
+
+            String unwinding = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
+            unwind.startCompensation(unwinding, abort());
+            assertThat(unwind.drain(unwinding).outcome()).isEmpty();
+            unwind.recordCompensated(unwinding, UnwindSaga.B);
+            assertThat(unwind.drain(unwinding).outcome()).isEmpty();
         }
     }
 }

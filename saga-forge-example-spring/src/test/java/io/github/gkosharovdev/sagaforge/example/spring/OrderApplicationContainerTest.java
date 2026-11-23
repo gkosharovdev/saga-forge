@@ -18,7 +18,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 /**
  * The Spring example end to end over Testcontainers Postgres ({@code specs/008-spring-boot-starter} quickstart
  * scenario 1, SC-001, SC-002): an order completes; a stock shortage after payment ends {@code COMPENSATED} with the
- * payment refunded.
+ * payment refunded; a declined payment ends {@code FAILED}, and its {@code SagaFailed} outcome event reaches
+ * {@link FailedOrders} ({@code specs/011-saga-outcome-events}).
  */
 @Tag("container")
 class OrderApplicationContainerTest {
@@ -79,5 +80,17 @@ class OrderApplicationContainerTest {
         assertThat(context.getBean(OrderRepository.class).findById("order-2").orElseThrow().status())
                 .isEqualTo(Order.Status.OUT_OF_STOCK);
         assertThat(context.getBean(PaymentProvider.class).refunds()).containsValue(new BigDecimal("9.99"));
+        assertThat(context.getBean(FailedOrders.class).orderIds()).doesNotContain("order-2");
+    }
+
+    @Test
+    @DisplayName("a declined payment fails the saga; the failed order is announced once")
+    void announcesFailure() throws InterruptedException {
+        context.getBean(OrderPlacement.class).place("order-3", new BigDecimal("-1.00"), true);
+
+        await(() -> context.getBean(FailedOrders.class).orderIds().contains("order-3"), "the failure to be announced");
+        assertThat(status("order-3")).isEqualTo("FAILED");
+        Thread.sleep(200);
+        assertThat(context.getBean(FailedOrders.class).orderIds()).containsOnlyOnce("order-3");
     }
 }

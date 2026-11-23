@@ -15,6 +15,11 @@ package io.github.gkosharovdev.sagaforge.core.spi;
  * triggering a {@code @StartSaga} step, events no step reacts to, and events still queued when an {@code @EndSaga}
  * step ended the unit of work. For a non-saga unit of work, every recorded event. Each event exactly once. Never for
  * a unit of work that rolled back or lost a write-time conflict; an empty batch is not stored in the outbox.</p>
+ * <p>Since {@code specs/011-saga-outcome-events}, the unit of work that moves an instance to a terminal status also
+ * carries one outcome event ({@code core.outcome.SagaCompleted}, {@code SagaFailed} or {@code SagaCompensated}) as the
+ * last element of {@link OutgoingMessages#events()} and {@link OutgoingMessages#recordedEvents()}, unless the host
+ * switched outcome events off. Its {@code eventId()} is {@code sagaId:STATUS}. Store it like any other event; the
+ * runtime accepts it on {@link EventReceiver#receive(Object)} and hands it to no saga.</p>
  *
  * <h2>Order and identity</h2>
  * <p>Events are in recording order. {@link OutgoingMessages#unitOfWorkId()} is unique per unit of work, saga-scoped

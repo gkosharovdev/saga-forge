@@ -9,6 +9,7 @@ import java.util.function.Predicate;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
@@ -238,7 +239,45 @@ public final class Then {
         return this;
     }
 
+    // --- outcome events --------------------------------------------------------------------------------------------
+
+    /**
+     * Exactly one outcome event was committed ({@code specs/011-saga-outcome-events}), for the chosen instance if one
+     * was chosen, and it is a {@code type} matching {@code predicate}.
+     */
+    public <T extends SagaOutcome> Then expectOutcomeEvent(Class<T> type, Predicate<? super T> predicate) {
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(predicate, "predicate");
+        List<SagaOutcome> actual = outcomeEvents();
+        boolean matches = actual.size() == 1 && type.isInstance(actual.get(0)) && predicate.test(type.cast(actual.get(0)));
+        if (!matches) {
+            throw fail(Messages.expectedActual("expected one outcome event", type.getSimpleName()
+                    + " matching the predicate", "committed", actual));
+        }
+        return this;
+    }
+
+    /** Exactly one outcome event was committed, for the chosen instance if one was chosen, and it is a {@code type}. */
+    public Then expectOutcomeEvent(Class<? extends SagaOutcome> type) {
+        return expectOutcomeEvent(type, outcome -> true);
+    }
+
+    /** No outcome event was committed, for the chosen instance if one was chosen: no instance ended. */
+    public Then expectNoOutcomeEvent() {
+        List<SagaOutcome> actual = outcomeEvents();
+        if (!actual.isEmpty()) {
+            throw fail(Messages.expectedActual("expected outcome events", "[]", "committed", actual));
+        }
+        return this;
+    }
+
     // --- internals -------------------------------------------------------------------------------------------------
+
+    private List<SagaOutcome> outcomeEvents() {
+        return result.outcomeEvents().stream()
+                .filter(outcome -> chosen == null || chosen.sagaId().equals(outcome.sagaId()))
+                .toList();
+    }
 
     private List<Object> commands() {
         return result.commands().stream()

@@ -27,6 +27,7 @@ import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StartSagaWithoutSt
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepReturningValueSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithMultipleParamsSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNoParamSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepTakingOutcomeEventSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNonDomainEventParamSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.ValidSaga;
 
@@ -241,6 +242,16 @@ class ReflectiveAnnotationScannerTest {
             assertThat(result.isValid()).isFalse();
             assertThat(result.errors()).anyMatch(e ->
                     e.equals("@SagaStep method handleStart parameter type NotADomainEvent must be annotated with @DomainEvent"));
+        }
+
+        @Test
+        @DisplayName("@SagaStep taking an outcome event produces error (011 FR-017)")
+        void stepTakingOutcomeEvent() {
+            SagaValidationResult result = scanner.validate(StepTakingOutcomeEventSaga.class);
+
+            assertThat(result.isValid()).isFalse();
+            assertThat(result.errors()).anyMatch(e ->
+                    e.equals("@SagaStep method otherSagaFailed parameter type SagaFailed must be annotated with @DomainEvent"));
         }
     }
 

@@ -8,7 +8,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * A stand-in for an outside payment provider that honours idempotency keys: a repeated key changes nothing. It is not
- * part of the saga's transaction, which is why {@link PaymentService} passes the command identity as the key.
+ * part of the saga's transaction, which is why {@link PaymentService} passes the command identity as the key. It
+ * declines an amount that is not positive.
  */
 @Component
 public class PaymentProvider {
@@ -18,6 +19,9 @@ public class PaymentProvider {
     private final Map<String, BigDecimal> refunds = new ConcurrentHashMap<>();
 
     public String charge(String idempotencyKey, BigDecimal amount) {
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("payment declined: amount " + amount + " is not positive");
+        }
         String paymentId = paymentsByKey.computeIfAbsent(idempotencyKey, key -> "payment-" + key);
         charges.putIfAbsent(paymentId, amount);
         return paymentId;

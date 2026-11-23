@@ -50,7 +50,7 @@ public record InstanceView(SagaInstance stored, Map<String, Object> context) {
 
     /**
      * The recorded failure: the instance's own ({@code FAILED}), else a failed compensation's
-     * ({@code REQUIRES_INTERVENTION}), else the failure that triggered compensation ({@code FINAL}/{@code EXHAUSTED}).
+     * ({@code COMPENSATION_FAILED}), else the failure that triggered compensation ({@code FINAL}/{@code EXHAUSTED}).
      */
     public Optional<SagaFailure> failure() {
         if (stored.failure() != null) {

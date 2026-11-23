@@ -10,6 +10,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.Reserv
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ShipmentService;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ThreeStepSaga;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ThreeStepSagaProbe;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.runtime.support.DifferentialRun;
 import io.github.gkosharovdev.sagaforge.runtime.support.DifferentialRun.Fixtures;
@@ -78,6 +79,8 @@ class ThreeStepSagaDifferentialTest {
         assertThat(run.engine().contexts().values()).singleElement()
                 .satisfies(values -> assertThat(values).containsEntry(ThreeStepSaga.CONTEXT_AMOUNT, 250L));
         assertThat(run.engine().dispatched()).isEmpty();
+        assertThat(run.engineOutcomes()).singleElement().isInstanceOfSatisfying(SagaCompleted.class,
+                completed -> assertThat(completed.outcomeStep()).isEqualTo(ThreeStepSaga.END_STEP));
     }
 
     @Test

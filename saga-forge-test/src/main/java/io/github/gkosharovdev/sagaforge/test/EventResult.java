@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
@@ -23,10 +24,11 @@ public final class EventResult {
     private final List<InstanceView> touched;
     private final List<RuntimeException> outboxFailures;
     private final List<FixtureLogger.Logged> logged;
+    private final List<SagaOutcome> outcomeEvents;
 
     EventResult(Object event, List<HandlingReport> reports, List<RecordedCommand> commands,
             List<RecordedCommand> allAttempts, Map<String, InstanceView> before, List<InstanceView> touched,
-            List<RuntimeException> outboxFailures, List<FixtureLogger.Logged> logged) {
+            List<RuntimeException> outboxFailures, List<FixtureLogger.Logged> logged, List<SagaOutcome> outcomeEvents) {
         this.event = event;
         this.reports = List.copyOf(reports);
         this.commands = List.copyOf(commands);
@@ -35,6 +37,7 @@ public final class EventResult {
         this.touched = List.copyOf(touched);
         this.outboxFailures = List.copyOf(outboxFailures);
         this.logged = List.copyOf(logged);
+        this.outcomeEvents = List.copyOf(outcomeEvents);
     }
 
     /** The published event. */
@@ -76,6 +79,15 @@ public final class EventResult {
     /** {@code sagaId}'s instance as it was before the event, if it existed. */
     public Optional<InstanceView> before(String sagaId) {
         return Optional.ofNullable(before.get(sagaId));
+    }
+
+    /**
+     * The outcome events ({@code SagaCompleted}, {@code SagaFailed}, {@code SagaCompensated}) committed while the event
+     * and its consequences were handled, in commit order; empty when the fixture was built with
+     * {@code outcomeEvents(false)} ({@code specs/011-saga-outcome-events}).
+     */
+    public List<SagaOutcome> outcomeEvents() {
+        return outcomeEvents;
     }
 
     /** Exceptions of outbox commands whose delivery failed; a transport would redeliver them, the fixture does not. */

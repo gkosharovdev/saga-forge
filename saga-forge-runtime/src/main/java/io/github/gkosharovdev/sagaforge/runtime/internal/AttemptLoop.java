@@ -9,15 +9,15 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.InstanceLocks.Lease;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.AttemptResult;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Collaborators;
 import io.github.gkosharovdev.sagaforge.runtime.internal.CompensationRun.Summary;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Committed;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Compensating;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Failed;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Finished;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Resume;
-import io.github.gkosharovdev.sagaforge.runtime.internal.SagaUnitOfWork.Trigger;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.AttemptResult;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Committed;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Compensating;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Failed;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Finished;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Resume;
+import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Trigger;
+import io.github.gkosharovdev.sagaforge.runtime.internal.UnitOfWork.Collaborators;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,20 +27,22 @@ import java.util.function.Supplier;
  * Runs the attempts of one event for one saga instance (005 contracts/attempt-loop.md).
  *
  * <p>Holds the instance's in-process lock for the whole sequence, so one unit of work per instance still holds
- * (004 FR-025). Each attempt is a new {@link SagaUnitOfWork} re-running the triggering event from the start. After a
- * failed attempt the failure is classified with the failing step's {@code @RetryPolicy} ({@link FailureClassifier}):
- * a {@code TRANSIENT} failure with attempts left claims the next attempt ({@link AttemptWrite}), waits the policy's
- * backoff and runs it; any other outcome is written {@code FAILED} ({@link FailedWrite}), a {@code TRANSIENT} failure
+ * (004 FR-025). Each attempt is a new unit of work running {@link RunSteps}, re-running the triggering event from the
+ * start. After a failed attempt the failure is classified with the failing step's {@code @RetryPolicy}
+ * ({@link FailureClassifier}): a {@code TRANSIENT} failure with attempts left claims the next attempt
+ * ({@link ClaimAttempt}), waits the policy's backoff and runs it; any other outcome is written {@code FAILED}
+ * ({@link RecordFailure}), a {@code TRANSIENT} failure
  * on the last attempt as {@code EXHAUSTED}. A redelivery that finds a retry claimed by an earlier call claims the next
  * attempt before running it, or writes {@code FAILED} {@code EXHAUSTED} if none is left. An interrupted wait returns
  * {@code NOT_HANDLED} with the claimed attempt left recorded.</p>
  *
- * <p>The lock is released before the {@code AFTER_COMMIT} outbox of a committed attempt, and after the
- * {@code FAILED} write otherwise.</p>
+ * <p>The lock is released before the {@code AFTER_COMMIT} outbox of a committed attempt and of the {@code FAILED}
+ * write (011: it carries the {@code SagaFailed} outcome event, and its outbox failures are reported in the
+ * {@code FAILED} result).</p>
  *
  * <p>Since 006 a committed attempt that started compensation, an attempt that found the instance already
  * {@code COMPENSATING}, and a {@code FINAL} or {@code EXHAUSTED} failure after a step committed
- * ({@link CompensationStartWrite} instead of {@code FailedWrite}) continue with {@link CompensationRun} under the same
+ * ({@link StartCompensation} instead of {@code RecordFailure}) continue with {@link CompensationRun} under the same
  * lock; the lock is released after the
  * run's last write and every committed unit of work's {@code AFTER_COMMIT} outbox then runs in commit order
  * (specs/006-saga-compensation contracts/compensation-run.md).</p>
@@ -102,8 +104,8 @@ final class AttemptLoop {
                                 settings.sources().now(), FailureClassification.TRANSIENT, failed.attempt());
                         int next = failed.attempt() + 1;
                         PendingRetry claim = new PendingRetry(trigger.step().name(), next, transientFailure);
-                        if (!new AttemptWrite(trigger.saga(), settings, with.diagnostics())
-                                .attemptFailed(failed.correlation(), claim, failed.cause())) {
+                        if (!ClaimAttempt.afterFailure(with, trigger.saga(), failed.correlation(), claim,
+                                failed.cause())) {
                             return failedWrite(trigger, failed, classification, instanceLease);
                         }
                         long wait = Backoff.waitBefore(policy, next);
@@ -131,7 +133,7 @@ final class AttemptLoop {
             return null;
         }
         PendingRetry claim = new PendingRetry(claimed.triggerStep(), next, claimed.lastFailure());
-        if (!new AttemptWrite(trigger.saga(), settings, with.diagnostics()).claim(resume.correlation(), claim)) {
+        if (!ClaimAttempt.onResume(with, trigger.saga(), resume.correlation(), claim)) {
             return null;
         }
         return next;
@@ -167,15 +169,18 @@ final class AttemptLoop {
         boolean compensable = failure.classification() == FailureClassification.FINAL
                 || failure.classification() == FailureClassification.EXHAUSTED;
         if (!compensable) {
-            return new FailedWrite(trigger.saga(), settings, with.diagnostics())
-                    .record(about, failure, cause, trigger.started());
+            return RecordFailure.record(with, trigger.saga(), about, failure, cause, trigger.started())
+                    .report(instanceLease);
         }
-        java.util.Optional<SagaHandlingResult> notStarted = new CompensationStartWrite(trigger.saga(), settings,
-                with.diagnostics()).record(about, failure, cause, trigger.started());
+        List<Supplier<List<Throwable>>> startOutbox = new ArrayList<>();
+        java.util.Optional<RecordFailure.Written> notStarted = StartCompensation.record(with, trigger.saga(), about,
+                failure, cause, trigger.started(), startOutbox);
         if (notStarted.isPresent()) {
-            return notStarted.get();
+            return notStarted.get().report(instanceLease);
         }
-        return compensate(trigger, instanceLease, about.inUnitOfWork(null), null, about.unitOfWorkId());
+        Supplier<List<Throwable>> triggerOutbox = () -> startOutbox.stream()
+                .flatMap(outbox -> outbox.get().stream()).toList();
+        return compensate(trigger, instanceLease, about.inUnitOfWork(null), triggerOutbox, about.unitOfWorkId());
     }
 
     /**
@@ -217,7 +222,7 @@ final class AttemptLoop {
                     .set(SagaInstrumentation.ATTEMPT_NUMBER, (long) attempt);
             AttemptResult result;
             try {
-                result = new SagaUnitOfWork(trigger, with, attempt, firstOfCall).run();
+                result = RunSteps.attempt(with, trigger, attempt, firstOfCall);
             } catch (RuntimeException | Error failure) {
                 span.fail(failure);
                 throw failure;

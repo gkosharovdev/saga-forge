@@ -59,18 +59,18 @@ class CompensationFailureTest {
     }
 
     @Test
-    @DisplayName("4.1 C compensated, B fails: A is not compensated and the saga requires intervention")
+    @DisplayName("4.1 C compensated, B fails: A is not compensated and the saga ends COMPENSATION_FAILED")
     void failedCompensationStopsUnwinding() {
         UnwindFixture fixture = threeCommitted();
         fixture.journal().failOn("undoB", new RefundRefused());
 
         SagaHandlingResult result = fixture.receive(new Aborted("o-1"));
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.REQUIRES_INTERVENTION);
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
         assertThat(result.failure()).isNull();
         assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
         SagaInstance instance = fixture.committed(result.sagaId());
-        assertThat(instance.status()).isEqualTo(SagaStatus.REQUIRES_INTERVENTION);
+        assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
         assertThat(instance.steps().get(UnwindSaga.C).compensation().status())
                 .isEqualTo(CompensationStatus.COMPENSATED);
         StepCompensation failed = instance.steps().get(UnwindSaga.B).compensation();
@@ -83,8 +83,10 @@ class CompensationFailureTest {
         assertThat(fixture.logger().byEvent("saga.compensation.failed")).hasSize(1);
         assertThat(fixture.storage().history(result.sagaId()).stream().map(stored -> stored.entry().kind())
                 .toList()).endsWith(SagaLifecycleEventKind.COMPENSATION_STARTED,
-                        SagaLifecycleEventKind.STEP_COMPENSATED, SagaLifecycleEventKind.COMPENSATION_FAILED,
-                        SagaLifecycleEventKind.REQUIRES_INTERVENTION);
+                        SagaLifecycleEventKind.STEP_COMPENSATED, SagaLifecycleEventKind.COMPENSATION_FAILED);
+        // 011: COMPENSATION_FAILED is the one terminal entry.
+        assertThat(fixture.storage().history(result.sagaId()).stream()
+                .filter(stored -> stored.entry().kind() == SagaLifecycleEventKind.COMPENSATION_FAILED)).hasSize(1);
     }
 
     @Test
@@ -116,7 +118,7 @@ class CompensationFailureTest {
 
         SagaHandlingResult result = fixture.reject("o-1", "no capacity");
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.REQUIRES_INTERVENTION);
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
         assertThat(fixture.committed(sagaId).steps().get(DeliverySaga.CHARGED).compensation().failure().causeType())
                 .isEqualTo(RefundRefused.class.getName());
     }
@@ -130,7 +132,7 @@ class CompensationFailureTest {
 
         SagaHandlingResult result = fixture.reject("o-1", "no capacity");
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.REQUIRES_INTERVENTION);
+        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
         assertThat(fixture.payments().refundIds()).hasSize(1);
         assertThat(fixture.pause().waits()).isEmpty();
         StepCompensation failed = fixture.committed(sagaId).steps().get(DeliverySaga.CHARGED).compensation();
@@ -152,7 +154,7 @@ class CompensationFailureTest {
     }
 
     @Test
-    @DisplayName("a later event for an instance that requires intervention is UNEXPECTED and runs nothing")
+    @DisplayName("a later event for a COMPENSATION_FAILED instance is UNEXPECTED and runs nothing")
     void noLaterRetry() {
         UnwindFixture fixture = threeCommitted();
         fixture.journal().failOn("undoB", new RefundRefused());
@@ -163,6 +165,6 @@ class CompensationFailureTest {
 
         assertThat(later.outcome()).isEqualTo(HandlingOutcome.UNEXPECTED);
         assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.REQUIRES_INTERVENTION);
+        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
     }
 }

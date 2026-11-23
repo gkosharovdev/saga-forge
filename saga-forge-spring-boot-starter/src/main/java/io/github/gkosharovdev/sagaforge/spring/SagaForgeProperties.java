@@ -32,6 +32,8 @@ public class SagaForgeProperties {
 
     private final Telemetry telemetry = new Telemetry();
 
+    private final OutcomeEvents outcomeEvents = new OutcomeEvents();
+
     /**
      * Checks values the binder cannot check itself.
      *
@@ -83,6 +85,25 @@ public class SagaForgeProperties {
 
     public Telemetry getTelemetry() {
         return telemetry;
+    }
+
+    public OutcomeEvents getOutcomeEvents() {
+        return outcomeEvents;
+    }
+
+    /** {@code saga-forge.outcome-events.*}: the events announcing how a saga ended (specs/011-saga-outcome-events). */
+    public static class OutcomeEvents {
+
+        /** Whether a saga reaching a terminal status records an outcome event (SagaCompleted, SagaFailed, SagaCompensated). */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
     }
 
     /** {@code saga-forge.storage.*}. */

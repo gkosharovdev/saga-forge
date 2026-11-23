@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -104,7 +105,7 @@ class OutboxCommittedTest {
     }
 
     @Test
-    @DisplayName("no notification after a rollback")
+    @DisplayName("no notification after a rollback; only the FAILED write's outcome batch is notified")
     void notNotifiedOnRollback() {
         CapturingOutbox capturing = CapturingOutbox.inTransaction(boundary);
         capturing.failNext(new IllegalStateException("outbox insert failed"));
@@ -113,7 +114,10 @@ class OutboxCommittedTest {
                 .get(0);
 
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(capturing.notified()).isEmpty();
+        assertThat(capturing.notified()).singleElement().satisfies(batch -> {
+            assertThat(batch.unitOfWorkId()).isEqualTo(result.unitOfWorkId());
+            assertThat(batch.events()).singleElement().isInstanceOf(SagaFailed.class);
+        });
     }
 
     @Test

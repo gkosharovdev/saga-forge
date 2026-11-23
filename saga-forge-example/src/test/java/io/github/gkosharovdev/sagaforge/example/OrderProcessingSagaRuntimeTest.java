@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -95,7 +96,9 @@ class OrderProcessingSagaRuntimeTest {
                 .containsExactly(AggregateReference.of(Order.class, ORDER));
         assertThat(instance.steps().get("completeOrder").touchedAggregates()).isEmpty();
         assertThat(orders.load(ORDER).status()).isEqualTo(Order.Status.COMPLETED);
-        assertThat(transport.dispatched()).isEmpty();
+        // The completing unit of work hands on its outcome event and nothing else.
+        assertThat(transport.dispatched()).singleElement().isInstanceOfSatisfying(SagaCompleted.class,
+                completed -> assertThat(completed.outcomeStep()).isEqualTo("completeOrder"));
 
         List<SagaLifecycleEntry> history = storage.history(result.sagaId()).stream().map(StoredEntry::entry).toList();
         assertThat(history).extracting(SagaLifecycleEntry::kind).containsExactly(SagaLifecycleEventKind.CREATED,
@@ -131,8 +134,13 @@ class OrderProcessingSagaRuntimeTest {
 
         engine.eventPublisher().publish(new OrderCreatedEvent(ORDER, AMOUNT));
 
-        assertThat(transport.dispatched()).containsExactly(new OrderCreatedEvent(ORDER, AMOUNT));
-        SagaHandlingResult result = onlyResult(transport.reports().get(0));
+        assertThat(transport.dispatched()).hasSize(2).first().isEqualTo(new OrderCreatedEvent(ORDER, AMOUNT));
+        // The saga's outcome event follows; looped back, it reaches no saga. Its delivery returns first, nested
+        // inside the order's.
+        assertThat(transport.dispatched().get(1)).isInstanceOf(SagaCompleted.class);
+        assertThat(transport.reports()).hasSize(2);
+        assertThat(transport.reports().get(0).results()).isEmpty();
+        SagaHandlingResult result = onlyResult(transport.reports().get(1));
         assertThat(result.started()).isTrue();
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
         assertThat(storage.committed().all()).singleElement()

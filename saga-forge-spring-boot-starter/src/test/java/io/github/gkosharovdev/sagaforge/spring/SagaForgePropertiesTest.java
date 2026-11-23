@@ -30,6 +30,7 @@ class SagaForgePropertiesTest {
             assertThat(properties.getStorage().getPostgres().getInitializeSchema()).isEqualTo(SchemaInitialization.NEVER);
             assertThat(properties.getRuntime().getMaxTotalRetryBackoff()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.getApplicationEvents().getMode()).isEqualTo(ApplicationEventsMode.IN_TRANSACTION);
+            assertThat(properties.getOutcomeEvents().isEnabled()).isTrue();
         });
     }
 
@@ -38,7 +39,8 @@ class SagaForgePropertiesTest {
     void binding() {
         runner.withPropertyValues("saga-forge.enabled=false", "saga-forge.scan-packages=com.example.a,com.example.b",
                 "saga-forge.storage.type=postgres", "saga-forge.storage.postgres.initialize-schema=always",
-                "saga-forge.runtime.max-total-retry-backoff=2m", "saga-forge.application-events.mode=after-delivery")
+                "saga-forge.runtime.max-total-retry-backoff=2m", "saga-forge.application-events.mode=after-delivery",
+                "saga-forge.outcome-events.enabled=false")
                 .run(context -> {
                     SagaForgeProperties properties = context.getBean(SagaForgeProperties.class);
                     assertThat(properties.isEnabled()).isFalse();
@@ -49,6 +51,7 @@ class SagaForgePropertiesTest {
                     assertThat(properties.getRuntime().getMaxTotalRetryBackoff()).isEqualTo(Duration.ofMinutes(2));
                     assertThat(properties.getApplicationEvents().getMode())
                             .isEqualTo(ApplicationEventsMode.AFTER_DELIVERY);
+                    assertThat(properties.getOutcomeEvents().isEnabled()).isFalse();
                 });
     }
 

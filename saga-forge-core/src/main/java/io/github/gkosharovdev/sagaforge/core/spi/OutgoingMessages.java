@@ -17,13 +17,14 @@ import java.util.List;
  *                     unit of work is saga-scoped
  * @param sagaId       the owning instance; non-null if and only if the unit of work is saga-scoped
  * @param events       the events, in recording order; non-null, no {@code null} element; an unmodifiable defensive
- *                     copy
+ *                     copy. Its last element may be an outcome event ({@code core.outcome.SagaOutcome}, since
+ *                     {@code specs/011-saga-outcome-events}) when the unit of work ended the instance
  * @param commands     the outbox commands, in send order; non-null, no {@code null} element; an unmodifiable
  *                     defensive copy
  * @param recordedEvents every event recorded in the unit of work, in recording order, including events a step of the
  *                     owning instance ran in process; a superset of {@code events} (since
  *                     {@code specs/008-spring-boot-starter}); non-null, no {@code null} element; an unmodifiable
- *                     defensive copy
+ *                     defensive copy. Ends with the same outcome event as {@code events}, if there is one
  */
 public record OutgoingMessages(String unitOfWorkId, String sagaType, String sagaId, List<Object> events,
         List<OutgoingCommand> commands, List<Object> recordedEvents) {

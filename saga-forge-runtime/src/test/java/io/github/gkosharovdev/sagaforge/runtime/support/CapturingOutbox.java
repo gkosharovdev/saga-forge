@@ -1,9 +1,11 @@
 package io.github.gkosharovdev.sagaforge.runtime.support;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary.Scope;
@@ -24,6 +26,8 @@ import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBound
  *       {@code ImmediateDispatchOutbox} over a looping-back transport.</li>
  *   <li>{@link #notified()} lists the batches the engine passed to {@link #committed(OutgoingMessages)} after
  *       commit (007), and {@link #failNextNotification(RuntimeException)} makes the next such call throw.</li>
+ *   <li>{@link #withoutOutcomes(List)} strips the outcome events (011) from batches, and {@link #outcomes()} lists the
+ *       outcome events of the surviving batches, for tests about the domain events of a batch.</li>
  *   <li>{@link #supportingCommands()} makes {@link #supportsCommands()} report {@code true} (007).</li>
  * </ul>
  *
@@ -160,6 +164,37 @@ public final class CapturingOutbox implements Outbox {
     /** @return the batches that survived (see the class description), in order; unmodifiable */
     public List<OutgoingMessages> committed() {
         return List.copyOf(committed);
+    }
+
+    /** @return the outcome events (011) of {@link #committed()}, in commit order; unmodifiable */
+    public List<SagaOutcome> outcomes() {
+        return committed.stream().flatMap(batch -> batch.events().stream())
+                .filter(SagaOutcome.class::isInstance).map(SagaOutcome.class::cast).toList();
+    }
+
+    /** @return {@link #committed()} without outcome events, dropping batches left empty; unmodifiable */
+    public List<OutgoingMessages> committedWithoutOutcomes() {
+        return withoutOutcomes(committed);
+    }
+
+    /**
+     * @param batches batches as an outbox received them
+     * @return the batches without their outcome events (011), dropping a batch left with no events, commands or
+     *         recorded events; unmodifiable
+     */
+    public static List<OutgoingMessages> withoutOutcomes(List<OutgoingMessages> batches) {
+        return batches.stream().flatMap(batch -> withoutOutcomes(batch).stream()).toList();
+    }
+
+    private static Optional<OutgoingMessages> withoutOutcomes(OutgoingMessages batch) {
+        List<Object> events = batch.events().stream().filter(event -> !(event instanceof SagaOutcome)).toList();
+        List<Object> recorded = batch.recordedEvents().stream().filter(event -> !(event instanceof SagaOutcome))
+                .toList();
+        if (events.isEmpty() && batch.commands().isEmpty() && recorded.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new OutgoingMessages(batch.unitOfWorkId(), batch.sagaType(), batch.sagaId(),
+                events, batch.commands(), recorded));
     }
 
     /**

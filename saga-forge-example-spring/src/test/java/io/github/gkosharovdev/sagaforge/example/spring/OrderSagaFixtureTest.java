@@ -1,5 +1,8 @@
 package io.github.gkosharovdev.sagaforge.example.spring;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
@@ -33,7 +36,8 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-1", amount))
                 .expectCommands(new ProcessPaymentCommand("o-1", amount), new ReserveStockCommand("o-1"))
                 .expectContext("orderAmount", "25.00")
-                .expectEndedWith("completeOrder");
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder"));
 
         assertThat(fixture.aggregate(Order.class, "o-1").orElseThrow().status()).isEqualTo(Order.Status.COMPLETED);
         assertThat(provider.charges()).containsValue(amount);
@@ -46,8 +50,20 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-2", new BigDecimal("9.50")))
                 .expectCompensations("compensatePayment")
                 .expectCompensatedAfter("rejectOrder")
-                .expectStatus(SagaStatus.COMPENSATED);
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class,
+                        compensated -> compensated.trigger().stepName().equals("rejectOrder"));
 
         assertThat(provider.refunds()).containsValue(new BigDecimal("9.50"));
+    }
+
+    @Test
+    @DisplayName("a declined payment fails the saga and announces SagaFailed")
+    void declined() {
+        fixture.givenAggregates(Order.create("o-3", true))
+                .when(new OrderCreatedEvent("o-3", new BigDecimal("-1.00")))
+                .expectStatus(SagaStatus.FAILED)
+                .expectOutcomeEvent(SagaFailed.class, failed -> failed.failedStep().equals("handleOrderCreated")
+                        && failed.causeType().equals(IllegalArgumentException.class.getName()));
     }
 }

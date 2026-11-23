@@ -181,6 +181,7 @@ them off with `management.endpoint.sagaforge.enabled=false` and `management.heal
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
+| `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
 | `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |

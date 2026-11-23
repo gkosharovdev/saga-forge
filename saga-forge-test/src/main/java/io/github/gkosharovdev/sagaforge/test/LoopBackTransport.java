@@ -12,6 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 
 /**
@@ -19,6 +20,9 @@ import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
  * work committed, and a dispatcher; what they hand off waits in one queue that {@link #drain} delivers on the test
  * thread, in order, events to the runtime and outbox commands to its {@code CommandReceiver}, until nothing is left.
  * Delivery is exactly once and synchronous; no lease, redelivery or ordering across aggregates is simulated.
+ *
+ * <p>Outcome events ({@code specs/011-saga-outcome-events}) of committed batches are collected for
+ * {@link EventResult#outcomeEvents()} instead of being queued: the runtime hands them to no saga.</p>
  */
 final class LoopBackTransport implements EventDispatcher, Outbox {
 
@@ -27,6 +31,7 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
 
     private final Deque<Object> queue = new ArrayDeque<>();
     private final List<OutgoingMessages> staged = new ArrayList<>();
+    private final List<SagaOutcome> outcomes = new ArrayList<>();
 
     @Override
     public synchronized void dispatch(Object domainEvent) {
@@ -61,9 +66,22 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     @Override
     public synchronized void committed(OutgoingMessages batch) {
         if (staged.remove(batch)) {
-            queue.addAll(batch.events());
+            for (Object event : batch.events()) {
+                if (event instanceof SagaOutcome outcome) {
+                    outcomes.add(outcome);
+                } else {
+                    queue.add(event);
+                }
+            }
             queue.addAll(batch.commands());
         }
+    }
+
+    /** @return the outcome events committed since the last call, in commit order */
+    synchronized List<SagaOutcome> takeOutcomes() {
+        List<SagaOutcome> taken = List.copyOf(outcomes);
+        outcomes.clear();
+        return taken;
     }
 
     /**

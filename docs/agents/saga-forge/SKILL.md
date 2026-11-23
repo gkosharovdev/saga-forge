@@ -92,7 +92,11 @@ public class OrderProcessingSaga {
   `CompensationTrigger`.
 - Retry with `@SagaStep(retry = @RetryPolicy(...))` and mark retryable exceptions `implements TransientFailure` (or list
   them in `retryOn`); mark "do not retry, compensate" exceptions `implements FinalFailure`. Keep total backoff under
-  30 s.
+  30 s. A `FinalFailure` compensates only if an earlier unit of work of the instance committed; in the start step, or
+  anywhere in a chain of steps that runs in one unit of work, the saga ends `FAILED` with nothing to undo.
+- React to how a saga ended by listening for its outcome event (`core.outcome`): `SagaCompleted`, `SagaFailed`
+  (`phase()` `STEP` or `COMPENSATION`) or `SagaCompensated`, with `@TransactionalEventListener` or
+  `@ApplicationModuleListener`. Deduplicate on `eventId()` (`sagaId:STATUS`); delivery is at least once.
 - Use `@Command(delivery = CommandDelivery.OUTBOX)` when the handler must run after the sending step commits and its
   failure must not roll the step back.
 - With the starter, a saga that needs collaborators is a `@Scope("prototype")` bean; handler hosts are beans.
@@ -116,6 +120,10 @@ public class OrderProcessingSaga {
 - Don't expect one event that continues a saga to also start a different saga type; record a separate event.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.
+- Don't write a saga step that takes `SagaCompleted`, `SagaFailed` or `SagaCompensated`: they are not domain events and
+  reach no saga. Start follow-up work from a listener.
+- Don't look for `REQUIRES_INTERVENTION`: a failed compensation ends `COMPENSATION_FAILED` (existing Postgres
+  databases apply `schema-upgrade-011.sql`).
 
 ## When startup fails
 

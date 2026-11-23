@@ -22,6 +22,7 @@ import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.spring.StarterPostgres;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.ModulithApp;
+import io.github.gkosharovdev.sagaforge.spring.modulith.app.notifications.OutcomeNotifier;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.notifications.PaymentNotifier;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.orders.OrderPlaced;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.orders.PaymentSaga;
@@ -88,6 +89,24 @@ class ModuleListenerContainerTest {
         assertThat(context.getBean(PaymentNotifier.class).notified()).isEmpty();
         assertThat(jdbc().queryForList("SELECT listener_id FROM event_publication WHERE listener_id LIKE"
                 + " '%PaymentNotifier%'", String.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("011 C4: a failed saga's SagaFailed reaches a module listener and a transactional listener once each")
+    void failedSagaReachesListeners() throws InterruptedException {
+        OutcomeNotifier notifier = context.getBean(OutcomeNotifier.class);
+        place("m-4", "5");
+        await(() -> "COMPLETED".equals(status(PaymentSaga.class)), "the saga to complete");
+        assertThat(notifier.moduleListener()).isEmpty();
+
+        place("m-5", "-1");
+
+        await(() -> notifier.moduleListener().size() == 1, "the module listener");
+        Thread.sleep(300);
+        assertThat(notifier.moduleListener()).singleElement().asString().endsWith(":FAILED");
+        assertThat(notifier.transactionalListener()).isEqualTo(notifier.moduleListener());
+        assertThat(jdbc().queryForList("SELECT listener_id FROM event_publication WHERE listener_id LIKE"
+                + " '%OutcomeNotifier%' AND completion_date IS NULL", String.class)).isEmpty();
     }
 
     @Test

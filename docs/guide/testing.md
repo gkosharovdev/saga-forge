@@ -33,7 +33,8 @@ class OrderProcessingSagaFixtureTest {
                 .expectCommands(new ReserveStockCommand("o-1"))
                 .expectContext("paymentId", "payment-1")
                 .expectCompletedStep("processPayment")
-                .expectStatus(SagaStatus.RUNNING);
+                .expectStatus(SagaStatus.RUNNING)
+                .expectNoOutcomeEvent();
     }
 
     @Test
@@ -44,7 +45,10 @@ class OrderProcessingSagaFixtureTest {
                 .when(new StockUnavailableEvent("o-2"))
                 .expectCompensations("compensatePayment")
                 .expectCommands(new RefundPaymentCommand("saga-1", "payment-2", AMOUNT))
-                .expectCompensatedAfter("rejectOrder");
+                .expectCompensatedAfter("rejectOrder")
+                .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                        compensated.trigger().kind() == CompensationTriggerKind.FAILURE_OUTCOME
+                                && compensated.trigger().stepName().equals("rejectOrder"));
     }
 }
 ```
@@ -74,7 +78,8 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-1", amount))
                 .expectCommands(new ProcessPaymentCommand("o-1", amount), new ReserveStockCommand("o-1"))
                 .expectContext("orderAmount", "25.00")
-                .expectEndedWith("completeOrder");
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder"));
 
         assertThat(fixture.aggregate(Order.class, "o-1").orElseThrow().status()).isEqualTo(Order.Status.COMPLETED);
         assertThat(provider.charges()).containsValue(amount);
@@ -87,7 +92,9 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-2", new BigDecimal("9.50")))
                 .expectCompensations("compensatePayment")
                 .expectCompensatedAfter("rejectOrder")
-                .expectStatus(SagaStatus.COMPENSATED);
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class,
+                        compensated -> compensated.trigger().stepName().equals("rejectOrder"));
 
         assertThat(provider.refunds()).containsValue(new BigDecimal("9.50"));
     }
@@ -146,8 +153,46 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 | `expectCompensations(String...)` | these compensations ran, in order |
 | `expectFailure(Class, FailureClassification)` | the recorded failure |
 | `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value or its absence |
+| `expectOutcomeEvent(Class, Predicate)` / `expectOutcomeEvent(Class)` / `expectNoOutcomeEvent()` | exactly one outcome event (`SagaCompleted`, `SagaFailed`, `SagaCompensated`) of that type matching / of that type / none |
 | `instance(Class, String)` | switch to the instance with that association value (several sagas reacting) |
 | `result()` | the `EventResult`, for your own assertions |
+
+## Outcome events
+
+When a saga ends, the runtime records one outcome event: `SagaCompleted`, `SagaFailed` or `SagaCompensated`. The
+fixture collects the ones the event under test caused; `expectOutcomeEvent` checks that exactly one was committed and
+that it matches, and `expectNoOutcomeEvent` that the saga is still running.
+
+```java
+    @Test
+    @DisplayName("completion: the order's completion ends the saga and announces SagaCompleted")
+    void completionIsAnnounced() {
+        SagaFixture.of(OrderProcessingSaga.class).build()
+                .given(new OrderCreatedEvent("o-4", AMOUNT), new PaymentProcessedEvent("payment-4", "o-4", AMOUNT))
+                .when(new OrderCompletedEvent("o-4"))
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder")
+                        && completed.associations().get("orderId").equals("o-4"));
+    }
+
+    @Test
+    @DisplayName("start-step failure: the payment keeps timing out, the saga fails and announces SagaFailed")
+    void startFailureIsAnnounced() {
+        PaymentProvider provider = new PaymentProvider();
+        provider.timeOutNext(10);
+        SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class).handlers(new PaymentService(provider)).build();
+
+        fixture.when(new OrderCreatedEvent("o-5", AMOUNT))
+                .expectStatus(SagaStatus.FAILED)
+                .expectOutcomeEvent(SagaFailed.class, failed -> failed.failedStep().equals("handleOrderCreated")
+                        && failed.classification() == FailureClassification.EXHAUSTED && failed.attempts() == 3);
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
+
+With a chosen `instance(...)`, only that instance's outcome event counts. `result().outcomeEvents()` lists them for
+your own assertions. Build the fixture with `outcomeEvents(false)` to match an application that switched them off.
 
 ## What the fixture catches before production
 
