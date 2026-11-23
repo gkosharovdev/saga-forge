@@ -328,6 +328,21 @@
   Saga, Step, Compensation — see `docs/architecture.md#vocabulary` for definitions.
 - Whenever you notice a gap, limitation or deferred decision, record it in `.specify/memory/memory.md` with an
   ID; don't silently fix or ignore it.
+- Favour composition over inheritance: reuse behaviour by holding and delegating to collaborators, not by
+  extending a concrete class. Inheritance is for types designed for it (sealed hierarchies, value variants); a
+  new class hierarchy needs a justification in `plan.md` (constitution, Development Workflow).
+- Test an abstraction before you propose it: a newly invented interface, SPI, abstract type or extension point
+  gets a concrete caller and a test against it (a test double or a second implementation) first. Don't put an
+  abstraction in `plan.md`, `tasks.md` or code that no test has exercised.
+- Favour intention-revealing abstractions and interfaces that the community already knows. When you map a
+  request to class design and an invocation chain, rate each proposed abstraction in the narrative by how
+  popular, and so how understandable, it is: established patterns, well-known libraries and frameworks, common
+  engineering vocabulary (Repository, Gateway, Outbox, Policy, Handler, Resolver). If an abstraction or its name
+  is too boutique, with no counterpart in known community code or common usage, avoid it and propose a
+  recognisable alternative.
+- Before class-level design (`/speckit-plan`'s data model and contracts) and before implementation
+  (`/speckit-implement`), propose loading the `effective-java`, `clean-code-java` and `solid-design-review`
+  skills, and apply them to the types you design.
 
 ## Consumer Documentation
 - `docs/guide/` is the user guide for applications that use Saga Forge (no spec numbers or gap ids in the prose,
