@@ -175,7 +175,9 @@
   `saga-forge-runtime` only (no Spring, storage or transport). Public API in `io.github.gkosharovdev.sagaforge.test`;
   its in-memory plug-ins are package-private there. See its `README.md`.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
-  whatever the annotation model currently supports.
+  whatever the annotation model currently supports. Package `example.checkout` holds the README's domain story,
+  `CheckoutSaga` and `FulfilmentSaga` (Inventory, Payments and Logistics as stand-in services), told in full in
+  `docs/use-cases.md` §1; saga-owned deadlines are added to it with 017 (G-DOC-04: two stories for now).
 - `saga-forge-example-spring` — the canonical saga as a Spring Boot application (Spring Data JDBC `Order`, service
   beans, no assembly code). Keep it in step with `saga-forge-example`; it keeps amounts as `String` in `SagaContext`
   (G-003-07).

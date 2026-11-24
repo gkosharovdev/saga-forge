@@ -288,7 +288,7 @@ then written as `FAILED` with a `SagaFailure` in a separate write. `SagaContext`
 exception: they are saved through `SagaContextStore` outside the saga transaction, so they survive the
 rollback.
 
-This is inherited directly from production experience in `docs/use-cases.md`: a step recorded as completed
+This comes from production experience: a step recorded as completed
 despite its business effect being rolled back is a worse failure mode than the step simply failing, because it
 silently breaks the saga's ability to resume or retry correctly.
 

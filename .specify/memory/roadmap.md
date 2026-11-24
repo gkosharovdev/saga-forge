@@ -267,6 +267,24 @@ durations may come from `SagaContext`.
 **Acceptance.** A saga whose deadline expires runs its timeout step once, after a restart in between. A deadline set
 before completion never fires after it. A retry waiting 10 minutes holds no thread.
 
+**Example to add with this spec.** Extend the checkout story in `saga-forge-example`
+(`io.github.gkosharovdev.sagaforge.example.checkout`, `docs/use-cases.md` §1, README) with
+saga-owned deadlines: a payment window in `CheckoutSaga` (the customer abandons a card challenge) and a
+courier-assignment deadline in `FulfilmentSaga`, each ending in a `@StartCompensation` timeout step, with fixture
+tests that advance `FixtureClock`. The example was written without deadlines on 2026-11-24 for this reason.
+
+**Input from the checkout story (2026-11-24)**, for the spec:
+1. One `DeadlineReached` event type allows one deadline step per saga (Property 11 allows one step per event type), and
+   the scanner rejects a step whose parameter is not a `@DomainEvent` (as in G-011-01). Checkout already needs two
+   deadlines: the step needs a name filter, or each deadline its own event type.
+2. Cancelling only when the instance ends is too late: "a courier within two hours" must stop once `CourierAssigned`
+   arrives, while the saga keeps waiting days for delivery. A deadline needs cancelling when the awaited step
+   completes (declared on the deadline, or by a later step).
+3. Durations from `SagaContext` are needed, not only from properties: the payment window and courier SLA vary per
+   order (express or standard).
+4. A deadline due while the instance is `COMPENSATING` must not start a second compensation; "never fires after
+   completion" should cover every non-`RUNNING` status.
+
 ### 018: Versioned schema migrations
 
 **Problem.** The Postgres module ships `schema.sql` plus `schema-upgrade-0NN.sql` for the host to apply. Flyway users
