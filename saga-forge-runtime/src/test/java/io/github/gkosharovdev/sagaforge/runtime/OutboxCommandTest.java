@@ -89,7 +89,8 @@ class OutboxCommandTest {
         SagaHandlingResult result = engine(outbox).receive(new InvoiceIssued("i-1", true, 0)).results().get(0);
 
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(outbox.received()).isEmpty();
+        // 011: the FAILED write stores its outcome event, and no command.
+        assertThat(CapturingOutbox.withoutOutcomes(outbox.received())).isEmpty();
         assertThat(cards.charged()).isEmpty();
     }
 

@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -62,8 +63,11 @@ class RecordedEventsTest {
                 .receive(new CaseOpened("case-1", AddNote.Mode.CLOSE_THEN_ESCALATE));
 
         assertThat(outbox.committed()).singleElement().satisfies(batch -> {
-            assertThat(batch.recordedEvents()).containsExactly(new CaseClosed("case-1"), new CaseEscalated("case-1"));
-            assertThat(batch.events()).containsExactly(new CaseEscalated("case-1"));
+            // 011: both lists end with the terminal unit of work's outcome event.
+            assertThat(batch.recordedEvents()).hasSize(3).startsWith(new CaseClosed("case-1"), new CaseEscalated("case-1"));
+            assertThat(batch.recordedEvents().get(2)).isInstanceOf(SagaCompleted.class);
+            assertThat(batch.events()).hasSize(2).startsWith(new CaseEscalated("case-1"));
+            assertThat(batch.events().get(1)).isSameAs(batch.recordedEvents().get(2));
         });
     }
 

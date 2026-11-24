@@ -9,6 +9,7 @@ and imports trimmed, code unchanged). Paths are relative to the repository root.
 - [3. Retry and idempotent handlers](#3-retry-and-idempotent-handlers)
 - [4. Outbox commands](#4-outbox-commands)
 - [5. Bounded-context modules in one Spring Boot monolith](#5-bounded-context-modules-in-one-spring-boot-monolith)
+- [6. Reacting to how a saga ended](#6-reacting-to-how-a-saga-ended)
 
 ## 1. Several aggregates in one saga-scoped unit of work
 
@@ -181,7 +182,7 @@ What starts compensation, and what does not:
 | A transient failure runs out of attempts (`EXHAUSTED`), after an earlier unit of work committed | compensate → `COMPENSATED` |
 | Any failure while nothing committed yet | nothing to undo → `FAILED` |
 | An unmarked exception (`UNCLASSIFIED`) | no compensation → `FAILED`, committed effects stay |
-| A compensation throws | never retried → `REQUIRES_INTERVENTION` |
+| A compensation throws | never retried → `COMPENSATION_FAILED` |
 
 A `FinalFailure` is a marker interface on your exception class:
 
@@ -505,3 +506,55 @@ Rules for this setup:
 - An event that continues a saga instance is not handed to a *different* saga type that also reacts to it; give the
   second saga an event of its own.
 - Run one application instance per database for now (see [Limitations](limitations.md)).
+
+## 6. Reacting to how a saga ended
+
+When a saga ends, the runtime records `SagaCompleted`, `SagaFailed` or `SagaCompensated` in the same unit of work as
+the terminal status ([Operations](operations.md#outcome-events)). A Spring listener that notes failed orders:
+
+```java
+@Component
+public class FailedOrders {
+
+    private final List<String> orderIds = new CopyOnWriteArrayList<>();
+
+    @TransactionalEventListener
+    public void on(SagaFailed failed) {
+        if (failed.sagaType().equals(OrderProcessingSaga.class.getName())) {
+            orderIds.add(failed.associations().get("orderId"));
+        }
+    }
+
+    /** @return the failed orders, in the order their failure committed */
+    public List<String> orderIds() {
+        return List.copyOf(orderIds);
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/FailedOrders.java`.
+
+`@TransactionalEventListener` runs after the unit of work that recorded the failure committed; in a Spring Modulith
+application `@ApplicationModuleListener` works the same way and retries through Modulith's registry. Testing the
+failure with the fixture, with the application's own payment service:
+
+```java
+@Test
+@DisplayName("a declined payment fails the saga and announces SagaFailed")
+void declined() {
+    fixture.givenAggregates(Order.create("o-3", true))
+            .when(new OrderCreatedEvent("o-3", new BigDecimal("-1.00")))
+            .expectStatus(SagaStatus.FAILED)
+            .expectOutcomeEvent(SagaFailed.class, failed -> failed.failedStep().equals("handleOrderCreated")
+                    && failed.causeType().equals(IllegalArgumentException.class.getName()));
+}```
+
+Source: `saga-forge-example-spring/src/test/java/io/github/gkosharovdev/sagaforge/example/spring/OrderSagaFixtureTest.java`.
+
+Rules:
+
+- An outcome event is not a domain event: a saga step cannot take one. Start follow-up work from a listener (publish a
+  domain event or send a command from there).
+- Delivery is at least once with the in-memory transport: deduplicate on `eventId()` (`sagaId:STATUS`) if acting twice
+  would hurt.
+- A rejected order is `COMPENSATED`, not `FAILED`; listen for `SagaCompensated` to react to it.

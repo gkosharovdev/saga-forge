@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
@@ -64,7 +64,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  *       the command its identity; a command whose identity already committed for the instance is not handled
  *       again ({@code saga.command.skipped}, 005 FR-004), and a handled one is recorded with the running step.</li>
  *   <li>Outside one (including a thread a handler started): validates the command, then runs the route in a new
- *       {@link NonSagaUnitOfWork} (FR-016).</li>
+ *       standalone unit of work running {@link HandleCommand} (FR-016).</li>
  * </ul>
  *
  * <h2>Interception ({@code specs/009-saga-test-fixture}, Property 36)</h2>
@@ -106,18 +106,18 @@ final class EngineCommandGateway implements CommandGateway {
     private final Map<Class<?>, CommandRoute> routes;
     private final TransactionBoundary transactions;
     private final boolean outboxStoresCommands;
-    private final Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork;
+    private final Consumer<Runnable> standaloneUnitsOfWork;
     private final Diagnostics diagnostics;
     private final CommandInterceptor interceptor;
     private final SagaInstrumentation instrumentation;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
-            boolean outboxStoresCommands, Supplier<NonSagaUnitOfWork> nonSagaUnitsOfWork, Diagnostics diagnostics,
+            boolean outboxStoresCommands, Consumer<Runnable> standaloneUnitsOfWork, Diagnostics diagnostics,
             CommandInterceptor interceptor, SagaInstrumentation instrumentation) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
         this.outboxStoresCommands = outboxStoresCommands;
-        this.nonSagaUnitsOfWork = nonSagaUnitsOfWork;
+        this.standaloneUnitsOfWork = standaloneUnitsOfWork;
         this.diagnostics = diagnostics;
         this.interceptor = interceptor;
         this.instrumentation = instrumentation;
@@ -150,23 +150,23 @@ final class EngineCommandGateway implements CommandGateway {
             factory.routesOf(host).forEach((commandType, route) -> addRoute(routes, commandType, route));
         }
         return new EngineCommandGateway(routes, settings.transactions(), settings.outbox().supportsCommands(),
-                () -> new NonSagaUnitOfWork(settings,
-                diagnostics, settings.sources().newUnitOfWorkId()), diagnostics, settings.commandInterceptor(),
+                handlerCall -> HandleCommand.run(settings, diagnostics, handlerCall), diagnostics,
+                settings.commandInterceptor(),
                 new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics));
     }
 
     @Override
     public void send(Object command) {
-        Optional<UnitOfWork> bound = UnitOfWork.bound();
+        Optional<BoundUnitOfWork> bound = BoundUnitOfWork.current();
         if (bound.isPresent()) {
             sendWithin(bound.get(), command);
             return;
         }
         requireCommand(command);
-        nonSagaUnitsOfWork.get().run(() -> send(command));
+        standaloneUnitsOfWork.accept(() -> send(command));
     }
 
-    private void sendWithin(UnitOfWork unitOfWork, Object command) {
+    private void sendWithin(BoundUnitOfWork unitOfWork, Object command) {
         try {
             requireCommand(command);
             CommandRoute route = routes.get(command.getClass());
@@ -214,12 +214,12 @@ final class EngineCommandGateway implements CommandGateway {
         }
         Object command = delivery.command();
         requireCommand(command);
-        if (UnitOfWork.bound().isPresent()) {
+        if (BoundUnitOfWork.current().isPresent()) {
             throw new IllegalStateException("CommandReceiver.receive was called inside a unit of work; a transport "
                     + "delivers outbox commands from its own threads");
         }
         CommandRoute route = routes.get(command.getClass());
-        nonSagaUnitsOfWork.get().run(() -> {
+        standaloneUnitsOfWork.accept(() -> {
             intercept(command, delivery.commandId(), route, "outbox");
             LocalTransaction transaction = transactions.current().orElseThrow(() -> new IllegalStateException(
                     "no transaction is active in the unit of work handling " + delivery.commandId()));

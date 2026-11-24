@@ -41,6 +41,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * @param commandInterceptor sees every command handling; {@link CommandInterceptor#proceeding()} by default
  * @param openTelemetry      where spans and metrics go; {@link OpenTelemetry#noop()} by default (010)
  * @param telemetry          what is recorded through {@code openTelemetry}
+ * @param outcomeEvents      whether terminal writes hand an outcome event to the outbox; {@code true} by default
+ *                           (specs/011-saga-outcome-events FR-016)
  */
 public record EngineSettings(
         StorageProvider storage,
@@ -57,7 +59,8 @@ public record EngineSettings(
         RetrySettings retry,
         CommandInterceptor commandInterceptor,
         OpenTelemetry openTelemetry,
-        SagaTelemetrySettings telemetry) {
+        SagaTelemetrySettings telemetry,
+        boolean outcomeEvents) {
 
     /**
      * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -78,6 +81,18 @@ public record EngineSettings(
         requireNonNull(telemetry, "telemetry");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
         parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
+    }
+
+    /** Settings with outcome events on (011). */
+    public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
+            EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
+            List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
+            Optional<SagaObjectProvider> sagaObjects, Outbox outbox, Outbox.Timing outboxTiming,
+            TimeAndIdentity sources, RetrySettings retry, CommandInterceptor commandInterceptor,
+            OpenTelemetry openTelemetry, SagaTelemetrySettings telemetry) {
+        this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
+                parameterResolvers, sagaObjects, outbox, outboxTiming, sources, retry, commandInterceptor,
+                openTelemetry, telemetry, true);
     }
 
     /** Settings without telemetry ({@link OpenTelemetry#noop()}). */

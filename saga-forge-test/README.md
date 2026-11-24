@@ -66,6 +66,9 @@ Every method returns the same `Then`, so calls chain.
 | `expectCompensatedAfter(String)` | `COMPENSATED`, with that step recorded as the trigger |
 | `expectFailure(Class, FailureClassification)` | the recorded failure: the instance's, a failed compensation's, or the one that triggered compensation |
 | `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value, or its absence |
+| `expectOutcomeEvent(Class<T>, Predicate<T>)` | exactly one outcome event was committed, of that type, matching |
+| `expectOutcomeEvent(Class<?>)` | exactly one outcome event was committed, of that type |
+| `expectNoOutcomeEvent()` | no outcome event was committed: no instance ended |
 | `instance(Class<?>, String)` | switches the subject to the instance with that association value |
 | `result()` | the `EventResult`, for your own assertions (AssertJ, Hamcrest, ...) |
 
@@ -81,6 +84,26 @@ OrderProcessingSaga[orderId=o-1] (saga-1), when PaymentProcessedEvent[paymentId=
   expected commands: [ReserveStockCommand[orderId=o-2]]
   dispatched:        [ReserveStockCommand[orderId=o-1]]
 ```
+
+Outcome events are the `SagaCompleted`, `SagaFailed` and `SagaCompensated` events the runtime records when a saga
+ends. `EventResult.outcomeEvents()` lists the ones the event under test caused; with a chosen instance, the outcome
+expectations look at that instance's only. `SagaFixture.Builder.outcomeEvents(false)` switches them off, like the
+runtime's builder:
+
+```java
+    @Test
+    @DisplayName("completion: the order's completion ends the saga and announces SagaCompleted")
+    void completionIsAnnounced() {
+        SagaFixture.of(OrderProcessingSaga.class).build()
+                .given(new OrderCreatedEvent("o-4", AMOUNT), new PaymentProcessedEvent("payment-4", "o-4", AMOUNT))
+                .when(new OrderCompletedEvent("o-4"))
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder")
+                        && completed.associations().get("orderId").equals("o-4"));
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
 
 An invalid saga fails `build()` with the runtime's `SagaRuntimeStartupException`, listing every model error.
 

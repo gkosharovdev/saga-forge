@@ -1,7 +1,20 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 → 1.0.1 (PATCH — clarification only; no principle semantics changed)
-Modified principles:
+Version change: 1.0.1 → 1.1.0 (MINOR — Development Workflow materially expanded)
+Modified principles: none
+Modified sections:
+  - Development Workflow — added three rules: composition over inheritance in class-level design (a class
+    hierarchy is justified in plan.md); every newly invented abstraction is exercised by a test before it
+    is proposed; abstractions are intention-revealing and rated for community familiarity, with boutique
+    ones replaced by a recognisable alternative.
+Added sections: none
+Removed sections: none
+Templates requiring updates: none (.specify/templates/* reference principles by number only)
+Dependent guidance updated: AGENTS.md "Agent Working Rules For This Repo" (same rules, plus loading the
+  effective-java, clean-code-java and solid-design-review skills before class-level design).
+Follow-up TODOs: none
+Previous report (1.0.1): PATCH — clarification only; no principle semantics changed.
+Modified principles (1.0.1):
   - II. Annotation-Driven, Declarative Style — annotation list extended with the annotations introduced by
     specs/002-transactional-step-sequence (`@Aggregate`, `@AggregateIdentifier`, `@CommandHandler`,
     `@AggregateLoader`, `@AggregateSaver`); principle wording unchanged.
@@ -97,6 +110,20 @@ explicit precedence order, contributors and agents will act on stale information
   convention retroactively.
 - Examples and docs that introduce or modify a saga MUST show `associationProperty` and the
   start/end lifecycle annotations, per `AGENTS.md`.
+- Class-level design favours composition over inheritance. A new type reuses behaviour by holding and
+  delegating to collaborators, not by extending a concrete class; inheritance is reserved for types
+  designed and documented for it (sealed hierarchies, value variants). A plan that introduces a class
+  hierarchy MUST justify it in `plan.md`.
+- A newly invented abstraction (interface, SPI, abstract type, extension point) MUST be exercised by a
+  test before it is proposed: at least one concrete use and a test against it (a test double or a second
+  implementation), so the abstraction's shape is proven by a caller rather than assumed. An abstraction
+  with no test-backed caller is not proposed in `plan.md`, `tasks.md` or code.
+- Abstractions and interfaces MUST be intention-revealing and recognisable to the community. When a
+  request is mapped to class design and an invocation chain, the plan rates each proposed abstraction's
+  name and shape by how widely it is known (established patterns, well-known libraries and frameworks,
+  common engineering vocabulary such as Repository, Gateway, Outbox, Policy, Handler, Resolver), since a
+  familiar abstraction is an understandable one. A boutique abstraction or name that appears in no known
+  community codebase or common usage is avoided, and the plan proposes a recognisable alternative.
 
 ## Governance
 
@@ -113,4 +140,4 @@ All Speckit-driven work (`/speckit-plan`, `/speckit-implement`) MUST verify comp
 Principles above before merge. Complexity that violates Principle I or IV must be explicitly justified
 in the relevant `spec.md`/`plan.md` or rejected.
 
-**Version**: 1.0.1 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-03
+**Version**: 1.1.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-23

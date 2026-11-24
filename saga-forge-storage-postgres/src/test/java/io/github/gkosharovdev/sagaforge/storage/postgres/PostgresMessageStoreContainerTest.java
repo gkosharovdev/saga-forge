@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,6 +23,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.outcome.OutcomeTrigger;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
@@ -71,6 +79,30 @@ class PostgresMessageStoreContainerTest extends MessageStoreContract {
 
     /** A payload with the value types events usually carry. */
     public record Rich(String id, BigDecimal amount, long count, boolean flag, List<String> tags, Instant at) {
+    }
+
+    @Test
+    @DisplayName("011 research §11: every outcome event kind round-trips through JSONB")
+    void outcomeEventRoundTrip() {
+        Instant at = Instant.parse("2026-11-20T10:00:00Z");
+        Map<String, String> associations = Map.of("orderId", "o-1");
+        OutcomeTrigger trigger = new OutcomeTrigger(CompensationTriggerKind.FINAL_FAILURE, "ship",
+                FailureClassification.FINAL, "com.example.Refused", 1, at);
+        List<Object> outcomes = List.of(
+                SagaCompleted.of("com.example.OrderSaga", "s-1", associations, at, "complete"),
+                SagaFailed.inStep("com.example.OrderSaga", "s-2", associations, at, "pay",
+                        FailureClassification.EXHAUSTED, "com.example.Busy", 3),
+                SagaFailed.inCompensation("com.example.OrderSaga", "s-3", associations, at, "pay",
+                        FailureClassification.UNCLASSIFIED, "java.lang.IllegalStateException", 1, trigger),
+                SagaCompensated.of("com.example.OrderSaga", "s-4", associations, at,
+                        new OutcomeTrigger(CompensationTriggerKind.FAILURE_OUTCOME, "reject", null, null, null, at)));
+        appendCommitted(outcomes.stream().map(SagaOutcome.class::cast).map(outcome -> new NewMessage(outcome.eventId(),
+                MessageKind.EVENT, outcome.getClass().getName(), outcome, null, "saga:" + outcome.sagaId(), null, null,
+                T0)).toArray(NewMessage[]::new));
+
+        List<StoredMessage> leased = log.lease("c", T0, LEASE, 10).readable();
+
+        assertThat(leased).extracting(StoredMessage::payload).containsExactlyElementsOf(outcomes);
     }
 
     @Test

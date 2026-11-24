@@ -130,7 +130,7 @@ for the claim that committed earlier and the saga ends `COMPENSATED`. If a step 
 rolls back. A transient failure (marked `TransientFailure` or listed in `retryOn`) is retried under the failing
 step's policy, re-running the whole unit of work. A final failure (marked `FinalFailure`) or running out of attempts
 compensates the steps that already committed; an unmarked failure ends the saga `FAILED`. A compensation that fails
-is never retried: the saga ends `REQUIRES_INTERVENTION`, and the stored instance shows what was and was not undone.
+is never retried: the saga ends `COMPENSATION_FAILED`, and the stored instance shows what was and was not undone.
 An event for a step that already completed is reported `DUPLICATE` and runs nothing. Loading and saving aggregates
 stays in your code, through `@AggregateLoader`/`@AggregateSaver` methods, or, in a Spring Boot application, goes
 through the aggregate's Spring Data repository.

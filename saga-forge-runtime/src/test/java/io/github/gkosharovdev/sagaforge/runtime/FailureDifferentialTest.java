@@ -15,6 +15,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.Reserv
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ShipmentService;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ThreeStepSaga;
 import io.github.gkosharovdev.sagaforge.core.execution.fixtures.inprocess.ThreeStepSagaProbe;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.runtime.support.DifferentialRun;
 import io.github.gkosharovdev.sagaforge.runtime.support.DifferentialRun.Fixtures;
@@ -132,6 +133,8 @@ class FailureDifferentialTest {
         assertThat(engine.contexts()).isEqualTo(harness.contexts());
         assertThat(engine.dispatched()).isEqualTo(harness.dispatched()).isEmpty();
         assertThat(engine.fixtureState()).isEqualTo(harness.fixtureState());
+        assertThat(run.engineOutcomes()).singleElement().isInstanceOfSatisfying(SagaFailed.class,
+                failed -> assertThat(failed.failedStep()).isEqualTo(engineInstance.failure().stepName()));
     }
 
     @ParameterizedTest(name = "{0} handler fails")

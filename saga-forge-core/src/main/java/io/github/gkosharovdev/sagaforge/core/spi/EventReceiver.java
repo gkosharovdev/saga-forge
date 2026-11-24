@@ -61,10 +61,14 @@ public interface EventReceiver {
     /**
      * Routes {@code domainEvent} to every saga type and instance that reacts to it and runs their units of work.
      *
+     * <p>An outcome event ({@link io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome}, 011) is accepted and
+     * reaches no saga: the report has no results, so a transport that delivers outcome events to every receiver
+     * treats it as consumed.</p>
+     *
      * @param domainEvent the domain event delivered by the transport; must not be {@code null}
      * @return the report of what happened, one result per affected saga type and instance; never {@code null}
-     * @throws IllegalArgumentException if {@code domainEvent} is {@code null}, not {@code @DomainEvent}-annotated,
-     *                                  or lacks an association value a reacting step needs
+     * @throws IllegalArgumentException if {@code domainEvent} is {@code null}, neither {@code @DomainEvent}-annotated
+     *                                  nor an outcome event, or lacks an association value a reacting step needs
      * @throws IllegalStateException    if the engine has not started, or a unit of work is running on this thread
      * @throws EventHandlingException   if no outcome could be recorded for at least one affected instance
      */

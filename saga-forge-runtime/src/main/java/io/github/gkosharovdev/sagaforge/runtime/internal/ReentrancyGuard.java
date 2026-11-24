@@ -62,7 +62,7 @@ final class ReentrancyGuard {
         IllegalStateException rejection = new IllegalStateException("EventReceiver.receive was called while a"
                 + " saga engine unit of work is running on thread " + Thread.currentThread().getName()
                 + "; deliver the event after the unit of work committed, for example from an AFTER_COMMIT outbox");
-        UnitOfWork.bound().ifPresent(unitOfWork -> unitOfWork.failed(rejection));
+        BoundUnitOfWork.current().ifPresent(unitOfWork -> unitOfWork.failed(rejection));
         throw rejection;
     }
 }

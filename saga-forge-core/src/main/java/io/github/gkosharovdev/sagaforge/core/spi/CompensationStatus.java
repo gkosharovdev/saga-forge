@@ -15,6 +15,6 @@ public enum CompensationStatus {
     /** The step declares no {@code @SagaCompensation}; nothing is undone (FR-007). */
     NOTHING_TO_COMPENSATE,
 
-    /** The step's compensation failed; the instance requires intervention (FR-016). */
+    /** The step's compensation failed; the instance is {@code COMPENSATION_FAILED} (FR-016). */
     FAILED
 }

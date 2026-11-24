@@ -1,11 +1,16 @@
 package io.github.gkosharovdev.sagaforge.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
+import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -24,10 +29,12 @@ import io.github.gkosharovdev.sagaforge.runtime.fixtures.fanout.NoteService;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.fanout.ReviewSaga;
 import io.github.gkosharovdev.sagaforge.runtime.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.runtime.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +53,7 @@ class InTransactionOutboxTest {
     private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
     private final NoteService notes = new NoteService();
     private final CapturingOutbox capturing = CapturingOutbox.inTransaction(boundary);
+    private final RecordingLogger logger = new RecordingLogger();
 
     /** What the outbox saw when it was called. */
     private record Seen(Optional<LocalTransaction> transaction, List<SagaStatus> committedStatuses) {
@@ -68,6 +76,7 @@ class InTransactionOutboxTest {
                 .dispatcher(new RecordingEventDispatcher())
                 .outbox(outbox)
                 .handlerInstances(new MapHandlerInstanceProvider().register(notes))
+                .logger(logger)
                 .build();
         engine.start();
         return engine;
@@ -127,20 +136,31 @@ class InTransactionOutboxTest {
 
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
         assertThat(capturing.committed()).singleElement()
-                .satisfies(batch -> assertThat(batch.events()).containsExactly(new CaseEscalated(CASE)));
+                .satisfies(batch -> {
+                    assertThat(batch.events()).hasSize(2).first().isEqualTo(new CaseEscalated(CASE));
+                    // 011: the outcome event comes last.
+                    assertThat(batch.events().get(1)).isInstanceOf(SagaCompleted.class);
+                });
     }
 
     @Test
     @DisplayName("a commit failing after the outbox keeps nothing; the saga ends FAILED")
     void failedCommitKeepsNothing() {
         IllegalStateException commitFailure = new IllegalStateException("commit failed");
-        SagaRuntime engine = engine(observing(() -> boundary.failNextCommit(commitFailure)));
+        AtomicBoolean armed = new AtomicBoolean();
+        // Only the step's commit fails; the FAILED write after it (011: with its outcome batch) commits.
+        SagaRuntime engine = engine(observing(() -> {
+            if (armed.compareAndSet(false, true)) {
+                boundary.failNextCommit(commitFailure);
+            }
+        }));
 
         SagaHandlingResult result = onlyResult(engine.receive(new CaseOpened(CASE, AddNote.Mode.NOTE)));
 
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(capturing.received()).hasSize(1);
-        assertThat(capturing.committed()).isEmpty();
+        assertThat(capturing.received()).hasSize(2);
+        assertThat(capturing.committedWithoutOutcomes()).isEmpty();
+        assertThat(capturing.outcomes()).singleElement().isInstanceOf(SagaFailed.class);
         assertThat(notes.notedCases()).isEmpty();
     }
 
@@ -158,8 +178,41 @@ class InTransactionOutboxTest {
         assertThat(result.failure().causeType()).isEqualTo(IllegalStateException.class.getName());
         assertThat(storage.committed().findById(result.sagaId())).hasValueSatisfying(
                 instance -> assertThat(instance.status()).isEqualTo(SagaStatus.FAILED));
-        assertThat(capturing.committed()).isEmpty();
+        assertThat(capturing.committedWithoutOutcomes()).isEmpty();
+        assertThat(capturing.outcomes()).singleElement().isInstanceOf(SagaFailed.class);
         assertThat(notes.notedCases()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("011 O9: an outbox throwing on the FAILED write's outcome batch leaves the instance unrecorded")
+    void throwingOnTheOutcomeBatchLeavesNothingRecorded() {
+        IllegalStateException stepFailure = new IllegalStateException("outbox insert failed");
+        IllegalStateException outcomeFailure = new IllegalStateException("outbox insert failed again");
+        capturing.failNext(stepFailure);
+        Outbox failingOnOutcomes = new Outbox() {
+            @Override
+            public Timing timing() {
+                return Timing.IN_TRANSACTION;
+            }
+
+            @Override
+            public void store(OutgoingMessages batch) {
+                if (batch.events().stream().anyMatch(SagaOutcome.class::isInstance)) {
+                    throw outcomeFailure;
+                }
+                capturing.store(batch);
+            }
+        };
+        SagaRuntime engine = engine(failingOnOutcomes);
+
+        Throwable thrown = catchThrowable(() -> engine.receive(new CaseOpened(CASE, AddNote.Mode.NOTE)));
+
+        assertThat(thrown).isInstanceOf(EventHandlingException.class);
+        assertThat(storage.committed().all()).singleElement()
+                .satisfies(instance -> assertThat(instance.status()).isEqualTo(SagaStatus.CREATED));
+        assertThat(logger.byEvent("saga.instance.failedNotRecorded")).singleElement()
+                .satisfies(logged -> assertThat(logged.thrown()).isSameAs(outcomeFailure));
+        assertThat(capturing.committed()).isEmpty();
     }
 
     @Test

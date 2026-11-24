@@ -5,6 +5,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaConte
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.SagaTestHarness;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
@@ -94,7 +95,8 @@ public final class DifferentialRun {
      *
      * @param instances    every stored instance of the saga type, in creation order
      * @param contexts     the stored {@code SagaContext} values per saga id (empty map if none)
-     * @param dispatched   every event handed to {@code EventDispatcher.dispatch}, in order
+     * @param dispatched   every event handed to {@code EventDispatcher.dispatch}, in order, without the engine's
+     *                     outcome events (011): the 002 harness has none
      * @param fixtureState {@link Fixtures#state()} after the run
      * @param failures     exceptions thrown out of {@code receive} (always empty for the harness)
      */
@@ -183,8 +185,18 @@ public final class DifferentialRun {
         Map<String, Map<String, Object>> contexts = new LinkedHashMap<>();
         instances.forEach(instance -> contexts.put(instance.sagaId(), contextStore.find(instance.sagaId())
                 .map(SagaContextRecord::values).orElse(Map.of())));
-        return new Side(views(instances), contexts, dispatcher.dispatched(), engineFixtures.state(),
+        return new Side(views(instances), contexts, domainEvents(dispatcher.dispatched()), engineFixtures.state(),
                 List.copyOf(engineFailures));
+    }
+
+    /** The outcome events (011) the engine dispatched, in order; the harness side has none to compare with. */
+    public List<SagaOutcome> engineOutcomes() {
+        return dispatcher.dispatched().stream().filter(SagaOutcome.class::isInstance)
+                .map(SagaOutcome.class::cast).toList();
+    }
+
+    private static List<Object> domainEvents(List<Object> dispatched) {
+        return dispatched.stream().filter(event -> !(event instanceof SagaOutcome)).toList();
     }
 
     /** The harness under test. */

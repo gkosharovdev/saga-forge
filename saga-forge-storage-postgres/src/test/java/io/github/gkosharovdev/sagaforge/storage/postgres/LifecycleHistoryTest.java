@@ -110,24 +110,22 @@ class LifecycleHistoryTest {
                 new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.STEP_COMPENSATED, "B", List.of(), null, null,
                         T2),
                 new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPENSATED, null, List.of(), null, null, T2)));
-        SagaInstance requiresIntervention = new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
-                SagaStatus.REQUIRES_INTERVENTION, CREATED_AT, T3,
+        SagaInstance compensationFailed = new SagaInstance(SAGA_ID, SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                SagaStatus.COMPENSATION_FAILED, CREATED_AT, T3,
                 steps(aDone.withCompensation(io.github.gkosharovdev.sagaforge.core.spi.StepCompensation.failed(refused)),
                         StepRecord.notRun(), StepRecord.notRun()), null, null, null, trigger);
-        provider.save(requiresIntervention, List.of(
+        provider.save(compensationFailed, List.of(
                 new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.COMPENSATION_FAILED, "A", List.of(), null,
-                        refused, T3),
-                new SagaLifecycleEntry(SAGA_ID, SagaLifecycleEventKind.REQUIRES_INTERVENTION, null, List.of(), null,
-                        null, T3)));
+                        refused, T3)));
 
         List<Map<String, Object>> rows = history(SAGA_ID);
 
         assertThat(rows).extracting(row -> row.get("kind")).containsExactly("CREATED", "COMPENSATION_STARTED",
-                "STEP_COMPENSATED", "COMPENSATED", "COMPENSATION_FAILED", "REQUIRES_INTERVENTION");
+                "STEP_COMPENSATED", "COMPENSATED", "COMPENSATION_FAILED");
         assertThat(SagaInstanceRows.decodeTrigger("compensation_trigger", (String) rows.get(1).get("compensation_trigger")))
                 .isEqualTo(trigger);
         assertThat(rows.get(0).get("compensation_trigger")).isNull();
-        assertThat(rows).extracting(row -> row.get("step_name")).containsExactly(null, null, "B", null, "A", null);
+        assertThat(rows).extracting(row -> row.get("step_name")).containsExactly(null, null, "B", null, "A");
         assertThat(rows.get(4).get("failure_cause_type")).isEqualTo("com.example.Refused");
         assertThat(rows.get(4).get("failure_classification")).isEqualTo("FINAL");
     }

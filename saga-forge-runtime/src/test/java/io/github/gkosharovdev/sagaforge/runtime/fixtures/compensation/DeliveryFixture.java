@@ -8,6 +8,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
+import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.retry.RecordingPause;
 import io.github.gkosharovdev.sagaforge.runtime.support.CapturingOutbox;
@@ -19,6 +20,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.UnaryOperator;
 
 /** An engine over {@link DeliverySaga} and its handlers, with in-memory stores and a recording retry pause. */
 public final class DeliveryFixture {
@@ -37,6 +39,7 @@ public final class DeliveryFixture {
     private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
     private final AtomicInteger sagaIds = new AtomicInteger();
     private SagaRuntime engine;
+    private boolean outcomeEvents = true;
 
     public DeliveryFixture() {
         engine = build(storage);
@@ -49,13 +52,26 @@ public final class DeliveryFixture {
         return faults;
     }
 
+    /** Replaces the engine with one whose storage calls go through {@code over}, wrapping this fixture's store. */
+    public DeliveryFixture withStorage(UnaryOperator<StorageProvider> over) {
+        engine = build(over.apply(storage));
+        return this;
+    }
+
+    /** Replaces the engine with one built with {@code outcomeEvents(false)} (011). */
+    public DeliveryFixture withoutOutcomeEvents() {
+        outcomeEvents = false;
+        engine = build(storage);
+        return this;
+    }
+
     /** A new engine over the same stores and services, as after a process restart. */
     public DeliveryFixture restart() {
         engine = build(storage);
         return this;
     }
 
-    private SagaRuntime build(io.github.gkosharovdev.sagaforge.core.spi.StorageProvider over) {
+    private SagaRuntime build(StorageProvider over) {
         SagaRuntime built = SagaRuntime.builder()
                 .register(DeliverySaga.class, PaymentService.class, DeliveryService.class, CourierService.class,
                         Order.class)
@@ -81,6 +97,7 @@ public final class DeliveryFixture {
                 .clock(Clock.fixed(NOW, ZoneOffset.UTC))
                 .sagaIds(() -> "saga-" + sagaIds.incrementAndGet())
                 .logger(logger)
+                .outcomeEvents(outcomeEvents)
                 .build();
         built.start();
         return built;

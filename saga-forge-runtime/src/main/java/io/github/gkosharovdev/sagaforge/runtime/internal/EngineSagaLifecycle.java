@@ -3,9 +3,15 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaLifecycle;
+import io.github.gkosharovdev.sagaforge.core.outcome.OutcomeTrigger;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
@@ -24,6 +30,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The production {@link SagaLifecycle}: applies the 001/002 transition rules to a working copy of one instance
@@ -37,7 +44,7 @@ import java.util.Map;
  * {@code FAILED}, {@link #attemptFailed} → {@code ATTEMPT_FAILED} (005), {@link #startCompensation} →
  * {@code COMPENSATION_STARTED} (and {@code COMPENSATED} when nothing is left to run), {@link #recordCompensated} →
  * {@code STEP_COMPENSATED} (and {@code COMPENSATED} after the last), {@link #recordCompensationFailed} →
- * {@code COMPENSATION_FAILED} then {@code REQUIRES_INTERVENTION} (006); each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
+ * {@code COMPENSATION_FAILED}, its terminal entry (011); each entry's {@code occurredAt} is the instant of its transition, which is also the instance's
  * {@code lastModifiedAt}. {@code SagaInstance.state} is always empty (G-ENG-06). A pending retry is kept across
  * transitions until {@link #clearPendingRetry}, a terminal transition or entering compensation drops it (005 research
  * §9). Each completed step gets the next {@code completionSequence} of its instance (006 research §5).</p>
@@ -52,12 +59,19 @@ import java.util.Map;
 final class EngineSagaLifecycle implements SagaLifecycle {
 
     /**
-     * What one write persists: the instance and the entries produced since the last drain, in transition order.
+     * What one write persists: the instance and the entries produced since the last drain, in transition order, and
+     * the outcome event of the terminal transition among them, if any (specs/011-saga-outcome-events research §2).
      */
-    record PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries) {
+    record PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries, Optional<SagaOutcome> outcome) {
 
         PendingWrite {
             entries = List.copyOf(entries);
+            outcome = outcome == null ? Optional.empty() : outcome;
+        }
+
+        /** A write without an outcome event. */
+        PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries) {
+            this(instance, entries, Optional.empty());
         }
     }
 
@@ -72,6 +86,7 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     private final TimeAndIdentity sources;
     private final List<SagaLifecycleEntry> pending = new ArrayList<>();
     private SagaInstance workingCopy;
+    private SagaOutcome outcome;
 
     /**
      * @param saga    the saga type this lifecycle's instance belongs to
@@ -98,6 +113,18 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         }
         requireEmpty();
         workingCopy = instance;
+    }
+
+    /**
+     * The working copy: the instance as loaded or started, with this lifecycle's transitions applied so far.
+     *
+     * @throws IllegalStateException if this lifecycle holds no instance
+     */
+    SagaInstance current() {
+        if (workingCopy == null) {
+            throw new IllegalStateException("No saga instance loaded or started");
+        }
+        return workingCopy;
     }
 
     @Override
@@ -160,6 +187,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         SagaInstance current = requireActive(sagaId, "complete");
         Instant now = evolve(SagaStatus.COMPLETED, current.steps(), new Ending(outcomeStep, null));
         pending.add(entry(SagaLifecycleEventKind.COMPLETED, now).outcome(outcomeStep).build());
+        outcome = SagaCompleted.of(workingCopy.sagaType(), workingCopy.sagaId(), workingCopy.associations(), now,
+                outcomeStep);
         return workingCopy;
     }
 
@@ -169,6 +198,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         SagaInstance current = requireActive(sagaId, "fail");
         Instant now = evolve(SagaStatus.FAILED, current.steps(), new Ending(null, failure));
         pending.add(entry(SagaLifecycleEventKind.FAILED, now).failure(failure).build());
+        outcome = SagaFailed.inStep(workingCopy.sagaType(), workingCopy.sagaId(), workingCopy.associations(), now,
+                failure.stepName(), classified(failure), failure.causeType(), failure.attempts());
         return workingCopy;
     }
 
@@ -268,8 +299,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
 
     /**
      * Marks {@code stepName}'s compensation {@code FAILED} with {@code failure} and ends the instance
-     * {@code REQUIRES_INTERVENTION}; produces {@code COMPENSATION_FAILED} then {@code REQUIRES_INTERVENTION}
-     * (006 research §9). Steps not reached stay {@code NOT_ATTEMPTED}.
+     * {@code COMPENSATION_FAILED}; produces one {@code COMPENSATION_FAILED} entry (006 research §9, 011 FR-021) and a
+     * {@code SagaFailed} outcome in phase {@code COMPENSATION}. Steps not reached stay {@code NOT_ATTEMPTED}.
      *
      * @throws InvalidSagaTransitionException if the working copy is not this compensating instance
      * @throws IllegalArgumentException       if the step's compensation is not {@code NOT_ATTEMPTED}
@@ -280,10 +311,12 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         Instant now = sources.now();
         Map<String, StepRecord> steps = new HashMap<>(workingCopy.steps());
         steps.put(stepName, step.withCompensation(StepCompensation.failed(failure)));
-        replace(SagaStatus.REQUIRES_INTERVENTION, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
+        replace(SagaStatus.COMPENSATION_FAILED, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
         pending.add(entry(SagaLifecycleEventKind.COMPENSATION_FAILED, now).failedStep(stepName).failure(failure)
                 .build());
-        pending.add(entry(SagaLifecycleEventKind.REQUIRES_INTERVENTION, now).build());
+        outcome = SagaFailed.inCompensation(workingCopy.sagaType(), workingCopy.sagaId(), workingCopy.associations(),
+                now, stepName, classified(failure), failure.causeType(), failure.attempts(),
+                OutcomeTrigger.of(workingCopy.compensationTrigger()));
         return workingCopy;
     }
 
@@ -305,6 +338,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
         if (remainingCompensations(workingCopy).isEmpty()) {
             replace(SagaStatus.COMPENSATED, workingCopy.steps(), Ending.NONE, workingCopy.compensationTrigger(), now);
             pending.add(entry(SagaLifecycleEventKind.COMPENSATED, now).build());
+            outcome = SagaCompensated.of(workingCopy.sagaType(), workingCopy.sagaId(), workingCopy.associations(),
+                    now, OutcomeTrigger.of(workingCopy.compensationTrigger()));
         }
     }
 
@@ -339,15 +374,21 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     PendingWrite drain(String sagaId) {
         requireNonNull(sagaId, "sagaId");
         requireHeld(sagaId, "drain");
-        PendingWrite write = new PendingWrite(workingCopy, pending);
+        PendingWrite write = new PendingWrite(workingCopy, pending, Optional.ofNullable(outcome));
         pending.clear();
+        outcome = null;
         return write;
     }
 
-    /** {@code true} for {@code COMPLETED}, {@code FAILED}, {@code COMPENSATED} and {@code REQUIRES_INTERVENTION}. */
+    /** A failure recorded before 005 may carry no classification; its outcome event reports it unclassified. */
+    private static FailureClassification classified(SagaFailure failure) {
+        return failure.classification() != null ? failure.classification() : FailureClassification.UNCLASSIFIED;
+    }
+
+    /** {@code true} for {@code COMPLETED}, {@code FAILED}, {@code COMPENSATED} and {@code COMPENSATION_FAILED}. */
     static boolean isTerminal(SagaStatus status) {
         return status == SagaStatus.COMPLETED || status == SagaStatus.FAILED || status == SagaStatus.COMPENSATED
-                || status == SagaStatus.REQUIRES_INTERVENTION;
+                || status == SagaStatus.COMPENSATION_FAILED;
     }
 
     private void rejectDuplicate(String associationProperty, String associationValue) {

@@ -17,6 +17,7 @@ import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
@@ -208,7 +209,11 @@ class ReentrancyTest {
 
             @Override
             public void store(OutgoingMessages batch) {
-                receiver.get().receive(new Knock("nested", Origin.NONE));
+                // 011: the FAILED write's batch holds only its outcome event; calling back there too would leave the
+                // instance unrecorded, which InTransactionOutboxTest covers.
+                if (!batch.events().stream().allMatch(SagaOutcome.class::isInstance)) {
+                    receiver.get().receive(new Knock("nested", Origin.NONE));
+                }
             }
         };
 

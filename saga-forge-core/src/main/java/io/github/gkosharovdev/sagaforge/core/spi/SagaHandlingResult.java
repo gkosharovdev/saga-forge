@@ -21,11 +21,13 @@ import java.util.List;
  * @param failure         the failure recorded on the instance; non-null if and only if {@code outcome == FAILED}
  * @param unitOfWorkId    the unit of work that ran; non-null if and only if one ran ({@code WAITING},
  *                        {@code COMPLETED}, {@code FAILED}, {@code NOT_HANDLED} after a conflict, and for
- *                        {@code COMPENSATED} and {@code REQUIRES_INTERVENTION} the last unit of work of the
+ *                        {@code COMPENSATED} and {@code COMPENSATION_FAILED} the last unit of work of the
  *                        compensation run)
  * @param outboxFailures the exceptions thrown by the after-commit outboxs of the committed units of work; non-null,
  *                        no {@code null} element, non-empty only for {@code WAITING}, {@code COMPLETED},
- *                        {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}; an unmodifiable defensive copy
+ *                        {@code FAILED} (since {@code specs/011-saga-outcome-events}: the {@code FAILED} write hands
+ *                        its outcome event to the outbox), {@code COMPENSATED} or {@code COMPENSATION_FAILED}; an
+ *                        unmodifiable defensive copy
  */
 public record SagaHandlingResult(
     String sagaType,
@@ -59,10 +61,11 @@ public record SagaHandlingResult(
             }
         }
         boolean committed = outcome == HandlingOutcome.WAITING || outcome == HandlingOutcome.COMPLETED
-            || outcome == HandlingOutcome.COMPENSATED || outcome == HandlingOutcome.REQUIRES_INTERVENTION;
+            || outcome == HandlingOutcome.FAILED || outcome == HandlingOutcome.COMPENSATED
+            || outcome == HandlingOutcome.COMPENSATION_FAILED;
         if (!committed && !outboxFailures.isEmpty()) {
             throw new IllegalArgumentException("outboxFailures must be empty unless outcome is WAITING, COMPLETED, "
-                + "COMPENSATED or REQUIRES_INTERVENTION, but outcome is " + outcome);
+                + "FAILED, COMPENSATED or COMPENSATION_FAILED, but outcome is " + outcome);
         }
         return List.copyOf(outboxFailures);
     }

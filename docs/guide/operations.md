@@ -13,6 +13,7 @@ with your own bean.
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
+| `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
 | `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |
@@ -37,12 +38,14 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
   applies to in its header comment. Run each once, in one transaction, while no runtime is running. Release notes list
   any new upgrade script.
+- `schema-upgrade-011.sql` renames the status `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` and removes the
+  history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -118,7 +121,7 @@ Metrics:
 |---|---|---|---|
 | `saga_forge.handle.duration`, `.attempt.duration`, `.step.duration`, `.command.duration`, `.compensation.duration`, `.delivery.duration` | histogram | s | the span's low-cardinality attributes |
 | `saga_forge.saga.started` | counter | — | `saga_forge.saga.type` |
-| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `requires_intervention`) |
+| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `compensation_failed`) |
 | `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
 | `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
@@ -130,8 +133,8 @@ Example alerts, in PromQL, assuming the OpenTelemetry-to-Prometheus name transla
 counters gain `_total`, units become suffixes):
 
 ```promql
-# Sagas failing or needing intervention, per saga type
-sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|requires_intervention"}[5m])) > 0
+# Sagas failing or failing to compensate, per saga type
+sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|compensation_failed"}[5m])) > 0
 
 # Compensations as a share of finished sagas
 sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]))
@@ -148,6 +151,64 @@ saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 ```
 
 
+## Outcome events
+
+When a saga instance reaches a terminal status, the unit of work that writes the status also records one outcome
+event (`io.github.gkosharovdev.sagaforge.core.outcome`):
+
+| Status | Outcome event |
+|---|---|
+| `COMPLETED` | `SagaCompleted`, with the `@EndSaga` step that ended it |
+| `FAILED` | `SagaFailed` with `phase() == STEP`: the failed step, its classification, cause type and attempts |
+| `COMPENSATION_FAILED` | `SagaFailed` with `phase() == COMPENSATION`: the compensation that failed, plus `compensationTrigger()` |
+| `COMPENSATED` | `SagaCompensated`, with `trigger()`: why compensation started |
+
+Every outcome event carries the saga type, the saga id, the instance's associations and the time. It never carries a
+failure message, a `SagaContext` value or a saga field. Its `eventId()` is `sagaId:STATUS` and is the same on every
+delivery, so a listener that must act once deduplicates on it.
+
+An outcome event is **not a domain event**: no saga step can take one (the model is rejected at startup), and the
+runtime hands a delivered outcome event to no saga. Applications, policies and other modules listen for it.
+
+How reliably it arrives depends on the outbox, like any event the unit of work records:
+
+| Outbox | Stored | Delivered |
+|---|---|---|
+| In-memory transport (own log) | in the terminal write's transaction | at least once |
+| In-memory transport, Spring Modulith interop | in Modulith's registry, same transaction | at least once |
+| `ImmediateDispatchOutbox` (the default without a transport) | not stored; dispatched after commit | at most once |
+| Saga test fixture | staged in the transaction, released on commit | exactly once, synchronous |
+
+**Listening.** In Spring Boot, outcome events are published as application events by the same rule as recorded events
+(`saga-forge.application-events.mode`): use `@TransactionalEventListener` or `@ApplicationModuleListener`, which run
+after the commit and never for a rolled-back unit of work; see [recipe 6](recipes.md#6-reacting-to-how-a-saga-ended).
+In a plain Java host, register a delivery callback on the in-memory transport; the starter's after-delivery bridge
+does exactly that:
+
+```java
+public ApplicationEventBridge(InMemoryTransport transport, ApplicationEventPublisher publisher) {
+    this.publisher = publisher;
+    transport.onDelivered(this::publish);
+}
+```
+
+Source: `saga-forge-spring-boot-starter/src/main/java/io/github/gkosharovdev/sagaforge/spring/transport/ApplicationEventBridge.java`.
+
+The in-memory transport orders outcome events per instance (ordering key `saga:<sagaId>`).
+
+**Switching them off.** `saga-forge.outcome-events.enabled=false`, `SagaRuntime.Builder.outcomeEvents(false)` or, in
+tests, `SagaFixture.Builder.outcomeEvents(false)`.
+
+**Failures of the outbox.** With an `IN_TRANSACTION` outbox (the in-memory transport), a failure to store the outcome
+event rolls back the write it belongs to: for a failed saga, the `FAILED` status is then not written, the runtime logs
+`saga.instance.failedNotRecorded` and the exception reaches the caller. With an `AFTER_COMMIT` outbox the status stays
+written and the failure is listed in the handling result's `outboxFailures()`.
+
+**Failure text.** Outcome events carry no failure message, but logs and spans can (spans only with
+`saga-forge.telemetry.record-failure-messages=true`). Mask secrets in your logging backend (Logback `%replace`, Log4j2
+`RegexReplacement`) and in the OpenTelemetry Collector (`redaction` or `transform` processor). The `saga_instance` and
+lifecycle-history tables keep the raw message.
+
 ## Statuses an operator sees
 
 | `SagaStatus` | Meaning | Action |
@@ -157,5 +218,5 @@ saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 | `COMPENSATING` | compensations are being run | resumes on the next event for the instance |
 | `COMPENSATED` | all committed steps undone | none |
 | `FAILED` | an unclassified failure; committed effects stay in place | investigate; no resume path |
-| `REQUIRES_INTERVENTION` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
+| `COMPENSATION_FAILED` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
 | `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | investigate |

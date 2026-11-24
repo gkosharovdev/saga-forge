@@ -112,13 +112,13 @@ class CompensationPersistenceTest {
                 Map.of("pay", completed(1, StepCompensation.notAttempted())), REJECTED);
         SagaInstance compensated = instance(SagaStatus.COMPENSATED,
                 Map.of("pay", completed(1, StepCompensation.compensated(AT))), REJECTED);
-        SagaInstance intervention = instance(SagaStatus.REQUIRES_INTERVENTION,
+        SagaInstance compensationFailed = instance(SagaStatus.COMPENSATION_FAILED,
                 Map.of("pay", completed(1, StepCompensation.failed(FINAL))), REJECTED);
 
         assertThatCode(() -> {
             ForwardTransition.requireForwardTransition(running, compensating);
             ForwardTransition.requireForwardTransition(compensating, compensated);
-            ForwardTransition.requireForwardTransition(compensating, intervention);
+            ForwardTransition.requireForwardTransition(compensating, compensationFailed);
             ForwardTransition.requireForwardTransition(compensated, compensated);
         }).doesNotThrowAnyException();
     }
@@ -167,7 +167,7 @@ class CompensationPersistenceTest {
     }
 
     @Test
-    @DisplayName("COMPENSATING only moves to COMPENSATED or REQUIRES_INTERVENTION; both are terminal")
+    @DisplayName("COMPENSATING only moves to COMPENSATED or COMPENSATION_FAILED; both are terminal")
     void statusRules() {
         SagaInstance compensating = instance(SagaStatus.COMPENSATING, Map.of(), REJECTED);
         SagaInstance running = new SagaInstance("s-1", "com.example.Saga", Map.of(), Map.of("orderId", "o-1"),

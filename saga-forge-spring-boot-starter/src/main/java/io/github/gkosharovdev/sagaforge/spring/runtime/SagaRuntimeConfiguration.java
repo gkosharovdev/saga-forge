@@ -96,7 +96,8 @@ public class SagaRuntimeConfiguration {
                 .contextStore(contexts)
                 .transactions(boundary)
                 .dispatcher(eventDispatcher)
-                .maxTotalRetryBackoff(properties.getRuntime().getMaxTotalRetryBackoff());
+                .maxTotalRetryBackoff(properties.getRuntime().getMaxTotalRetryBackoff())
+                .outcomeEvents(properties.getOutcomeEvents().isEnabled());
         outbox.ifAvailable(builder::outbox);
         sagaObjects.ifAvailable(builder::sagaObjects);
         handlerInstances.ifAvailable(builder::handlerInstances);

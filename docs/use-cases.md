@@ -237,7 +237,7 @@ failure outcome instead of an `@EndSaga` step that releases the claim by hand, a
 The decline then ends the saga `COMPENSATED`. A final failure of the second unit of work (the `Booking` constructor
 throwing an exception marked `FinalFailure`) releases the claim the same way, with the failing step and cause as the
 trigger; an unmarked failure still ends `FAILED`. If releasing the claim itself fails, the saga ends
-`REQUIRES_INTERVENTION`, and nothing retries it.
+`COMPENSATION_FAILED`, and nothing retries it.
 
 Production lessons this example carries (see architecture.md's feature gaps):
 
@@ -265,20 +265,20 @@ and distinct association properties.
 | Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
 | Validate and record request | `DeferredBookingRequestedEvent` | `RecordBookingRequestCommand` | Retry with backoff | Fail terminally — no compensation needed, nothing committed yet |
-| Notify owner | `BookingRequestRecordedEvent` | `NotifyOwnerCommand` | Retry with backoff | Requires intervention — booking exists but owner was never notified |
+| Notify owner | `BookingRequestRecordedEvent` | `NotifyOwnerCommand` | Retry with backoff | Manual follow-up — booking exists but owner was never notified |
 
 ### Process B — Owner accepts
 
 | Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
-| Record acceptance | `OwnerAcceptedEvent` | `ConfirmBookingCommand` | Retry with backoff | Requires intervention |
+| Record acceptance | `OwnerAcceptedEvent` | `ConfirmBookingCommand` | Retry with backoff | Manual follow-up |
 | Trigger payment initiation | `BookingConfirmedEvent` | `InitiateDeferredPaymentCommand` | Retry with backoff | Compensate: `CancelBookingConfirmationCommand` |
 
 ### Process C — Owner declines
 
 | Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
-| Record decline and release hold | `OwnerDeclinedEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Requires intervention — hold may be stuck |
+| Record decline and release hold | `OwnerDeclinedEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Manual follow-up — hold may be stuck |
 
 ### Process D — Initiate deferred payment
 
@@ -295,8 +295,8 @@ expression, not just relying on the saga/step name pair.
 
 | Step | Triggered by | Dispatches | On transient failure | On domain failure |
 |---|---|---|---|---|
-| Detect expiry | Scheduled work claim reaching its deadline | `ExpireBookingCommand` | Retry with backoff | Requires intervention |
-| Release hold | `BookingExpiredEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Requires intervention |
+| Detect expiry | Scheduled work claim reaching its deadline | `ExpireBookingCommand` | Retry with backoff | Manual follow-up |
+| Release hold | `BookingExpiredEvent` | `ReleaseBookingHoldCommand` | Retry with backoff | Manual follow-up |
 
 Process E is triggered by a scheduled work claim rather than a domain event from another aggregate. The thin
 scheduling adapter that detects the deadline should invoke exactly one complete use case
