@@ -38,6 +38,7 @@ import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanc
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaStateTypeMismatchException;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -159,7 +160,8 @@ class SagaRuntimeHappyPathTest {
             assertThat(reservations.changedAggregates()).containsExactly(ReservationService.reservationIdFor(ORDER));
             assertThat(invoices.changedAggregates()).containsExactly(InvoiceService.invoiceIdFor(ORDER));
             assertThat(shipments.changedAggregates()).containsExactly(ShipmentService.shipmentIdFor(ORDER));
-            assertThat(dispatcher.dispatched()).isEmpty();
+            // 011: the default outbox dispatches the outcome event, and nothing else.
+            assertThat(dispatcher.dispatched()).singleElement().isInstanceOf(SagaCompleted.class);
             assertThat(dispatcher.registeredSagaTypes()).containsExactly(ThreeStepSaga.class);
         }
 

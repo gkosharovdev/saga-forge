@@ -165,11 +165,11 @@ class ForwardTransitionPropertyTest {
     }
 
     /**
-     * Every status except {@code REQUIRES_INTERVENTION}, which needs a failed compensation these step records never
+     * Every status except {@code COMPENSATION_FAILED}, which needs a failed compensation these step records never
      * carry (covered by {@code CompensationPersistenceTest}).
      */
     private static Arbitrary<SagaStatus> statuses() {
-        return Arbitraries.of(SagaStatus.class).filter(status -> status != SagaStatus.REQUIRES_INTERVENTION);
+        return Arbitraries.of(SagaStatus.class).filter(status -> status != SagaStatus.COMPENSATION_FAILED);
     }
 
     private static SagaInstance instance(Map<String, StepRecord> steps, SagaStatus status) {

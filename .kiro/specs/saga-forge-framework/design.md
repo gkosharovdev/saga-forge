@@ -576,12 +576,12 @@ public enum SagaStatus {
     COMPLETED,
     FAILED,
     COMPENSATED,             // terminal: every applicable compensation committed (006)
-    REQUIRES_INTERVENTION    // terminal: a compensation failed; never retried (006)
+    COMPENSATION_FAILED      // terminal: a compensation failed; never retried (006; renamed from REQUIRES_INTERVENTION in 011)
 }
 ```
 
-`COMPLETED`, `FAILED`, `COMPENSATED` and `REQUIRES_INTERVENTION` are terminal. `SagaInstance.compensationTrigger` is
-non-null if and only if the status is `COMPENSATING`, `COMPENSATED` or `REQUIRES_INTERVENTION`
+`COMPLETED`, `FAILED`, `COMPENSATED` and `COMPENSATION_FAILED` are terminal. `SagaInstance.compensationTrigger` is
+non-null if and only if the status is `COMPENSATING`, `COMPENSATED` or `COMPENSATION_FAILED`
 (`specs/006-saga-compensation/data-model.md`).
 
 ## Data Models
@@ -801,7 +801,7 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 ### Property 27: Lifecycle history order
 
-*For any* engine-driven saga instance, its persisted lifecycle entries shall be `CREATED`, then for each committed unit of work its `STEP_COMPLETED` entries in completion order followed by `COMPLETED` if that unit of work ended the saga, then `FAILED` if the saga failed; no entry of a rolled-back unit of work shall be persisted. Since `specs/006-saga-compensation`, a compensating instance's entries continue with `COMPENSATION_STARTED`, one `STEP_COMPENSATED` per compensation committed in reverse completion order, and finally either `COMPENSATED` or `COMPENSATION_FAILED` followed by `REQUIRES_INTERVENTION`.
+*For any* engine-driven saga instance, its persisted lifecycle entries shall be `CREATED`, then for each committed unit of work its `STEP_COMPLETED` entries in completion order followed by `COMPLETED` if that unit of work ended the saga, then `FAILED` if the saga failed; no entry of a rolled-back unit of work shall be persisted. Since `specs/006-saga-compensation`, a compensating instance's entries continue with `COMPENSATION_STARTED`, one `STEP_COMPENSATED` per compensation committed in reverse completion order, and finally either `COMPENSATED` or `COMPENSATION_FAILED` (since `specs/011-saga-outcome-events` the one terminal entry of a failed compensation; before, a separate `REQUIRES_INTERVENTION` entry followed it).
 
 **Validates: Feature spec `specs/004-saga-engine` FR-033, SC-010** (test: `LifecycleHistoryPropertyTest`)
 
@@ -865,9 +865,15 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/010-otel-observability` FR-003, FR-011, FR-012, SC-004, SC-007; contracts/instrumentation.md** (tests: `TelemetryParityPropertyTest`, `FaultyInstrumentationTest`, `DiagnosticsCorrelationTest`)
 
+### Property 38: Outcome events
+
+*For any* terminal transition the runtime writes (`COMPLETED`, `FAILED`, `COMPENSATED`, `COMPENSATION_FAILED`), exactly one outcome event of the matching kind (`SagaCompleted`, `SagaFailed` in phase `STEP`, `SagaCompensated`, `SagaFailed` in phase `COMPENSATION`) is part of that write's outgoing batch, last in its `events` and `recordedEvents`; there is none when the write rolls back or records nothing, and none for a non-terminal write. Its identity is `sagaId:status`, and it carries no failure message, `SagaContext` value or saga field. With `outcomeEvents(false)` no batch carries one.
+
+**Validates: Feature spec `specs/011-saga-outcome-events` FR-001 to FR-016, SC-001, SC-002, SC-006** (tests: `OutcomeEventsTest`, `OutcomeEventsPropertyTest`, `EngineSagaLifecycleTest`)
+
 ### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
 
-None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged. `specs/006-saga-compensation` adds `@StartCompensation`, rules R20 to R22 and Properties 30 to 34, extends Property 27 with the compensation entries, and leaves Properties 1 to 26, 28 and 29 unchanged. `specs/007-in-memory-transport` adds `@Command.delivery` (`CommandDelivery`), rule R23 and Property 35, renames the handoff SPI to `Outbox` (Property 26's wording follows), and leaves Properties 1 to 34 otherwise unchanged. `specs/008-spring-boot-starter` extends Property 26 with `recordedEvents` and changes no annotation, rule or other property. `specs/009-saga-test-fixture` adds the `CommandInterceptor` SPI and Property 36 and changes no annotation, rule or other property. `specs/010-otel-observability` adds OpenTelemetry instrumentation to the runtime and the in-memory transport and Property 37, and changes no annotation, rule or other property.
+None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged. `specs/006-saga-compensation` adds `@StartCompensation`, rules R20 to R22 and Properties 30 to 34, extends Property 27 with the compensation entries, and leaves Properties 1 to 26, 28 and 29 unchanged. `specs/007-in-memory-transport` adds `@Command.delivery` (`CommandDelivery`), rule R23 and Property 35, renames the handoff SPI to `Outbox` (Property 26's wording follows), and leaves Properties 1 to 34 otherwise unchanged. `specs/008-spring-boot-starter` extends Property 26 with `recordedEvents` and changes no annotation, rule or other property. `specs/009-saga-test-fixture` adds the `CommandInterceptor` SPI and Property 36 and changes no annotation, rule or other property. `specs/010-otel-observability` adds OpenTelemetry instrumentation to the runtime and the in-memory transport and Property 37, and changes no annotation, rule or other property. `specs/011-saga-outcome-events` adds Property 38 (outcome events, framework events that are not `@DomainEvent`s, so the existing "Non-@DomainEvent param" rule rejects a step that takes one), renames `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` in Properties 27 and 30 to 34 (Property 27's entry list drops the `REQUIRES_INTERVENTION` kind), and changes no annotation or scanner rule.
 
 ## Error Handling
 

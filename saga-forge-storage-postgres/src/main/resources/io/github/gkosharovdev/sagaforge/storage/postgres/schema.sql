@@ -29,7 +29,7 @@ CREATE TABLE saga_instance (
     CONSTRAINT pending_retry_only_while_active
         CHECK (pending_retry IS NULL OR status IN ('CREATED', 'RUNNING')),
     CONSTRAINT trigger_iff_compensation
-        CHECK ((status IN ('COMPENSATING', 'COMPENSATED', 'REQUIRES_INTERVENTION'))
+        CHECK ((status IN ('COMPENSATING', 'COMPENSATED', 'COMPENSATION_FAILED'))
             = (compensation_trigger IS NOT NULL))
 );
 

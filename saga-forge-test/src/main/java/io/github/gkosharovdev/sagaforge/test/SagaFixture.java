@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.test;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -163,11 +164,13 @@ public final class SagaFixture {
         int attemptsMark = interceptor.attemptsSnapshot().size();
         int loggedMark = logger.logged().size();
         contexts.takeRejections();
+        transport.takeOutcomes();
 
         List<HandlingReport> reports = new ArrayList<>();
         List<RuntimeException> outboxFailures = new ArrayList<>();
         reports.add(runtime.receive(event));
         transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+        List<SagaOutcome> outcomeEvents = transport.takeOutcomes();
 
         Set<String> touchedIds = new LinkedHashSet<>();
         for (HandlingReport report : reports) {
@@ -184,7 +187,7 @@ public final class SagaFixture {
         List<FixtureLogger.Logged> logged = logger.logged();
         EventResult result = new EventResult(event, reports, committed.subList(committedMark, committed.size()),
                 attempts.subList(attemptsMark, attempts.size()), before, touched, outboxFailures,
-                logged.subList(loggedMark, logged.size()));
+                logged.subList(loggedMark, logged.size()), outcomeEvents);
         List<UnsupportedContextValueException> rejected = contexts.takeRejections();
         if (!rejected.isEmpty()) {
             throw Messages.unsupportedContextValue(this, result, rejected.get(0));
@@ -249,6 +252,7 @@ public final class SagaFixture {
         private boolean handleAggregates;
         private OpenTelemetry openTelemetry = OpenTelemetry.noop();
         private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
+        private boolean outcomeEvents = true;
 
         private Builder() {
         }
@@ -371,6 +375,15 @@ public final class SagaFixture {
         }
 
         /**
+         * Whether the runtime records outcome events ({@code specs/011-saga-outcome-events}); default {@code true}, as
+         * in {@code SagaRuntime.Builder.outcomeEvents}.
+         */
+        public Builder outcomeEvents(boolean enabled) {
+            this.outcomeEvents = enabled;
+            return this;
+        }
+
+        /**
          * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the runtime's startup
          * does (FR-003).
          *
@@ -425,6 +438,7 @@ public final class SagaFixture {
                     .commandInterceptor(interceptor)
                     .openTelemetry(openTelemetry)
                     .telemetry(telemetry)
+                    .outcomeEvents(outcomeEvents)
                     .logger(logger);
             if (maxTotalRetryBackoff != null) {
                 runtime.maxTotalRetryBackoff(maxTotalRetryBackoff);

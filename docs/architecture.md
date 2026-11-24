@@ -20,7 +20,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the runtime, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
 | Saga runtime (`saga-forge-runtime`: event routing, saga-scoped unit of work, one unit of work per instance, outbox SPI, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
 | Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([005](../specs/005-step-retry/spec.md)) |
-| Compensation (`@StartCompensation`, `@SagaCompensation` run by the runtime, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`REQUIRES_INTERVENTION`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
+| Compensation (`@StartCompensation`, `@SagaCompensation` run by the runtime, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`COMPENSATION_FAILED`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the runtime, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
 | Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
@@ -420,17 +420,17 @@ compensation undoes only steps whose units of work **already committed**:
   method) and read and write `SagaContext`, and it may take the `CompensationTrigger` as its parameter. Its effects
   and its `COMPENSATED` mark commit together, and the last commit also ends the saga `COMPENSATED`. No forward step
   runs while compensating.
-- **Requires intervention.** A compensation that fails is never retried: the unwinding stops, the step is recorded
+- **Compensation failed.** A compensation that fails is never retried: the unwinding stops, the step is recorded
   `FAILED` with the classified failure, steps not reached stay `NOT_ATTEMPTED`, and the saga ends
-  `REQUIRES_INTERVENTION`. The stored instance alone shows the trigger and every committed step's compensation status
+  `COMPENSATION_FAILED`. The stored instance alone shows the trigger and every committed step's compensation status
   and time.
 - **Resume.** After a crash, the next event routed to a `COMPENSATING` instance (the redelivered trigger, or any
   forward event, whose step does not run) resumes with the first compensation not yet committed.
 
 Known limitations: an instance left `COMPENSATING` with no further event never resumes (G-006-05); a compensation
 sees the trigger's event type, not the event (G-006-06); compensations run on the caller's thread holding the
-instance (G-006-08); a failed compensation is never retried and there is no operator path out of "requires
-intervention" (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02).
+instance (G-006-08); a failed compensation is never retried and there is no operator path out of
+`COMPENSATION_FAILED` (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02).
 
 ## jMolecules consideration
 

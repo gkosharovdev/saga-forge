@@ -399,7 +399,7 @@ Other types a model uses:
 
 - **Runs when**: a `@StartCompensation` step committed, or a step failed `FINAL` (exception implements `FinalFailure`)
   or `EXHAUSTED` (transient failure, attempts used up) after an earlier unit of work committed. Only steps that
-  completed are compensated. A compensation that throws is never retried: the instance ends `REQUIRES_INTERVENTION`.
+  completed are compensated. A compensation that throws is never retried: the instance ends `COMPENSATION_FAILED`.
   A compensation can run again after a crash, so the commands it sends must be idempotent (pass `CommandId` on).
 
 ### `@RetryPolicy`
@@ -654,7 +654,7 @@ and imports trimmed, code unchanged). Paths are relative to the repository root.
 - [3. Retry and idempotent handlers](#3-retry-and-idempotent-handlers)
 - [4. Outbox commands](#4-outbox-commands)
 - [5. Bounded-context modules in one Spring Boot monolith](#5-bounded-context-modules-in-one-spring-boot-monolith)
-- [6. Telling the caller how it went](#6-telling-the-caller-how-it-went)
+- [6. Reacting to how a saga ended](#6-reacting-to-how-a-saga-ended)
 
 ## 1. Several aggregates in one saga-scoped unit of work
 
@@ -827,7 +827,7 @@ What starts compensation, and what does not:
 | A transient failure runs out of attempts (`EXHAUSTED`), after an earlier unit of work committed | compensate → `COMPENSATED` |
 | Any failure while nothing committed yet | nothing to undo → `FAILED` |
 | An unmarked exception (`UNCLASSIFIED`) | no compensation → `FAILED`, committed effects stay |
-| A compensation throws | never retried → `REQUIRES_INTERVENTION` |
+| A compensation throws | never retried → `COMPENSATION_FAILED` |
 
 A `FinalFailure` is a marker interface on your exception class:
 
@@ -1152,24 +1152,57 @@ Rules for this setup:
   second saga an event of its own.
 - Run one application instance per database for now (see [Limitations](limitations.md)).
 
-## 6. Telling the caller how it went
+## 6. Reacting to how a saga ended
 
-**Problem**: an HTTP request starts a process, and the client wants to know how it went.
+When a saga ends, the runtime records `SagaCompleted`, `SagaFailed` or `SagaCompensated` in the same unit of work as
+the terminal status ([Operations](operations.md#outcome-events)). A Spring listener that notes failed orders:
 
-**Pattern**: don't wait for the saga. Saga Forge has no API that blocks the caller until a saga, or its first unit of
-work, finishes, and steps return nothing. A saga is a process that may outlive the request: it can wait for an outside
-event, retry, or compensate. Instead:
+```java
+@Component
+public class FailedOrders {
 
-- **Do request-time work in the use case.** When the response needs a value from an outside system (a payment
-  provider's client secret, say), the application service obtains it, commits its own change, and publishes the event
-  that starts the saga. The saga handles only the follow-up steps. Recipe 5's `OrderPlacement.place` is that shape:
-  the order is saved and `OrderCreatedEvent` published in one transaction, and the request returns.
-- **Report progress through domain events.** The handlers record events as the saga moves on (`PaymentProcessedEvent`,
-  `OrderCompletedEvent`, `StockUnavailableEvent`). A listener in the module that serves the client reacts to them, as
-  `PaymentNotifier` does in recipe 5, and updates a read model the client polls, or pushes a notification
-  (WebSocket, server-sent events, email).
-- **Answer the request with what is already known**: `202 Accepted` with the order id, or the use case's own result.
-  The client follows the process by that id.
+    private final List<String> orderIds = new CopyOnWriteArrayList<>();
+
+    @TransactionalEventListener
+    public void on(SagaFailed failed) {
+        if (failed.sagaType().equals(OrderProcessingSaga.class.getName())) {
+            orderIds.add(failed.associations().get("orderId"));
+        }
+    }
+
+    /** @return the failed orders, in the order their failure committed */
+    public List<String> orderIds() {
+        return List.copyOf(orderIds);
+    }
+}
+```
+
+Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/FailedOrders.java`.
+
+`@TransactionalEventListener` runs after the unit of work that recorded the failure committed; in a Spring Modulith
+application `@ApplicationModuleListener` works the same way and retries through Modulith's registry. Testing the
+failure with the fixture, with the application's own payment service:
+
+```java
+@Test
+@DisplayName("a declined payment fails the saga and announces SagaFailed")
+void declined() {
+    fixture.givenAggregates(Order.create("o-3", true))
+            .when(new OrderCreatedEvent("o-3", new BigDecimal("-1.00")))
+            .expectStatus(SagaStatus.FAILED)
+            .expectOutcomeEvent(SagaFailed.class, failed -> failed.failedStep().equals("handleOrderCreated")
+                    && failed.causeType().equals(IllegalArgumentException.class.getName()));
+}```
+
+Source: `saga-forge-example-spring/src/test/java/io/github/gkosharovdev/sagaforge/example/spring/OrderSagaFixtureTest.java`.
+
+Rules:
+
+- An outcome event is not a domain event: a saga step cannot take one. Start follow-up work from a listener (publish a
+  domain event or send a command from there).
+- Delivery is at least once with the in-memory transport: deduplicate on `eventId()` (`sagaId:STATUS`) if acting twice
+  would hurt.
+- A rejected order is `COMPENSATED`, not `FAILED`; listen for `SagaCompensated` to react to it.
 
 <!-- docs/guide/testing.md -->
 
@@ -1208,7 +1241,8 @@ class OrderProcessingSagaFixtureTest {
                 .expectCommands(new ReserveStockCommand("o-1"))
                 .expectContext("paymentId", "payment-1")
                 .expectCompletedStep("processPayment")
-                .expectStatus(SagaStatus.RUNNING);
+                .expectStatus(SagaStatus.RUNNING)
+                .expectNoOutcomeEvent();
     }
 
     @Test
@@ -1219,7 +1253,10 @@ class OrderProcessingSagaFixtureTest {
                 .when(new StockUnavailableEvent("o-2"))
                 .expectCompensations("compensatePayment")
                 .expectCommands(new RefundPaymentCommand("saga-1", "payment-2", AMOUNT))
-                .expectCompensatedAfter("rejectOrder");
+                .expectCompensatedAfter("rejectOrder")
+                .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                        compensated.trigger().kind() == CompensationTriggerKind.FAILURE_OUTCOME
+                                && compensated.trigger().stepName().equals("rejectOrder"));
     }
 }
 ```
@@ -1249,7 +1286,8 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-1", amount))
                 .expectCommands(new ProcessPaymentCommand("o-1", amount), new ReserveStockCommand("o-1"))
                 .expectContext("orderAmount", "25.00")
-                .expectEndedWith("completeOrder");
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder"));
 
         assertThat(fixture.aggregate(Order.class, "o-1").orElseThrow().status()).isEqualTo(Order.Status.COMPLETED);
         assertThat(provider.charges()).containsValue(amount);
@@ -1262,7 +1300,9 @@ class OrderSagaFixtureTest {
                 .when(new OrderCreatedEvent("o-2", new BigDecimal("9.50")))
                 .expectCompensations("compensatePayment")
                 .expectCompensatedAfter("rejectOrder")
-                .expectStatus(SagaStatus.COMPENSATED);
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class,
+                        compensated -> compensated.trigger().stepName().equals("rejectOrder"));
 
         assertThat(provider.refunds()).containsValue(new BigDecimal("9.50"));
     }
@@ -1321,8 +1361,46 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 | `expectCompensations(String...)` | these compensations ran, in order |
 | `expectFailure(Class, FailureClassification)` | the recorded failure |
 | `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value or its absence |
+| `expectOutcomeEvent(Class, Predicate)` / `expectOutcomeEvent(Class)` / `expectNoOutcomeEvent()` | exactly one outcome event (`SagaCompleted`, `SagaFailed`, `SagaCompensated`) of that type matching / of that type / none |
 | `instance(Class, String)` | switch to the instance with that association value (several sagas reacting) |
 | `result()` | the `EventResult`, for your own assertions |
+
+## Outcome events
+
+When a saga ends, the runtime records one outcome event: `SagaCompleted`, `SagaFailed` or `SagaCompensated`. The
+fixture collects the ones the event under test caused; `expectOutcomeEvent` checks that exactly one was committed and
+that it matches, and `expectNoOutcomeEvent` that the saga is still running.
+
+```java
+    @Test
+    @DisplayName("completion: the order's completion ends the saga and announces SagaCompleted")
+    void completionIsAnnounced() {
+        SagaFixture.of(OrderProcessingSaga.class).build()
+                .given(new OrderCreatedEvent("o-4", AMOUNT), new PaymentProcessedEvent("payment-4", "o-4", AMOUNT))
+                .when(new OrderCompletedEvent("o-4"))
+                .expectEndedWith("completeOrder")
+                .expectOutcomeEvent(SagaCompleted.class, completed -> completed.outcomeStep().equals("completeOrder")
+                        && completed.associations().get("orderId").equals("o-4"));
+    }
+
+    @Test
+    @DisplayName("start-step failure: the payment keeps timing out, the saga fails and announces SagaFailed")
+    void startFailureIsAnnounced() {
+        PaymentProvider provider = new PaymentProvider();
+        provider.timeOutNext(10);
+        SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class).handlers(new PaymentService(provider)).build();
+
+        fixture.when(new OrderCreatedEvent("o-5", AMOUNT))
+                .expectStatus(SagaStatus.FAILED)
+                .expectOutcomeEvent(SagaFailed.class, failed -> failed.failedStep().equals("handleOrderCreated")
+                        && failed.classification() == FailureClassification.EXHAUSTED && failed.attempts() == 3);
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
+
+With a chosen `instance(...)`, only that instance's outcome event counts. `result().outcomeEvents()` lists them for
+your own assertions. Build the fixture with `outcomeEvents(false)` to match an application that switched them off.
 
 ## What the fixture catches before production
 
@@ -1360,6 +1438,7 @@ with your own bean.
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
+| `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
 | `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |
@@ -1384,12 +1463,14 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
   applies to in its header comment. Run each once, in one transaction, while no runtime is running. Release notes list
   any new upgrade script.
+- `schema-upgrade-011.sql` renames the status `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` and removes the
+  history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -1465,7 +1546,7 @@ Metrics:
 |---|---|---|---|
 | `saga_forge.handle.duration`, `.attempt.duration`, `.step.duration`, `.command.duration`, `.compensation.duration`, `.delivery.duration` | histogram | s | the span's low-cardinality attributes |
 | `saga_forge.saga.started` | counter | — | `saga_forge.saga.type` |
-| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `requires_intervention`) |
+| `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `compensation_failed`) |
 | `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
 | `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
@@ -1477,8 +1558,8 @@ Example alerts, in PromQL, assuming the OpenTelemetry-to-Prometheus name transla
 counters gain `_total`, units become suffixes):
 
 ```promql
-# Sagas failing or needing intervention, per saga type
-sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|requires_intervention"}[5m])) > 0
+# Sagas failing or failing to compensate, per saga type
+sum by (saga_forge_saga_type) (rate(saga_forge_saga_ended_total{saga_forge_saga_outcome=~"failed|compensation_failed"}[5m])) > 0
 
 # Compensations as a share of finished sagas
 sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]))
@@ -1495,6 +1576,64 @@ saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 ```
 
 
+## Outcome events
+
+When a saga instance reaches a terminal status, the unit of work that writes the status also records one outcome
+event (`io.github.gkosharovdev.sagaforge.core.outcome`):
+
+| Status | Outcome event |
+|---|---|
+| `COMPLETED` | `SagaCompleted`, with the `@EndSaga` step that ended it |
+| `FAILED` | `SagaFailed` with `phase() == STEP`: the failed step, its classification, cause type and attempts |
+| `COMPENSATION_FAILED` | `SagaFailed` with `phase() == COMPENSATION`: the compensation that failed, plus `compensationTrigger()` |
+| `COMPENSATED` | `SagaCompensated`, with `trigger()`: why compensation started |
+
+Every outcome event carries the saga type, the saga id, the instance's associations and the time. It never carries a
+failure message, a `SagaContext` value or a saga field. Its `eventId()` is `sagaId:STATUS` and is the same on every
+delivery, so a listener that must act once deduplicates on it.
+
+An outcome event is **not a domain event**: no saga step can take one (the model is rejected at startup), and the
+runtime hands a delivered outcome event to no saga. Applications, policies and other modules listen for it.
+
+How reliably it arrives depends on the outbox, like any event the unit of work records:
+
+| Outbox | Stored | Delivered |
+|---|---|---|
+| In-memory transport (own log) | in the terminal write's transaction | at least once |
+| In-memory transport, Spring Modulith interop | in Modulith's registry, same transaction | at least once |
+| `ImmediateDispatchOutbox` (the default without a transport) | not stored; dispatched after commit | at most once |
+| Saga test fixture | staged in the transaction, released on commit | exactly once, synchronous |
+
+**Listening.** In Spring Boot, outcome events are published as application events by the same rule as recorded events
+(`saga-forge.application-events.mode`): use `@TransactionalEventListener` or `@ApplicationModuleListener`, which run
+after the commit and never for a rolled-back unit of work; see [recipe 6](recipes.md#6-reacting-to-how-a-saga-ended).
+In a plain Java host, register a delivery callback on the in-memory transport; the starter's after-delivery bridge
+does exactly that:
+
+```java
+public ApplicationEventBridge(InMemoryTransport transport, ApplicationEventPublisher publisher) {
+    this.publisher = publisher;
+    transport.onDelivered(this::publish);
+}
+```
+
+Source: `saga-forge-spring-boot-starter/src/main/java/io/github/gkosharovdev/sagaforge/spring/transport/ApplicationEventBridge.java`.
+
+The in-memory transport orders outcome events per instance (ordering key `saga:<sagaId>`).
+
+**Switching them off.** `saga-forge.outcome-events.enabled=false`, `SagaRuntime.Builder.outcomeEvents(false)` or, in
+tests, `SagaFixture.Builder.outcomeEvents(false)`.
+
+**Failures of the outbox.** With an `IN_TRANSACTION` outbox (the in-memory transport), a failure to store the outcome
+event rolls back the write it belongs to: for a failed saga, the `FAILED` status is then not written, the runtime logs
+`saga.instance.failedNotRecorded` and the exception reaches the caller. With an `AFTER_COMMIT` outbox the status stays
+written and the failure is listed in the handling result's `outboxFailures()`.
+
+**Failure text.** Outcome events carry no failure message, but logs and spans can (spans only with
+`saga-forge.telemetry.record-failure-messages=true`). Mask secrets in your logging backend (Logback `%replace`, Log4j2
+`RegexReplacement`) and in the OpenTelemetry Collector (`redaction` or `transform` processor). The `saga_instance` and
+lifecycle-history tables keep the raw message.
+
 ## Statuses an operator sees
 
 | `SagaStatus` | Meaning | Action |
@@ -1504,7 +1643,7 @@ saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 | `COMPENSATING` | compensations are being run | resumes on the next event for the instance |
 | `COMPENSATED` | all committed steps undone | none |
 | `FAILED` | an unclassified failure; committed effects stay in place | investigate; no resume path |
-| `REQUIRES_INTERVENTION` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
+| `COMPENSATION_FAILED` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
 | `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | investigate |
 
 <!-- docs/guide/limitations.md -->
@@ -1518,13 +1657,14 @@ status in later releases.
 | # | Limitation | Design around it |
 |---|---|---|
 | 1 | **One running application instance per database** (G-007-09). The in-memory transport's relay assumes it is the only consumer of its message store; a second instance is detected and logged, not coordinated. | Run one replica, or put sagas in a single-replica deployment. Blue/green deploys must stop the old instance before the new one delivers. |
-| 2 | **No operator path out of `REQUIRES_INTERVENTION`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=requires_intervention}`; repair by hand. |
+| 2 | **No operator path out of `COMPENSATION_FAILED`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=compensation_failed}`; repair by hand. |
 | 3 | **No deadlines or scheduled waits** (G-ENG-25, G-005-01). A saga waits for its next event forever; retry backoff is in-process and capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Run a scheduled job that finds stale instances and publishes a timeout event the saga has a step for. Keep retry policies short. |
 | 4 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
 | 5 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
 | 6 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |
 | 7 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
 | 8 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
+| 9 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
 
 Further constraints of the model:
 

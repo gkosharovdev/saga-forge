@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
@@ -39,7 +40,7 @@ import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.TakePayment;
 
 /**
  * FR-017 and SC-003: every scenario of User Stories 1 to 3 gives the same handling outcomes, stored instances and
- * committed commands through the fixture as through a {@link SagaRuntime} assembled by hand over the runtime's own test
+ * committed commands, and since {@code specs/011-saga-outcome-events} the same outcome events, through the fixture as through a {@link SagaRuntime} assembled by hand over the runtime's own test
  * doubles, with the same clock, identities and command failures (tasks.md T058).
  */
 class FixtureParityTest {
@@ -61,7 +62,8 @@ class FixtureParityTest {
     }
 
     /** What one run observed. */
-    private record Observed(List<List<Handled>> outcomes, List<Optional<SagaInstance>> instances, List<Sent> commands) {
+    private record Observed(List<List<Handled>> outcomes, List<Optional<SagaInstance>> instances, List<Sent> commands,
+            List<SagaOutcome> outcomeEvents) {
     }
 
     static Stream<Arguments> scenarios() {
@@ -99,6 +101,7 @@ class FixtureParityTest {
         assertThat(fixture.outcomes()).as("handling outcomes").isEqualTo(assembled.outcomes());
         assertThat(fixture.instances()).as("stored instances").isEqualTo(assembled.instances());
         assertThat(fixture.commands()).as("committed commands").isEqualTo(assembled.commands());
+        assertThat(fixture.outcomeEvents()).as("outcome events").isEqualTo(assembled.outcomeEvents());
     }
 
     private static Observed throughFixture(List<Object> events, List<Failure> failures) {
@@ -112,14 +115,17 @@ class FixtureParityTest {
         }
         SagaFixture fixture = builder.build();
         List<List<Handled>> outcomes = new ArrayList<>();
+        List<SagaOutcome> outcomeEvents = new ArrayList<>();
         for (Object event : events) {
-            outcomes.add(fixture.when(event).result().results().stream().map(Handled::of).toList());
+            EventResult result = fixture.when(event).result();
+            outcomes.add(result.results().stream().map(Handled::of).toList());
+            outcomeEvents.addAll(result.outcomeEvents());
         }
         List<Optional<SagaInstance>> instances = sagaIds(outcomes).stream()
                 .map(id -> fixture.current(id).map(InstanceView::stored)).toList();
         List<Sent> commands = fixture.commands().stream()
                 .map(command -> new Sent(command.command(), command.commandId())).toList();
-        return new Observed(outcomes, instances, commands);
+        return new Observed(outcomes, instances, commands, outcomeEvents);
     }
 
     private static Observed throughAssembledRuntime(List<Object> events, List<Failure> failures) {
@@ -163,7 +169,9 @@ class FixtureParityTest {
         }
         List<Optional<SagaInstance>> instances = sagaIds(outcomes).stream()
                 .map(id -> storage.committed().findById(id)).toList();
-        return new Observed(outcomes, instances, List.copyOf(committed));
+        List<SagaOutcome> outcomeEvents = transport.dispatched().stream().filter(SagaOutcome.class::isInstance)
+                .map(SagaOutcome.class::cast).toList();
+        return new Observed(outcomes, instances, List.copyOf(committed), outcomeEvents);
     }
 
     private static List<String> sagaIds(List<List<Handled>> outcomes) {

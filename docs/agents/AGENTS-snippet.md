@@ -24,8 +24,10 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - `SagaContext` values are JSON scalars: store `BigDecimal` as `toPlainString()`, `Instant` as a string.
 - Handlers that call outside systems take a `CommandId` and pass `commandId.value()` as the idempotency key.
 - Business failures are events handled by a `@StartCompensation` step; undo steps with
-  `@SagaCompensation(forStep = "<step method name>")`.
-- Never make a request wait for a saga's result. Do request-time work in the use case, then publish the start event;
-  clients follow progress through the domain events the handlers record (listeners, read models).
+  `@SagaCompensation(forStep = "<step method name>")`. A `FinalFailure` compensates only after an earlier unit of work
+  of the instance committed; otherwise the saga ends `FAILED`.
+- A saga that ends records `SagaCompleted`, `SagaFailed` or `SagaCompensated` (`core.outcome`); listen with
+  `@TransactionalEventListener` or `@ApplicationModuleListener`, deduplicate on `eventId()`. No saga step can take one.
+  A failed compensation ends `COMPENSATION_FAILED`.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

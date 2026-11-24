@@ -59,7 +59,7 @@
   of work (`CompensationRun`/`CompensationUnitOfWork`), after a `@StartCompensation` step commits or a `FINAL`/
   `EXHAUSTED` failure once a step committed (`CompensationStartWrite`); an `UNCLASSIFIED` failure, or one with nothing
   committed, still ends `FAILED`. New terminal statuses `COMPENSATED` and `REQUIRES_INTERVENTION` (a failed
-  compensation, never retried); `SagaInstance.compensationTrigger`, `StepRecord.compensation` (`StepCompensation`),
+  compensation, never retried; renamed `COMPENSATION_FAILED` by 011); `SagaInstance.compensationTrigger`, `StepRecord.compensation` (`StepCompensation`),
   five lifecycle kinds; any event for a `COMPENSATING` instance resumes compensation (checked before the duplicate
   check). Postgres persists it; existing databases apply `schema-upgrade-006.sql`.
 - Implemented and tested, added by `specs/007-in-memory-transport`: the in-memory transport. The 004 handoff SPI is
@@ -80,7 +80,7 @@
   with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests). With 009 (the fixture,
   the interceptor and the example fixture tests) the whole build, container suites included, passed on 2026-11-12
   (1,574 tests). With 010 (OpenTelemetry instrumentation) the whole build, container suites included, passed on
-  2026-11-12 (1,612 tests; the opt-in `TelemetryOverheadTest` skipped).
+  2026-11-12 (1,612 tests; the opt-in `TelemetryOverheadTest` skipped). With 011 (outcome events) the whole build, container suites included, passed on 2026-11-20 (1,669 tests; `TelemetryOverheadTest` skipped).
 - Implemented and tested, including container suites, added by `specs/008-spring-boot-starter`: the Spring Boot
   starter assembles and starts the runtime with no host code. It collects the model (auto-configuration packages,
   beans, `saga-forge.scan-packages`, `SagaModelContributor`), detects storage (`saga-forge.storage.type` when
@@ -117,6 +117,21 @@
   bean on (`SagaForgeTelemetryConfiguration`, `SagaForgeTelemetry`, `saga-forge.telemetry.*`); the Spring example
   proves it through Micrometer Tracing's OpenTelemetry bridge. `SagaFixture.Builder.openTelemetry` for fixture tests.
   No own observation SPI and no Micrometer instrumentation (G-010-06).
+- Implemented and tested, including container suites, added by `specs/011-saga-outcome-events`: one unit of work and
+  outcome events. Every runtime write (step, start-compensation, compensation, `FAILED` and failed-compensation
+  writes) runs through one package-private `runtime.internal.UnitOfWork` (scopes `forInstance`/`forNewInstance`/
+  `standalone`; `Work` admit/perform; results `Committed`/`NotRun`/`Failed`/`Conflicted`), held to that by the ArchUnit
+  rule in `UnitOfWorkBoundaryTest`. Core gains `core.outcome`: sealed `SagaOutcome` = `SagaCompleted`, `SagaFailed`
+  (`FailurePhase` `STEP`/`COMPENSATION`) and `SagaCompensated`, with `OutcomeTrigger`; `eventId` is `sagaId:STATUS`.
+  The unit of work that writes a terminal status appends one outcome event last to its batch's `events` and
+  `recordedEvents` (no failure message, context value or saga field); status writes release their `AFTER_COMMIT`
+  outbox after the instance lock and report its failures in `outboxFailures` (now allowed for `FAILED` too).
+  `SagaRuntime.Builder.outcomeEvents(boolean)` (default `true`), starter property `saga-forge.outcome-events.enabled`,
+  `SagaFixture.Builder.outcomeEvents`; the runtime accepts a delivered outcome event and hands it to no saga; the
+  in-memory transport keys it `saga:<sagaId>`. Fixture: `EventResult.outcomeEvents()`, `Then.expectOutcomeEvent`/
+  `expectNoOutcomeEvent`. `REQUIRES_INTERVENTION` is renamed `COMPENSATION_FAILED` (`SagaStatus`, `HandlingOutcome`,
+  telemetry `compensation_failed`) and its lifecycle kind removed; existing databases apply `schema-upgrade-011.sql`.
+  Property 38. The Spring example's `FailedOrders` listens for `SagaFailed`.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -133,7 +148,8 @@
   `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
 - `saga-forge-runtime` — the saga runtime; depends on the JDK, `saga-forge-core` and `opentelemetry-api` (010) only. Public surface:
   `SagaRuntime` with its host-facing builder, `StartupReport`, `SagaRuntimeStartupException`,
-  `ImmediateDispatchOutbox`; everything else is package-private in `engine.internal`. Every contract it needs lives
+  `ImmediateDispatchOutbox`; everything else is package-private in `runtime.internal`, where every write goes through
+  `UnitOfWork` (ArchUnit test scope only, `UnitOfWorkBoundaryTest`). Every contract it needs lives
   in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
   `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
   `TransactionalInMemoryStorageProvider`, `TestTransport`, ...).
@@ -241,7 +257,7 @@
   during a fresh event's first attempt is not counted (G-005-05); a retry of a start unit of work does not resume
   after a crash (G-005-06).
 - Compensation limitations, see memory.md G-006-02 to G-006-09: no confirmation wait for an undo (G-006-02); no
-  operator path out of `REQUIRES_INTERVENTION` (G-006-03); no "irreversible step" marker (G-006-04); a `COMPENSATING`
+  operator path out of `COMPENSATION_FAILED` (G-006-03); no "irreversible step" marker (G-006-04); a `COMPENSATING`
   instance with no further event never resumes (G-006-05); a compensation sees the trigger's event type, not the
   event (G-006-06); upgraded instances may get a name-ordered `completionSequence` (G-006-07); compensations block the
   caller and hold the instance (G-006-08); a failed compensation is never retried (G-006-09). A compensation
@@ -289,6 +305,10 @@
   (G-009-04); aggregates without a no-argument constructor are shared, not copied (G-009-05); `Long` read-back as
   `Integer` is not emulated (G-009-06); outbox commands are reported at delivery, after the sender's own (G-009-07).
 
+- Outcome events (011), see memory.md G-011-01 and G-011-06 to G-011-08: no saga step can react to another saga's
+  outcome event, so follow-up work starts from a listener (G-011-01); a status write's batch reuses the rolled-back
+  unit of work's id (G-011-06); the fixture collects outcome events instead of delivering them (G-011-07).
+
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,
   not MDC (G-010-04); saga metrics need an OpenTelemetry metric exporter, Spring Boot defines none (G-010-05); no
@@ -310,6 +330,21 @@
   Saga, Step, Compensation — see `docs/architecture.md#vocabulary` for definitions.
 - Whenever you notice a gap, limitation or deferred decision, record it in `.specify/memory/memory.md` with an
   ID; don't silently fix or ignore it.
+- Favour composition over inheritance: reuse behaviour by holding and delegating to collaborators, not by
+  extending a concrete class. Inheritance is for types designed for it (sealed hierarchies, value variants); a
+  new class hierarchy needs a justification in `plan.md` (constitution, Development Workflow).
+- Test an abstraction before you propose it: a newly invented interface, SPI, abstract type or extension point
+  gets a concrete caller and a test against it (a test double or a second implementation) first. Don't put an
+  abstraction in `plan.md`, `tasks.md` or code that no test has exercised.
+- Favour intention-revealing abstractions and interfaces that the community already knows. When you map a
+  request to class design and an invocation chain, rate each proposed abstraction in the narrative by how
+  popular, and so how understandable, it is: established patterns, well-known libraries and frameworks, common
+  engineering vocabulary (Repository, Gateway, Outbox, Policy, Handler, Resolver). If an abstraction or its name
+  is too boutique, with no counterpart in known community code or common usage, avoid it and propose a
+  recognisable alternative.
+- Before class-level design (`/speckit-plan`'s data model and contracts) and before implementation
+  (`/speckit-implement`), propose loading the `effective-java`, `clean-code-java` and `solid-design-review`
+  skills, and apply them to the types you design.
 
 ## Consumer Documentation
 - `docs/guide/` is the user guide for applications that use Saga Forge (no spec numbers or gap ids in the prose,

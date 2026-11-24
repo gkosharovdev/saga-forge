@@ -184,7 +184,7 @@ class EngineCommandGatewayTest {
     }
 
     /** A bound engine unit of work that records events and failure reports. */
-    private static final class RecordingUnitOfWork implements UnitOfWork {
+    private static final class RecordingUnitOfWork implements BoundUnitOfWork {
 
         private final List<Object> recorded = new ArrayList<>();
         private final List<Throwable> failures = new ArrayList<>();

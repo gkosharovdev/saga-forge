@@ -180,7 +180,7 @@ class CompensationVocabularyTest {
         void triggerIffCompensation() {
             for (SagaStatus status : SagaStatus.values()) {
                 boolean compensation = SagaInstance.isCompensation(status);
-                Map<String, StepRecord> steps = status == SagaStatus.REQUIRES_INTERVENTION
+                Map<String, StepRecord> steps = status == SagaStatus.COMPENSATION_FAILED
                         ? Map.of("a", completed(1, StepCompensation.failed(failure("a", FailureClassification.FINAL))))
                         : Map.of();
                 if (compensation) {
@@ -216,16 +216,16 @@ class CompensationVocabularyTest {
         }
 
         @Test
-        @DisplayName("exactly one failed compensation if and only if REQUIRES_INTERVENTION")
+        @DisplayName("exactly one failed compensation if and only if COMPENSATION_FAILED")
         void exactlyOneFailure() {
             StepCompensation failed = StepCompensation.failed(failure("b", FailureClassification.FINAL));
-            assertThatCode(() -> instance(SagaStatus.REQUIRES_INTERVENTION, Map.of(
+            assertThatCode(() -> instance(SagaStatus.COMPENSATION_FAILED, Map.of(
                     "a", completed(1, StepCompensation.notAttempted()),
                     "b", completed(2, failed)), REJECTED)).doesNotThrowAnyException();
-            assertThatThrownBy(() -> instance(SagaStatus.REQUIRES_INTERVENTION,
+            assertThatThrownBy(() -> instance(SagaStatus.COMPENSATION_FAILED,
                     Map.of("a", completed(1, StepCompensation.notAttempted())), REJECTED))
                     .hasMessageContaining("exactly one step must have a FAILED compensation");
-            assertThatThrownBy(() -> instance(SagaStatus.REQUIRES_INTERVENTION, Map.of(
+            assertThatThrownBy(() -> instance(SagaStatus.COMPENSATION_FAILED, Map.of(
                     "a", completed(1, failed), "b", completed(2, failed)), REJECTED))
                     .hasMessageContaining("exactly one step must have a FAILED compensation");
             assertThatThrownBy(() -> instance(SagaStatus.COMPENSATING, Map.of("a", completed(1, failed)), REJECTED))
@@ -258,7 +258,7 @@ class CompensationVocabularyTest {
         }
 
         @Test
-        @DisplayName("each compensation kind accepts exactly its parts")
+        @DisplayName("each compensation kind accepts exactly its parts; COMPENSATION_FAILED is the terminal entry (011)")
         void accepted() {
             SagaFailure refused = failure("pay", FailureClassification.FINAL);
             assertThatCode(() -> {
@@ -266,7 +266,6 @@ class CompensationVocabularyTest {
                 entry(SagaLifecycleEventKind.STEP_COMPENSATED, "pay", null, null);
                 entry(SagaLifecycleEventKind.COMPENSATION_FAILED, "pay", refused, null);
                 entry(SagaLifecycleEventKind.COMPENSATED, null, null, null);
-                entry(SagaLifecycleEventKind.REQUIRES_INTERVENTION, null, null, null);
             }).doesNotThrowAnyException();
         }
 
@@ -281,7 +280,7 @@ class CompensationVocabularyTest {
                     .hasMessageContaining("stepName must be non-null");
             assertThatThrownBy(() -> entry(SagaLifecycleEventKind.COMPENSATION_FAILED, "pay", null, null))
                     .hasMessageContaining("failure must be non-null");
-            assertThatThrownBy(() -> entry(SagaLifecycleEventKind.REQUIRES_INTERVENTION, "pay", null, null))
+            assertThatThrownBy(() -> entry(SagaLifecycleEventKind.COMPENSATED, "pay", null, null))
                     .hasMessageContaining("stepName must be non-null");
         }
 

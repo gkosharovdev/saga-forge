@@ -37,4 +37,9 @@ public class OrderApp {
     PaymentService paymentService() {
         return new PaymentService();
     }
+
+    @Bean
+    OutcomeListener outcomeListener() {
+        return new OutcomeListener();
+    }
 }

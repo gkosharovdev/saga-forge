@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.RecordingEventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -91,8 +93,9 @@ class OutboxObligationsTest {
         SagaHandlingResult result = onlyResult(fixture.requestParcel("parcel-1", 4));
 
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.FAILED);
-        assertThat(fixture.outbox().received()).isEmpty();
-        assertThat(fixture.dispatcher().dispatched()).isEmpty();
+        // 011: the FAILED write hands off its outcome event; the rolled-back unit of work hands off nothing.
+        assertThat(CapturingOutbox.withoutOutcomes(fixture.outbox().received())).isEmpty();
+        assertThat(fixture.outbox().outcomes()).singleElement().isInstanceOf(SagaFailed.class);
     }
 
     @Test
@@ -106,7 +109,8 @@ class OutboxObligationsTest {
         assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
         assertThat(result.outcomeStep()).isEqualTo(AuditSaga.END_STEP);
         assertThat(outbox.received()).singleElement().satisfies(batch -> {
-            assertThat(batch.events()).containsExactly(new CaseEscalated(CASE));
+            assertThat(batch.events()).hasSize(2).first().isEqualTo(new CaseEscalated(CASE));
+            assertThat(batch.events().get(1)).isInstanceOf(SagaCompleted.class);
             assertThat(batch.unitOfWorkId()).isEqualTo(result.unitOfWorkId());
             assertThat(batch.sagaType()).isEqualTo(AuditSaga.class.getName());
             assertThat(batch.sagaId()).isEqualTo(result.sagaId());

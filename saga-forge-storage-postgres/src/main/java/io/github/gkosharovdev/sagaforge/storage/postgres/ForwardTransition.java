@@ -27,11 +27,11 @@ final class ForwardTransition {
      * Rejects an {@code incoming} snapshot that is not a forward transition from {@code previous}
      * (contracts/concurrency-control.md "Forward transition"): every step {@code COMPLETED} in {@code previous}
      * must be {@code COMPLETED} in {@code incoming} with an equal {@code touchedAggregates} list, and a terminal
-     * ({@code COMPLETED}, {@code FAILED}, {@code COMPENSATED}, {@code REQUIRES_INTERVENTION}) previous status must be
+     * ({@code COMPLETED}, {@code FAILED}, {@code COMPENSATED}, {@code COMPENSATION_FAILED}) previous status must be
      * unchanged. Since 006: a completed step keeps its {@code completionSequence}; its compensation only moves
      * {@code null -> NOT_ATTEMPTED | NOTHING_TO_COMPENSATE} and {@code NOT_ATTEMPTED -> COMPENSATED | FAILED}; a
      * recorded compensation trigger never changes; {@code COMPENSATING} only moves to {@code COMPENSATED} or
-     * {@code REQUIRES_INTERVENTION} (specs/006-saga-compensation contracts/storage-delta.md). A previously completed step missing
+     * {@code COMPENSATION_FAILED} (specs/006-saga-compensation contracts/storage-delta.md). A previously completed step missing
      * from {@code incoming} is a violation; a previously {@code NOT_RUN} step may be missing, and anything else
      * may differ ({@code .specify/memory/memory.md} G-003-15).
      *
@@ -89,7 +89,7 @@ final class ForwardTransition {
         }
         SagaStatus previousStatus = previous.status();
         boolean terminal = previousStatus == SagaStatus.COMPLETED || previousStatus == SagaStatus.FAILED
-                || previousStatus == SagaStatus.COMPENSATED || previousStatus == SagaStatus.REQUIRES_INTERVENTION;
+                || previousStatus == SagaStatus.COMPENSATED || previousStatus == SagaStatus.COMPENSATION_FAILED;
         if (terminal && incoming.status() != previousStatus) {
             throw new ConcurrentSagaUpdateException(sagaId, "status is terminal " + previousStatus
                     + " but the incoming snapshot has " + incoming.status());

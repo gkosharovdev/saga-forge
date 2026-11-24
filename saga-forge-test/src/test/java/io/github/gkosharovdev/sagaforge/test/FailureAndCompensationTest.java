@@ -118,7 +118,7 @@ class FailureAndCompensationTest {
     }
 
     @Test
-    @DisplayName("scenario 5: a failing compensation requires intervention")
+    @DisplayName("scenario 5: a failing compensation ends COMPENSATION_FAILED")
     void failingCompensation() {
         SagaFixture.of(ShopSaga.class)
                 .failCommand(RefundPayment.class, refund -> refund.amount().equals("10"),
@@ -126,8 +126,8 @@ class FailureAndCompensationTest {
                 .build()
                 .given(new OrderPlaced("o-9", "10"), new PaymentTaken("payment-9", "o-9", "10"))
                 .when(new StockMissing("o-9"))
-                .expectOutcome(HandlingOutcome.REQUIRES_INTERVENTION)
-                .expectStatus(SagaStatus.REQUIRES_INTERVENTION)
+                .expectOutcome(HandlingOutcome.COMPENSATION_FAILED)
+                .expectStatus(SagaStatus.COMPENSATION_FAILED)
                 .expectCompensations(Shop.REFUND + " (failed)")
                 .expectFailure(IllegalStateException.class, FailureClassification.UNCLASSIFIED)
                 .expectNoCommands();

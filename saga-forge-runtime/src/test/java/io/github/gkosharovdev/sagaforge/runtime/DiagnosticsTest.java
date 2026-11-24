@@ -168,7 +168,8 @@ class DiagnosticsTest {
 
         Logged outbox = logged(fixture.logger(), "saga.outbox.failed", Level.ERROR, "uow", "sagaType", "sagaId",
                 "events");
-        assertThat(outbox.keys()).containsEntry("uow", result.unitOfWorkId()).containsEntry("events", "1");
+        assertThat(outbox.keys()).containsEntry("uow", result.unitOfWorkId()).containsEntry("events", "2");
+        // 011: the batch is the label event plus the trailing SagaCompleted outcome event.
         assertThat(outbox.thrown()).isSameAs(failure);
     }
 }

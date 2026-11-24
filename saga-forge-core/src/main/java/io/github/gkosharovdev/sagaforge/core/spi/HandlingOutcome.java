@@ -61,7 +61,7 @@ public enum HandlingOutcome {
 
     /**
      * A compensation failed: its unit of work rolled back, unwinding stopped, and the instance is
-     * {@link SagaStatus#REQUIRES_INTERVENTION} ({@code specs/006-saga-compensation} FR-016). Never retried.
+     * {@link SagaStatus#COMPENSATION_FAILED} ({@code specs/006-saga-compensation} FR-016). Never retried.
      */
-    REQUIRES_INTERVENTION
+    COMPENSATION_FAILED
 }

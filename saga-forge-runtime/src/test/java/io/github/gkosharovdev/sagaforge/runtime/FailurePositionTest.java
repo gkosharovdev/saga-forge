@@ -3,6 +3,9 @@ package io.github.gkosharovdev.sagaforge.runtime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
@@ -19,6 +22,7 @@ import io.github.gkosharovdev.sagaforge.runtime.fixtures.failure.FeeCharged;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.failure.FeeService;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.failure.InjectedFault;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.failure.LabelPrinted;
+import io.github.gkosharovdev.sagaforge.runtime.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.runtime.support.RecordingLogger.Logged;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider.StoredEntry;
 import java.util.Arrays;
@@ -101,8 +105,12 @@ class FailurePositionTest {
                 WEIGHT * FailureFixture.CENTS_PER_KILOGRAM);
         assertThat(fixture.slots().reservations()).hasSize(1);
         assertThat(fixture.labels().printed()).hasSize(1);
-        assertThat(fixture.outbox().received()).singleElement()
-                .satisfies(batch -> assertThat(batch.events()).singleElement().isInstanceOf(LabelPrinted.class));
+        assertThat(fixture.outbox().received()).singleElement().satisfies(batch -> {
+            assertThat(batch.events()).hasSize(2);
+            assertThat(batch.events().get(0)).isInstanceOf(LabelPrinted.class);
+            // 011: the terminal unit of work ends its batch with the outcome event.
+            assertThat(batch.events().get(1)).isInstanceOf(SagaCompleted.class);
+        });
     }
 
     @ParameterizedTest(name = "{0}")
@@ -128,8 +136,11 @@ class FailurePositionTest {
         assertThat(instance.steps().values()).containsOnly(StepRecord.notRun());
 
         assertThat(fixture.noClientChanges()).isTrue();
-        assertThat(fixture.outbox().received()).isEmpty();
-        assertThat(fixture.dispatcher().dispatched()).isEmpty();
+        // 011: only the FAILED write's outcome event reaches the outbox; nothing of the rolled-back unit of work does.
+        assertThat(CapturingOutbox.withoutOutcomes(fixture.outbox().received())).isEmpty();
+        assertThat(fixture.outbox().outcomes()).singleElement().isInstanceOfSatisfying(SagaFailed.class,
+                failed -> assertThat(failed.failedStep()).isEqualTo(position.failingStep()));
+        assertThat(fixture.dispatcher().dispatched()).allMatch(SagaOutcome.class::isInstance);
 
         assertThat(fixture.context(result.sagaId())).containsEntry(FailureSaga.CONTEXT_WEIGHT, WEIGHT);
         if (position.feeIdWritten()) {
@@ -157,7 +168,7 @@ class FailurePositionTest {
         assertThat(result.failure().message()).contains(FaultPoint.SLOT_HANDLER.name());
         assertThat(fixture.committed(result.sagaId()).status()).isEqualTo(SagaStatus.FAILED);
         assertThat(fixture.noClientChanges()).isTrue();
-        assertThat(fixture.outbox().received()).isEmpty();
+        assertThat(CapturingOutbox.withoutOutcomes(fixture.outbox().received())).isEmpty();
     }
 
     @Test

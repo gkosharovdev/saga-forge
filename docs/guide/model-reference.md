@@ -87,7 +87,7 @@ Other types a model uses:
 
 - **Runs when**: a `@StartCompensation` step committed, or a step failed `FINAL` (exception implements `FinalFailure`)
   or `EXHAUSTED` (transient failure, attempts used up) after an earlier unit of work committed. Only steps that
-  completed are compensated. A compensation that throws is never retried: the instance ends `REQUIRES_INTERVENTION`.
+  completed are compensated. A compensation that throws is never retried: the instance ends `COMPENSATION_FAILED`.
   A compensation can run again after a crash, so the commands it sends must be idempotent (pass `CommandId` on).
 
 ### `@RetryPolicy`

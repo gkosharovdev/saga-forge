@@ -18,7 +18,7 @@ import java.util.Map;
  *                                  {@code RUNNING}, if
  *                                  {@code compensationTrigger} breaks its rule, if a step has a compensation state
  *                                  outside compensation, if a {@code COMPENSATED} instance has a step not yet
- *                                  compensated or failed, or if a {@code REQUIRES_INTERVENTION} instance does not
+ *                                  compensated or failed, or if a {@code COMPENSATION_FAILED} instance does not
  *                                  have exactly one failed compensation.</p>
  *
  * @param sagaId           unique identifier
@@ -39,7 +39,7 @@ import java.util.Map;
  *                         ({@code specs/005-step-retry} FR-015). Written in its own transaction, like
  *                         {@code failure}
  * @param compensationTrigger why the instance entered compensation; non-null if and only if {@code status} is
- *                         {@code COMPENSATING}, {@code COMPENSATED} or {@code REQUIRES_INTERVENTION}
+ *                         {@code COMPENSATING}, {@code COMPENSATED} or {@code COMPENSATION_FAILED}
  *                         ({@code specs/006-saga-compensation} FR-017). Written once, by the write that enters
  *                         {@code COMPENSATING}
  */
@@ -81,7 +81,7 @@ public record SagaInstance(
         boolean compensation = isCompensation(status);
         if (compensation != (compensationTrigger != null)) {
             throw new IllegalArgumentException("compensationTrigger must be non-null if and only if status is "
-                + "COMPENSATING, COMPENSATED or REQUIRES_INTERVENTION, but status is " + status);
+                + "COMPENSATING, COMPENSATED or COMPENSATION_FAILED, but status is " + status);
         }
         requireCompensationStates(status, steps);
     }
@@ -131,10 +131,10 @@ public record SagaInstance(
             outcome, failure, pendingRetry, trigger);
     }
 
-    /** {@code true} for {@code COMPENSATING}, {@code COMPENSATED} and {@code REQUIRES_INTERVENTION}. */
+    /** {@code true} for {@code COMPENSATING}, {@code COMPENSATED} and {@code COMPENSATION_FAILED}. */
     public static boolean isCompensation(SagaStatus status) {
         return status == SagaStatus.COMPENSATING || status == SagaStatus.COMPENSATED
-            || status == SagaStatus.REQUIRES_INTERVENTION;
+            || status == SagaStatus.COMPENSATION_FAILED;
     }
 
     private static void requireCompensationStates(SagaStatus status, Map<String, StepRecord> steps) {
@@ -146,7 +146,7 @@ public record SagaInstance(
             }
             if (!isCompensation(status)) {
                 throw new IllegalArgumentException("step " + entry.getKey() + " must have no compensation state "
-                    + "unless status is COMPENSATING, COMPENSATED or REQUIRES_INTERVENTION, but status is " + status);
+                    + "unless status is COMPENSATING, COMPENSATED or COMPENSATION_FAILED, but status is " + status);
             }
             CompensationStatus state = compensation.status();
             if (status == SagaStatus.COMPENSATED
@@ -158,10 +158,10 @@ public record SagaInstance(
                 failed++;
             }
         }
-        boolean intervention = status == SagaStatus.REQUIRES_INTERVENTION;
-        if (intervention ? failed != 1 : failed != 0) {
+        boolean compensationFailed = status == SagaStatus.COMPENSATION_FAILED;
+        if (compensationFailed ? failed != 1 : failed != 0) {
             throw new IllegalArgumentException("exactly one step must have a FAILED compensation if and only if "
-                + "status is REQUIRES_INTERVENTION, but status is " + status + " with " + failed);
+                + "status is COMPENSATION_FAILED, but status is " + status + " with " + failed);
         }
     }
 

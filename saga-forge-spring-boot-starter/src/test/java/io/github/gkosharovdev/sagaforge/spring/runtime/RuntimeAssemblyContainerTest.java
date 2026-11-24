@@ -21,6 +21,7 @@ import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderApp;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.OrderCreatedEvent;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.ProcessPaymentCommand;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderProcessingSaga;
+import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OutcomeListener;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderRepository;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.PaymentService;
 import io.github.gkosharovdev.sagaforge.spring.support.StarterApp;
@@ -54,6 +55,27 @@ class RuntimeAssemblyContainerTest {
             await(() -> "COMPLETED".equals(status(OrderProcessingSaga.class)), "the order saga to complete");
             assertThat(context.getBean(PaymentService.class).charges()).containsValue(AMOUNT);
             await(() -> count(FulfilmentSaga.class) == 1, "the fulfilment saga to start through the transport");
+        }
+    }
+
+    @Test
+    @DisplayName("011 C4: a failed saga's SagaFailed reaches a transactional listener once, after the FAILED commit")
+    void failedSagaReachesListener() throws InterruptedException {
+        try (ConfigurableApplicationContext context = StarterApp.run(OrderApp.class)) {
+            OutcomeListener listener = context.getBean(OutcomeListener.class);
+            context.getBean(OrderRepository.class).save(new Order("o-4", true));
+            context.getBean(EventPublisher.class).publish(new OrderCreatedEvent("o-4", AMOUNT));
+            await(() -> "COMPLETED".equals(status(OrderProcessingSaga.class)), "the order saga to complete");
+
+            context.getBean(EventPublisher.class).publish(new OrderCreatedEvent("o-missing", AMOUNT));
+
+            await(() -> !listener.failed().isEmpty(), "the SagaFailed listener");
+            Thread.sleep(300);
+            assertThat(listener.failed()).singleElement().satisfies(failed -> {
+                assertThat(failed.sagaType()).isEqualTo(OrderProcessingSaga.class.getName());
+                assertThat(failed.failedStep()).isEqualTo("processPayment");
+                assertThat(failed.associations()).containsEntry("orderId", "o-missing");
+            });
         }
     }
 

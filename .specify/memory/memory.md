@@ -1094,23 +1094,26 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Origin**: `specs/010-otel-observability/spec.md` Clarifications (Q1 revised).
 - **Status**: open (deferred until a user needs Micrometer-native metrics).
 
-## Adoption backlog (booking-service, 2026-11-12)
+## Adoption backlog (booking-service, 2026-11-12; revised 2026-11-19)
 
 The first production adopter is booking-service: a Spring Boot monolith with one Java module per bounded context,
 integrated through events, no message broker, using the starter, Postgres storage and the in-memory transport
-(DEC-REL-01). The known gaps that matter most for it, in suggested order for the next versions:
+(DEC-REL-01). Its first migration attempt (2026-11-19) reordered the backlog. The feature order, the briefs and what
+was kept out of the library are in `.specify/memory/roadmap.md`:
 
-1. **G-007-09**: one running instance per message store. Blocks running more than one replica.
-2. **G-006-03**: no operator path out of `REQUIRES_INTERVENTION` (with G-008-02's read-only endpoint: saga-instance
-   views and write actions belong to the same operations feature).
-3. **G-ENG-25** and **G-005-01**: no deadlines or scheduled waits; G-005-02 (in-process retry blocks the caller) is
-   solved by the same durable scheduling.
-4. **G-ENG-24**: an event a step of its own instance runs is not handed to other saga types.
-5. **G-008-03**: events published through Spring's `ApplicationEventPublisher` do not reach sagas.
-6. **G-ENG-05**: a crash between the creation write and the first unit of work strands a `CREATED` instance.
-7. **G-003-25**: no migration tool; upgrade scripts are applied by the host.
-8. **G-010-05**: saga metrics need an OpenTelemetry metric exporter in Spring Boot.
+1. ~~011 outcome events, the `COMPENSATION_FAILED` rename, one unit of work (G-ADOPT-01, G-011-02)~~ done
+   2026-11-20
+2. 012 outbox command failure feedback (G-ADOPT-02)
+3. 013 active/standby relay (G-007-09)
+4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
+5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05)
+6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
+7. 017 durable scheduling (G-ENG-25, G-005-01, G-005-02)
+8. 018 versioned schema migrations (G-003-25)
+9. 019 process metadata (G-ADOPT-05)
+10. 020 Spring context tests without a database (G-009-01; needs a scope decision, Principle IV)
 
+Also open from the 2026-11-12 list: G-010-05 (saga metrics need an OpenTelemetry metric exporter in Spring Boot).
 Revisit the order with feedback from booking-service before each release.
 
 ## Release and distribution
@@ -1199,3 +1202,141 @@ Revisit the order with feedback from booking-service before each release.
   `ReflectiveAnnotationScanner`/`StartupChecks`.
 - **Origin**: consumer guide work (`docs/guide/`, 2026-11-13).
 - **Status**: open (a test like the starter's `ReadmePropertiesTest` could check the error texts and snippet lines).
+
+### G-DOC-03: Unit-of-work and failure behaviour that adopters miss
+- **Description**: five points are documented only in Javadoc or not at all, and the first adopter planned around
+  them wrongly: (1) a `FINAL` failure compensates only after a unit of work of the instance committed; in the start
+  step, or anywhere in an in-process chain, it ends `FAILED` (the `saga-forge` skill implies otherwise); (2) events that
+  continue the same instance run in the same unit of work (`SagaUnitOfWork`), which sets transaction size, lock time
+  and whether compensation can happen; (3) `CommandGateway.send` marks the transaction rollback-only before rethrowing
+  (`EngineCommandGateway`), so a step cannot catch a rejection to branch on it; (4) which route reaches which Spring
+  listener, and how durably (`ApplicationEventBridge` vs `ApplicationEventPublishingOutbox`); (5) an outbox command's
+  handler failure is not reported to the sending saga (G-ADOPT-02).
+- **Origin**: booking-service feedback D1 to D5 (2026-11-19), `.specify/memory/roadmap.md`.
+- **Status**: open (doc fix in `docs/guide/`, `docs/agents/saga-forge/SKILL.md`, `docs/agents/AGENTS-snippet.md`).
+  Point (1) is in the skill and the AGENTS snippet since 011; point (4) for outcome events in `docs/guide/operations.md`
+  "Outcome events"; the rest is open.
+
+## Adopter feedback (booking-service, 2026-11-19)
+
+Gaps found by the first migration attempt. Feature briefs and the verdict on each proposal are in
+`.specify/memory/roadmap.md`.
+
+### G-ADOPT-01: A terminal saga emits nothing applications can react to
+- **Description**: completing, failing or compensating writes the instance and
+  history only. A `FINAL` failure before any commit writes `FAILED` silently (`AttemptLoop`, `FailedWrite`).
+  Applications poll storage to learn outcomes.
+- **Origin**: booking-service feedback SF-1 (W1, W2).
+- **Status**: closed by `specs/011-saga-outcome-events` (2026-11-20): every terminal transition records one outcome
+  event (`SagaCompleted`, `SagaFailed`, `SagaCompensated`) in the unit of work that writes the status, including the
+  `FAILED` write of a failure before any commit.
+
+### G-ADOPT-02: An outbox command's failure is not reported to the sending saga
+- **Description**: a handler failure of a `@Command(delivery = OUTBOX)` command goes to the relay's retry and
+  set-aside path (`Relay`: retried up to `maxAttempts`, `FinalFailure` not recognised, then set aside). The sending
+  instance never learns it, so a saga cannot both commit a step on its own and compensate when the step's follow-up
+  fails; with in-process chaining a multi-step saga is one unit of work and compensation is unreachable.
+- **Origin**: booking-service feedback SF-2 (W3, W4).
+- **Status**: open (roadmap feature 012, option (b); a step-level commit boundary is deferred).
+
+### G-ADOPT-03: Persisted failure messages are not redacted
+- **Description**: `SagaFailure.message` and lifecycle history store raw exception messages, which can contain
+  credentials. Telemetry content recording is off by default, but storage has no equivalent.
+- **Origin**: booking-service feedback SF-8 (W13).
+- **Status**: open. Dropped from feature 011 (user, 2026-11-20): logs and spans can be cleaned with existing tools
+  (Logback `%replace`, Log4j2 `RegexReplacement`, the OpenTelemetry Collector's `redaction`/`transform` processors);
+  what Saga Forge stores in its own tables is still undecided.
+
+### G-ADOPT-04: Only Saga Forge's own markers are recognised; events cannot be harvested from aggregates
+- **Description**: `@DomainEvent(aggregate = X.class)` requires `X` to carry `@Aggregate`, and recording needs the
+  static `DomainEvents.record`. A domain that depends only on jMolecules must double-annotate or translate events in
+  the application layer. architecture.md "jMolecules consideration" states the intent, nothing is built.
+- **Origin**: booking-service feedback SF-3 (W5, W6).
+- **Status**: open (roadmap feature 016: a core marker SPI, a `saga-forge-jmolecules` module, an
+  `AggregateEventSource` SPI; fluent registration and handlers returning events rejected).
+
+### G-ADOPT-05: No process metadata on instances or messages
+- **Description**: an instance records no correlation data, and steps and handlers do not see the triggering
+  request's context. Only OpenTelemetry trace context travels on messages (010).
+- **Origin**: booking-service feedback SF-10 (W15); relates to G-010-04.
+- **Status**: open (roadmap feature 019: a generic metadata map, MDC restore in the starter; no fixed "initiator"
+  field).
+
+### G-ADOPT-06: `CommandId` is random outside a saga step
+- **Description**: `CommandId.unscoped` is random, so a command sent while handling a delivered message outside a
+  saga (a policy) gets no stable identity, though one could be derived from the message id.
+- **Origin**: booking-service feedback SF-9 (W14).
+- **Status**: open (roadmap, later).
+
+### G-ADOPT-07: An instance has exactly one association
+- **Description**: the association is set at start and cannot be extended, so every event a saga reacts to must carry
+  that value. The `saga_association` table already allows several rows per instance.
+- **Origin**: booking-service feedback SF-13.
+- **Status**: open (roadmap, later: `SagaLifecycle.associateWith`).
+
+## Saga outcome events (011)
+
+### G-011-01: Saga steps cannot react to another saga's outcome
+- **Description**: 011's outcome events (completed, failed, compensated) reach application
+  listeners, policies and transport subscribers, but no saga step: the scanner rejects a step whose parameter is not a
+  domain event, and the runtime routes an outcome event to no saga. Starting a follow-up saga when another ends, or
+  continuing one on another's failure, needs new scanner rules (steps on framework events, a filter naming the source
+  saga type, since Property 11 allows one step per event type) and correlation on the ending instance's association.
+- **Origin**: `specs/011-saga-outcome-events/spec.md` Clarifications (user, 2026-11-20).
+- **Status**: open (deferred to its own spec).
+
+### G-011-02: "Requires intervention" is an observer's judgement recorded as a saga status
+- **Description**: 006 ended an instance whose compensation failed in the terminal status `REQUIRES_INTERVENTION`. A
+  saga cannot know that it needs a person; an observer decides that from the failures it sees and the time spent
+  (user, 2026-11-20).
+- **Origin**: `specs/011-saga-outcome-events/spec.md` Clarifications.
+- **Status**: closed by `specs/011-saga-outcome-events` (2026-11-20): renamed to `COMPENSATION_FAILED` (status,
+  handling outcome, telemetry value `compensation_failed`), the redundant history kind removed,
+  `schema-upgrade-011.sql` (spec FR-019 to FR-022).
+
+### G-011-03: Exceptions handed back to callers keep raw failure messages
+- **Description**: 011 cleans every failure text Saga Forge stores, logs or puts on spans, but the exceptions it hands
+  back (`EventHandlingException` causes, exceptions rethrown from `CommandGateway.send`) are the application's own
+  objects and keep their messages (FR-026). An application that logs them logs whatever they contain.
+- **Origin**: `specs/011-saga-outcome-events/research.md` §10.
+- **Status**: closed (withdrawn, 2026-11-20): failure-text cleaning was dropped from 011, so the design it
+  described will not be built (G-ADOPT-03).
+
+### G-011-04: The redactor is configured separately for runtime and transport in hand-assembled hosts
+- **Description**: `SagaRuntime.Builder` and `InMemoryTransport.Builder` each take a `FailureMessageRedactor`. The
+  starter passes one bean to both; a host that assembles them by hand can configure two different rules, and nothing
+  checks that they agree.
+- **Origin**: `specs/011-saga-outcome-events/research.md` §9.
+- **Status**: closed (withdrawn, 2026-11-20): failure-text cleaning was dropped from 011, so the design it
+  described will not be built (G-ADOPT-03).
+
+### G-011-05: Failure messages stored before the upgrade are not cleaned
+- **Description**: the 011 redactor applies to new failures only (FR-027). Instances, lifecycle history and delivery
+  failures written by 0.1.0 keep their raw text; there is no rewrite tool.
+- **Origin**: `specs/011-saga-outcome-events/spec.md` FR-027.
+- **Status**: closed (withdrawn, 2026-11-20): failure-text cleaning was dropped from 011, so the design it
+  described will not be built (G-ADOPT-03).
+
+### G-011-06: A status write's outcome batch reuses the rolled-back unit of work's id
+- **Description**: contracts/outcome-events.md O4 says the `FAILED`, start-compensation and failed-compensation
+  writes hand on their batch "with that unit of work's own id". As built, `RecordFailure`, `StartCompensation` and
+  `RecordCompensationFailure` run `UnitOfWork.forInstance(..., about)` with the correlation of the attempt that
+  rolled back, so the batch carries that attempt's `unitOfWorkId`. It is still unique (the rolled-back attempt stored
+  nothing), but logs and spans show one id for two transactions.
+- **Origin**: `specs/011-saga-outcome-events` implementation (T018, T035).
+- **Status**: open; decide whether status writes get a fresh id, then align the contract or the code.
+
+### G-011-07: The fixture collects outcome events instead of delivering them
+- **Description**: the in-memory transport delivers an outcome event to the runtime, which returns an empty report;
+  the fixture's `LoopBackTransport` only collects it for `EventResult.outcomeEvents()`, so `EventResult.reports()`
+  has one report fewer than a real transport would produce. No saga can react to an outcome event, so handling is
+  unaffected.
+- **Origin**: `specs/011-saga-outcome-events` T052.
+- **Status**: accepted (revisit with G-011-01).
+
+### G-011-08: Contract C3 names a transport listener API that does not exist
+- **Description**: contracts/outcome-events.md C3 mentions `InMemoryTransport.Builder.listener`; the transport's
+  delivery callback is `InMemoryTransport.onDelivered(Consumer<StoredMessage>)`, which the starter's after-delivery
+  bridge uses. The guide documents `onDelivered`.
+- **Origin**: `specs/011-saga-outcome-events` T055.
+- **Status**: open (spec-text fix only).
