@@ -654,6 +654,24 @@ Noted only; nothing is bumped until the starter feature decides.
   needs the same scheduling mechanism.
 - **Status**: open (deferred; needs a spec).
 
+### G-ENG-26: A step runs at most once per saga instance
+- **Description**: once a step completed, a further event of its type for the same instance is reported `DUPLICATE`
+  and runs nothing (005). A saga therefore cannot react to a repeated business event (a second
+  `DeliveryAttemptFailedEvent`, a further partial payment) or count occurrences; the integrating service has to own
+  the repetition and report only the result.
+- **Origin**: checkout example (`saga-forge-example` `example.checkout`, `docs/use-cases.md` §1), 2026-11-24.
+- **Remark**: it is the duplicate check that makes redelivery safe, so lifting it needs a way to tell a redelivery from
+  a new occurrence (the event's own id rather than its type).
+- **Status**: open (accepted for now; revisit with an adopter that needs repeating steps).
+
+### G-DOC-04: Two example stories
+- **Description**: the README and `docs/use-cases.md` §1 tell the checkout story (`CheckoutSaga`, `FulfilmentSaga`),
+  while `docs/guide/`, the test fixture's README, `saga-forge-example-spring` and the `saga-forge` agent skill still use
+  `OrderProcessingSaga`.
+- **Origin**: README and use-cases rewrite, 2026-11-24.
+- **Status**: open (decide whether the checkout story replaces `OrderProcessingSaga` as the canonical example, and if so
+  move the guide, the Spring example and the skill together).
+
 ### G-005-02: In-process retry blocks the caller and holds the instance
 - **Description**: While a retry waits, the instance's unit-of-work lock is held and the caller (for Kafka, the
   consumer thread) is blocked, so other events for that instance wait and a long total backoff can trip
@@ -1178,8 +1196,10 @@ Revisit the order with feedback from booking-service before each release.
   `CreateBookingSaga` pitch example (with `Inventory`, `PaymentService`) exists only in the README, and
   `docs/architecture.md#vocabulary` mentions a `@ReadModel` marker that `saga-forge-core` does not define.
 - **Origin**: consumer guide work (`docs/guide/`, 2026-11-13).
-- **Status**: open (either add the booking saga as a compiling example module or test, or replace the README example
-  with the canonical `OrderProcessingSaga`; drop or implement `@ReadModel`).
+- **Status**: partly closed (2026-11-24): the README example is now `CheckoutSaga`, copied from compiling code in
+  `saga-forge-example` (`example.checkout`) and covered by fixture tests. `CreateBookingSaga` remains only as a
+  test fixture in `saga-forge-core`; `docs/use-cases.md` no longer shows it. `@ReadModel` is still open (drop or
+  implement).
 
 ### G-DOC-02: The guide is checked by hand against the code
 - **Description**: `docs/guide/` snippets were verified line by line against the sources when written, and CI only
@@ -1326,3 +1346,30 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   bridge uses. The guide documents `onDelivered`.
 - **Origin**: `specs/011-saga-outcome-events` T055.
 - **Status**: open (spec-text fix only).
+
+## Outbox command failure feedback (012)
+
+### G-012-01: A failed command sent by a compensation cannot correct a COMPENSATED instance
+- **Description**: a compensation's outbox command (a refund, say) that fails finally or exhausts after the instance
+  already ended `COMPENSATED` leaves it `COMPENSATED`, with a diagnostic only. The saga reports an undo that did not
+  fully happen. Terminal statuses never move, so the fact reaches only the logs and the set-aside command.
+- **Origin**: `specs/012-outbox-command-failure-feedback/spec.md` Clarifications (user, 2026-11-24).
+- **Status**: accepted (revisit with the operations API, roadmap 015).
+
+### G-012-02: A completed saga is not told that one of its commands failed
+- **Description**: a fire-and-forget outbox command whose failure arrives after its saga ended `COMPLETED` is ignored
+  with a diagnostic. Telling a completed saga, or starting follow-up work, needs steps on
+  framework events (G-011-01).
+- **Origin**: `specs/012-outbox-command-failure-feedback/spec.md` Assumptions.
+- **Status**: open (deferred with G-011-01).
+
+### G-012-03: No saga step can react to a failed command
+- **Description**: 012 ships only the default reaction (compensate every committed step). A `@StartCompensation` step
+  that takes the failure report, to record a named business outcome, needs the scanner to accept steps on framework
+  events, which is G-011-01.
+- **Origin**: `specs/012-outbox-command-failure-feedback/spec.md` Clarifications (user, 2026-11-24).
+- **Revisit with it**: 012 hands the report to the runtime as a value through `CommandReceiver.receiveFailure` (a
+  recoverer that borrows the relay's set-aside transaction), not as a failure reply message as Eventuate Tram does
+  (research §1 and §2). The user chose the callback on 2026-11-24. If steps may take the report, reconsider a routed
+  failure message, which such a step would need.
+- **Status**: open (deferred with G-011-01).
