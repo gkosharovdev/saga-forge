@@ -10,35 +10,35 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartDeadline;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 
 /**
- * A hold that lapses ({@code specs/017-saga-deadlines}): {@code @StartSaga onHoldPlaced} starts the {@code lapse}
- * deadline, {@code @EndSaga onHoldConfirmed} ends it in time, {@code @StartCompensation expire} runs when it is due.
- * All on {@code associationProperty = "holdId"}.
+ * A hold that lapses ({@code specs/017-saga-deadlines}): {@code @StartSaga onHoldPlaced} starts the
+ * {@code lapse} deadline, {@code @EndSaga onHoldConfirmed} ends it in time,
+ * {@code @StartCompensation expire} runs when it is due. All on {@code associationProperty =
+ * "holdId"}.
  */
 @Saga
 public final class HoldSaga {
 
-    public static final String LAPSE = "lapse";
+  public static final String LAPSE = "lapse";
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "holdId")
-    @StartDeadline(name = LAPSE, duration = "${hold.lapse:PT0.3S}")
-    public void onHoldPlaced(HoldPlaced event) {
-        // Opens the deadline.
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "holdId")
+  @StartDeadline(name = LAPSE, duration = "${hold.lapse:PT0.3S}")
+  public void onHoldPlaced(HoldPlaced event) {
+    // Opens the deadline.
+  }
 
-    @EndSaga
-    @SagaStep(associationProperty = "holdId")
-    public void onHoldConfirmed(HoldConfirmed event) {
-        // Confirmed in time.
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "holdId")
+  public void onHoldConfirmed(HoldConfirmed event) {
+    // Confirmed in time.
+  }
 
-    @StartCompensation
-    @DeadlineExpired(LAPSE)
-    @SagaStep
-    public void expire() {
-        // The hold lapsed.
-    }
+  @StartCompensation
+  @DeadlineExpired(LAPSE)
+  @SagaStep
+  public void expire() {
+    // The hold lapsed.
+  }
 }

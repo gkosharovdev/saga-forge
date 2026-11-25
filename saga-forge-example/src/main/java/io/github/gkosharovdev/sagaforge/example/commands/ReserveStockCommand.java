@@ -8,5 +8,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
  * {@code orderId} is the {@code @AggregateIdentifier} the engine loads the order by.
  */
 @Command
-public record ReserveStockCommand(@AggregateIdentifier String orderId) {
-}
+public record ReserveStockCommand(@AggregateIdentifier String orderId) {}

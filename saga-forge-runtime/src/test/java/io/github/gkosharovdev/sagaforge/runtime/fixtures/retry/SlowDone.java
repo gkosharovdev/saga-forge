@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** Event of the retry fixtures. */
 @DomainEvent(aggregate = Delivery.class)
-public record SlowDone(@AggregateIdentifier String bookingId) {
-}
+public record SlowDone(@AggregateIdentifier String bookingId) {}

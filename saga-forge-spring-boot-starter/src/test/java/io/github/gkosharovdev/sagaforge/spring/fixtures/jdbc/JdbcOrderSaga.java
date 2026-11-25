@@ -1,7 +1,5 @@
 package io.github.gkosharovdev.sagaforge.spring.fixtures.jdbc;
 
-import java.time.Clock;
-
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
@@ -14,43 +12,43 @@ import io.github.gkosharovdev.sagaforge.spring.fixtures.jdbc.JdbcOrderEvents.Con
 import io.github.gkosharovdev.sagaforge.spring.fixtures.jdbc.JdbcOrderEvents.OrderCharged;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.jdbc.JdbcOrderEvents.OrderConfirmed;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.jdbc.JdbcOrderEvents.OrderPlaced;
+import java.time.Clock;
 
 /**
- * A prototype-scoped saga bean with a constructor-injected {@link Clock} (US2 scenario 1); its {@code SagaContext} and
- * {@code CommandGateway} fields are still supplied by the runtime.
+ * A prototype-scoped saga bean with a constructor-injected {@link Clock} (US2 scenario 1); its
+ * {@code SagaContext} and {@code CommandGateway} fields are still supplied by the runtime.
  */
 @Saga
 public class JdbcOrderSaga {
 
-    private final Clock clock;
+  private final Clock clock;
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    private SagaContext context;
+  private SagaContext context;
 
-    private CommandGateway commandGateway;
+  private CommandGateway commandGateway;
 
-    public JdbcOrderSaga(Clock clock) {
-        this.clock = clock;
-    }
+  public JdbcOrderSaga(Clock clock) {
+    this.clock = clock;
+  }
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void onPlaced(OrderPlaced event) {
-        context.putState("placedAt", clock.instant().toString());
-        commandGateway.send(new ChargeOrder(event.orderId(), event.amount()));
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void onPlaced(OrderPlaced event) {
+    context.putState("placedAt", clock.instant().toString());
+    commandGateway.send(new ChargeOrder(event.orderId(), event.amount()));
+  }
 
-    @SagaStep(associationProperty = "orderId")
-    public void onCharged(OrderCharged event) {
-        context.putState("provider", event.provider());
-        commandGateway.send(new ConfirmOrder(event.orderId()));
-    }
+  @SagaStep(associationProperty = "orderId")
+  public void onCharged(OrderCharged event) {
+    context.putState("provider", event.provider());
+    commandGateway.send(new ConfirmOrder(event.orderId()));
+  }
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void onConfirmed(OrderConfirmed event) {
-        // outcome
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void onConfirmed(OrderConfirmed event) {
+    // outcome
+  }
 }

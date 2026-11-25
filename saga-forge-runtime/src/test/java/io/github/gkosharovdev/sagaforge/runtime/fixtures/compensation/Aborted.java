@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** The business failure of {@link UnwindSaga}: starts compensation. */
 @DomainEvent(aggregate = Order.class)
-public record Aborted(@AggregateIdentifier String orderId) {
-}
+public record Aborted(@AggregateIdentifier String orderId) {}

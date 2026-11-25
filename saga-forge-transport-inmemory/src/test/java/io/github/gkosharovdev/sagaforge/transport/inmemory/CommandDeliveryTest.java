@@ -3,18 +3,12 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory;
 import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Duration;
-
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
-import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardCharged;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
@@ -22,110 +16,148 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssued;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
+import java.time.Duration;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 /** User Story 3 (spec.md, tasks.md T060): outbox commands travel through the same log. */
 class CommandDeliveryTest {
 
-    private static final Duration WAIT = Duration.ofSeconds(5);
+  private static final Duration WAIT = Duration.ofSeconds(5);
 
-    private final TransportHarness harness = new TransportHarness(TransportHarness.FAST, BillingSaga.class,
-            CardService.class, ChargeCard.class);
+  private final TransportHarness harness =
+      new TransportHarness(
+          TransportHarness.FAST, BillingSaga.class, CardService.class, ChargeCard.class);
 
-    @AfterEach
-    void stop() {
-        harness.close();
-    }
+  @AfterEach
+  void stop() {
+    harness.close();
+  }
 
-    private StoredMessage charge() {
-        return harness.messagesOf(ChargeCard.class).get(0);
-    }
+  private StoredMessage charge() {
+    return harness.messagesOf(ChargeCard.class).get(0);
+  }
 
-    @Test
-    @DisplayName("scenarios 1 and 4: a outbox command is handled after the step commits; its events go through the store")
-    void handledAfterCommit() {
-        harness.start();
-        harness.publish(new InvoiceIssued("i-1"));
+  @Test
+  @DisplayName(
+      "scenarios 1 and 4: a outbox command is handled after the step commits; its events go through the store")
+  void handledAfterCommit() {
+    harness.start();
+    harness.publish(new InvoiceIssued("i-1"));
 
-        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(), WAIT, "billing to end");
-        harness.awaitQuiet(WAIT);
-        assertThat(harness.cards.charges()).singleElement().satisfies(c -> {
-            assertThat(c.invoiceId()).isEqualTo("i-1");
-            assertThat(c.thread()).startsWith("saga-forge-transport-");
-        });
-        assertThat(charge().kind()).isEqualTo(MessageKind.COMMAND);
-        assertThat(charge().sourceSagaType()).isEqualTo(BillingSaga.class.getName());
-        assertThat(charge().orderingKey()).isEqualTo(ChargeCard.class.getName() + "#i-1");
-        assertThat(harness.messagesOf(CardCharged.class)).singleElement()
-                .satisfies(m -> assertThat(m.status()).isEqualTo(MessageStatus.CONSUMED));
-    }
+    await(
+        () -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(),
+        WAIT,
+        "billing to end");
+    harness.awaitQuiet(WAIT);
+    assertThat(harness.cards.charges())
+        .singleElement()
+        .satisfies(
+            c -> {
+              assertThat(c.invoiceId()).isEqualTo("i-1");
+              assertThat(c.thread()).startsWith("saga-forge-transport-");
+            });
+    assertThat(charge().kind()).isEqualTo(MessageKind.COMMAND);
+    assertThat(charge().sourceSagaType()).isEqualTo(BillingSaga.class.getName());
+    assertThat(charge().orderingKey()).isEqualTo(ChargeCard.class.getName() + "#i-1");
+    assertThat(harness.messagesOf(CardCharged.class))
+        .singleElement()
+        .satisfies(m -> assertThat(m.status()).isEqualTo(MessageStatus.CONSUMED));
+  }
 
-    @Test
-    @DisplayName("scenarios 2 and 3: stopped before handling, the command is handled once after restart, same id")
-    void survivesRestartWithSameIdentity() {
-        // The process runs the start step and stores the command, then stops before any delivery.
-        harness.engine().receive(new InvoiceIssued("i-1"));
-        assertThat(harness.messagesOf(ChargeCard.class)).singleElement()
-                .satisfies(m -> assertThat(m.status()).isEqualTo(MessageStatus.UNCONSUMED));
-        assertThat(harness.cards.charges()).isEmpty();
-        CommandId stored = charge().commandId();
+  @Test
+  @DisplayName(
+      "scenarios 2 and 3: stopped before handling, the command is handled once after restart, same id")
+  void survivesRestartWithSameIdentity() {
+    // The process runs the start step and stores the command, then stops before any delivery.
+    harness.engine().receive(new InvoiceIssued("i-1"));
+    assertThat(harness.messagesOf(ChargeCard.class))
+        .singleElement()
+        .satisfies(m -> assertThat(m.status()).isEqualTo(MessageStatus.UNCONSUMED));
+    assertThat(harness.cards.charges()).isEmpty();
+    CommandId stored = charge().commandId();
 
-        harness.restart();
+    harness.restart();
 
-        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(), WAIT, "billing to end");
-        harness.awaitQuiet(WAIT);
-        assertThat(harness.cards.charges()).extracting(CardService.Charge::commandId).containsExactly(stored);
-        assertThat(stored.stepName()).isEqualTo(BillingSaga.START_STEP);
-    }
+    await(
+        () -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(),
+        WAIT,
+        "billing to end");
+    harness.awaitQuiet(WAIT);
+    assertThat(harness.cards.charges())
+        .extracting(CardService.Charge::commandId)
+        .containsExactly(stored);
+    assertThat(stored.stepName()).isEqualTo(BillingSaga.START_STEP);
+  }
 
-    @Test
-    @DisplayName("a failing handler is retried with the same identity, then consumed")
-    void failingHandlerRetried() {
-        harness.cards.failNext(2);
-        harness.start();
-        harness.publish(new InvoiceIssued("i-1"));
+  @Test
+  @DisplayName("a failing handler is retried with the same identity, then consumed")
+  void failingHandlerRetried() {
+    harness.cards.failNext(2);
+    harness.start();
+    harness.publish(new InvoiceIssued("i-1"));
 
-        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(), WAIT, "billing to end");
-        harness.awaitQuiet(WAIT);
-        assertThat(harness.cards.charges()).hasSize(3);
-        assertThat(harness.cards.charges()).extracting(CardService.Charge::commandId).containsOnly(
-                charge().commandId());
-        assertThat(charge().attempts()).isEqualTo(3);
-        assertThat(harness.messagesOf(CardCharged.class)).hasSize(1);
-    }
+    await(
+        () -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(),
+        WAIT,
+        "billing to end");
+    harness.awaitQuiet(WAIT);
+    assertThat(harness.cards.charges()).hasSize(3);
+    assertThat(harness.cards.charges())
+        .extracting(CardService.Charge::commandId)
+        .containsOnly(charge().commandId());
+    assertThat(charge().attempts()).isEqualTo(3);
+    assertThat(harness.messagesOf(CardCharged.class)).hasSize(1);
+  }
 
-    @Test
-    @DisplayName("a consumed mark failing inside the handler's transaction rolls the handler's effects back")
-    void consumedMarkAtomicWithHandler() {
-        harness.log.failNext(InMemoryMessageStore.Operation.MARK_CONSUMED, new IllegalStateException("mark failed"));
-        harness.start();
-        harness.publish(new InvoiceIssued("i-1"));
+  @Test
+  @DisplayName(
+      "a consumed mark failing inside the handler's transaction rolls the handler's effects back")
+  void consumedMarkAtomicWithHandler() {
+    harness.log.failNext(
+        InMemoryMessageStore.Operation.MARK_CONSUMED, new IllegalStateException("mark failed"));
+    harness.start();
+    harness.publish(new InvoiceIssued("i-1"));
 
-        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(), WAIT, "billing to end");
-        harness.awaitQuiet(WAIT);
-        assertThat(harness.messagesOf(CardCharged.class)).hasSize(1);
-    }
+    await(
+        () -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(),
+        WAIT,
+        "billing to end");
+    harness.awaitQuiet(WAIT);
+    assertThat(harness.messagesOf(CardCharged.class)).hasSize(1);
+  }
 
-    @Test
-    @DisplayName("012 US1: a charge that fails every attempt compensates the saga once, and is set aside MAX_ATTEMPTS")
-    void exhaustedCommandCompensates() {
-        int maxAttempts = TransportHarness.FAST.maxAttempts();
-        harness.cards.failNext(Integer.MAX_VALUE);
-        harness.start();
-        harness.publish(new InvoiceIssued("i-1"));
+  @Test
+  @DisplayName(
+      "012 US1: a charge that fails every attempt compensates the saga once, and is set aside MAX_ATTEMPTS")
+  void exhaustedCommandCompensates() {
+    int maxAttempts = TransportHarness.FAST.maxAttempts();
+    harness.cards.failNext(Integer.MAX_VALUE);
+    harness.start();
+    harness.publish(new InvoiceIssued("i-1"));
 
-        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPENSATED).isPresent(), WAIT,
-                "billing to compensate");
-        harness.awaitQuiet(WAIT);
-        assertThat(harness.cards.charges()).hasSize(maxAttempts);
-        assertThat(charge().status()).isEqualTo(MessageStatus.SET_ASIDE);
-        assertThat(charge().setAsideReason()).isEqualTo("MAX_ATTEMPTS");
-        assertThat(harness.instance(BillingSaga.class, SagaStatus.COMPENSATED).orElseThrow().compensationTrigger())
-                .satisfies(trigger -> {
-                    assertThat(trigger.commandType()).isEqualTo(ChargeCard.class.getName());
-                    assertThat(trigger.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
-                    assertThat(trigger.failure().attempts()).isEqualTo(maxAttempts);
-                    assertThat(trigger.failure().message()).isNull();
-                });
-        assertThat(harness.messagesOf(CardCharged.class)).isEmpty();
-    }
+    await(
+        () -> harness.instance(BillingSaga.class, SagaStatus.COMPENSATED).isPresent(),
+        WAIT,
+        "billing to compensate");
+    harness.awaitQuiet(WAIT);
+    assertThat(harness.cards.charges()).hasSize(maxAttempts);
+    assertThat(charge().status()).isEqualTo(MessageStatus.SET_ASIDE);
+    assertThat(charge().setAsideReason()).isEqualTo("MAX_ATTEMPTS");
+    assertThat(
+            harness
+                .instance(BillingSaga.class, SagaStatus.COMPENSATED)
+                .orElseThrow()
+                .compensationTrigger())
+        .satisfies(
+            trigger -> {
+              assertThat(trigger.commandType()).isEqualTo(ChargeCard.class.getName());
+              assertThat(trigger.failure().classification())
+                  .isEqualTo(FailureClassification.EXHAUSTED);
+              assertThat(trigger.failure().attempts()).isEqualTo(maxAttempts);
+              assertThat(trigger.failure().message()).isNull();
+            });
+    assertThat(harness.messagesOf(CardCharged.class)).isEmpty();
+  }
 }

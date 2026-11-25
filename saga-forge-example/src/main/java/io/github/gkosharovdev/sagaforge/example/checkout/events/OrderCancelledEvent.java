@@ -6,5 +6,4 @@ import io.github.gkosharovdev.sagaforge.example.checkout.Order;
 
 /** A confirmed order was cancelled because it could not be delivered. */
 @DomainEvent(aggregate = Order.class)
-public record OrderCancelledEvent(@AggregateIdentifier String orderId, String reason) {
-}
+public record OrderCancelledEvent(@AggregateIdentifier String orderId, String reason) {}

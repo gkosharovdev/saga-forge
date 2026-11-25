@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /** Sent by {@code onFeeCharged}; handled by the {@link Slot} it names. */
 @Command
-public record ReserveSlot(@AggregateIdentifier String slotId, String parcelId) {
-}
+public record ReserveSlot(@AggregateIdentifier String slotId, String parcelId) {}

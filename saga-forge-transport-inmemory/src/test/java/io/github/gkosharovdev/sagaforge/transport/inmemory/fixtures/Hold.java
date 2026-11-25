@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Hold {
 
-    @AggregateIdentifier
-    private String holdId;
+  @AggregateIdentifier private String holdId;
 }

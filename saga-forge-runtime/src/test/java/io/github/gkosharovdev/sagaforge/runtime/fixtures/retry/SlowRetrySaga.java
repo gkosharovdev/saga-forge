@@ -11,16 +11,15 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 @Saga
 public final class SlowRetrySaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "bookingId", retry = @RetryPolicy(maxAttempts = 4, initialBackoffMillis = 15_000))
-    public void onSlowBooked(SlowBooked event) {
-    }
+  @StartSaga
+  @SagaStep(
+      associationProperty = "bookingId",
+      retry = @RetryPolicy(maxAttempts = 4, initialBackoffMillis = 15_000))
+  public void onSlowBooked(SlowBooked event) {}
 
-    @EndSaga
-    @SagaStep(associationProperty = "bookingId")
-    public void onSlowDone(SlowDone event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "bookingId")
+  public void onSlowDone(SlowDone event) {}
 }

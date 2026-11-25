@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public class Payment {
 
-    @AggregateIdentifier
-    private String paymentId;
+  @AggregateIdentifier private String paymentId;
 }

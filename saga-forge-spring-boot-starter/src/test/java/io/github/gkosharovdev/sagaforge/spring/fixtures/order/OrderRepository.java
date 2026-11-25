@@ -1,23 +1,22 @@
 package io.github.gkosharovdev.sagaforge.spring.fixtures.order;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Client-owned, in-memory persistence of {@link Order}; a bean. */
 public class OrderRepository {
 
-    private final Map<String, Order> orders = new ConcurrentHashMap<>();
+  private final Map<String, Order> orders = new ConcurrentHashMap<>();
 
-    @AggregateLoader
-    public Order load(String orderId) {
-        return orders.get(orderId);
-    }
+  @AggregateLoader
+  public Order load(String orderId) {
+    return orders.get(orderId);
+  }
 
-    @AggregateSaver
-    public void save(Order order) {
-        orders.put(order.orderId(), order);
-    }
+  @AggregateSaver
+  public void save(Order order) {
+    orders.put(order.orderId(), order);
+  }
 }

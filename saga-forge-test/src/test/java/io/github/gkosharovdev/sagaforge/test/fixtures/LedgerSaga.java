@@ -14,34 +14,29 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 @Saga
 public final class LedgerSaga {
 
-    @Aggregate
-    public static final class Ledger {
+  @Aggregate
+  public static final class Ledger {
 
-        @AggregateIdentifier
-        private String ledgerId;
-    }
+    @AggregateIdentifier private String ledgerId;
+  }
 
-    @DomainEvent(aggregate = Ledger.class)
-    public record ValueBooked(@AggregateIdentifier String ledgerId, String key, Object value) {
-    }
+  @DomainEvent(aggregate = Ledger.class)
+  public record ValueBooked(@AggregateIdentifier String ledgerId, String key, Object value) {}
 
-    @DomainEvent(aggregate = Ledger.class)
-    public record LedgerClosed(@AggregateIdentifier String ledgerId) {
-    }
+  @DomainEvent(aggregate = Ledger.class)
+  public record LedgerClosed(@AggregateIdentifier String ledgerId) {}
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    private SagaContext context;
+  private SagaContext context;
 
-    @StartSaga
-    @SagaStep(associationProperty = "ledgerId")
-    public void booked(ValueBooked event) {
-        context.putState(event.key(), event.value());
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "ledgerId")
+  public void booked(ValueBooked event) {
+    context.putState(event.key(), event.value());
+  }
 
-    @EndSaga
-    @SagaStep(associationProperty = "ledgerId")
-    public void closed(LedgerClosed event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "ledgerId")
+  public void closed(LedgerClosed event) {}
 }

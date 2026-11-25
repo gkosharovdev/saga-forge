@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Shipment {
 
-    @AggregateIdentifier
-    private String shipmentId;
+  @AggregateIdentifier private String shipmentId;
 }

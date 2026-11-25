@@ -40,396 +40,461 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link EngineSagaLifecycle}: the 001/002 transition rules applied to a working copy, the lifecycle entries each
- * transition produces, and {@code drain} (specs/004-saga-engine tasks.md T043, data-model.md "Lifecycle entry
- * production"), plus the outcome event each terminal transition hands to {@code drain} (specs/011 T022).
+ * {@link EngineSagaLifecycle}: the 001/002 transition rules applied to a working copy, the
+ * lifecycle entries each transition produces, and {@code drain} (specs/004-saga-engine tasks.md
+ * T043, data-model.md "Lifecycle entry production"), plus the outcome event each terminal
+ * transition hands to {@code drain} (specs/011 T022).
  */
 class EngineSagaLifecycleTest {
 
-    private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
-    private static final String ORDER = "order-1";
-    private static final AggregateReference RESERVATION = AggregateReference.of(Reservation.class, "reservation-1");
+  private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
+  private static final String ORDER = "order-1";
+  private static final AggregateReference RESERVATION =
+      AggregateReference.of(Reservation.class, "reservation-1");
 
-    /** A clock one second further on every read, so each transition has its own instant. */
-    private static final class TickingClock extends Clock {
+  /** A clock one second further on every read, so each transition has its own instant. */
+  private static final class TickingClock extends Clock {
 
-        private final AtomicInteger ticks = new AtomicInteger();
+    private final AtomicInteger ticks = new AtomicInteger();
 
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return START.plus(Duration.ofSeconds(ticks.getAndIncrement()));
-        }
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
     }
 
-    private final InMemoryStorageProvider storage = new InMemoryStorageProvider();
-    private final AtomicInteger sagaIds = new AtomicInteger();
-    private final TimeAndIdentity sources = new TimeAndIdentity(new TickingClock(),
-            () -> "saga-" + sagaIds.incrementAndGet(), () -> "uow");
-    private final SagaModel threeStep = SagaModel.of(ThreeStepSaga.class);
-    private final EngineSagaLifecycle lifecycle = new EngineSagaLifecycle(threeStep, storage, sources);
-
-    private SagaInstance started() {
-        return lifecycle.start(ThreeStepSaga.class, "orderId", ORDER);
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
     }
 
-    private static SagaInstance stored(String sagaId, Class<?> sagaType, SagaStatus status) {
-        String outcome = status == SagaStatus.COMPLETED ? ThreeStepSaga.END_STEP : null;
-        SagaFailure failure = status == SagaStatus.FAILED
-                ? SagaFailure.of(ThreeStepSaga.START_STEP, new IllegalStateException("earlier failure"), START)
-                : null;
-        return new SagaInstance(sagaId, sagaType.getName(), Map.of(), Map.of("orderId", ORDER), status, START, START,
-                Map.of(), outcome, failure);
+    @Override
+    public Instant instant() {
+      return START.plus(Duration.ofSeconds(ticks.getAndIncrement()));
+    }
+  }
+
+  private final InMemoryStorageProvider storage = new InMemoryStorageProvider();
+  private final AtomicInteger sagaIds = new AtomicInteger();
+  private final TimeAndIdentity sources =
+      new TimeAndIdentity(
+          new TickingClock(), () -> "saga-" + sagaIds.incrementAndGet(), () -> "uow");
+  private final SagaModel threeStep = SagaModel.of(ThreeStepSaga.class);
+  private final EngineSagaLifecycle lifecycle =
+      new EngineSagaLifecycle(threeStep, storage, sources);
+
+  private SagaInstance started() {
+    return lifecycle.start(ThreeStepSaga.class, "orderId", ORDER);
+  }
+
+  private static SagaInstance stored(String sagaId, Class<?> sagaType, SagaStatus status) {
+    String outcome = status == SagaStatus.COMPLETED ? ThreeStepSaga.END_STEP : null;
+    SagaFailure failure =
+        status == SagaStatus.FAILED
+            ? SagaFailure.of(
+                ThreeStepSaga.START_STEP, new IllegalStateException("earlier failure"), START)
+            : null;
+    return new SagaInstance(
+        sagaId,
+        sagaType.getName(),
+        Map.of(),
+        Map.of("orderId", ORDER),
+        status,
+        START,
+        START,
+        Map.of(),
+        outcome,
+        failure);
+  }
+
+  private static List<SagaLifecycleEventKind> kinds(PendingWrite write) {
+    return write.entries().stream().map(SagaLifecycleEntry::kind).toList();
+  }
+
+  @Nested
+  @DisplayName("start")
+  class Start {
+
+    @Test
+    @DisplayName(
+        "builds a CREATED instance with a fresh id, every step NOT_RUN and empty state, writing nothing")
+    void buildsCreatedInstance() {
+      SagaInstance instance = started();
+
+      assertThat(instance.sagaId()).isEqualTo("saga-1");
+      assertThat(instance.sagaType()).isEqualTo(ThreeStepSaga.class.getName());
+      assertThat(instance.status()).isEqualTo(SagaStatus.CREATED);
+      assertThat(instance.associations()).isEqualTo(Map.of("orderId", ORDER));
+      assertThat(instance.state()).isEmpty();
+      assertThat(instance.createdAt()).isEqualTo(instance.lastModifiedAt());
+      assertThat(instance.steps()).containsOnlyKeys(ThreeStepSaga.STEPS_IN_EVENT_ORDER);
+      assertThat(instance.steps().values()).containsOnly(StepRecord.notRun());
+      assertThat(instance.outcome()).isNull();
+      assertThat(instance.failure()).isNull();
+      assertThat(storage.all()).isEmpty();
     }
 
-    private static List<SagaLifecycleEventKind> kinds(PendingWrite write) {
-        return write.entries().stream().map(SagaLifecycleEntry::kind).toList();
-    }
+    @Test
+    @DisplayName("produces one CREATED entry at createdAt")
+    void producesCreatedEntry() {
+      SagaInstance instance = started();
 
-    @Nested
-    @DisplayName("start")
-    class Start {
+      PendingWrite write = lifecycle.drain(instance.sagaId());
 
-        @Test
-        @DisplayName("builds a CREATED instance with a fresh id, every step NOT_RUN and empty state, writing nothing")
-        void buildsCreatedInstance() {
-            SagaInstance instance = started();
-
-            assertThat(instance.sagaId()).isEqualTo("saga-1");
-            assertThat(instance.sagaType()).isEqualTo(ThreeStepSaga.class.getName());
-            assertThat(instance.status()).isEqualTo(SagaStatus.CREATED);
-            assertThat(instance.associations()).isEqualTo(Map.of("orderId", ORDER));
-            assertThat(instance.state()).isEmpty();
-            assertThat(instance.createdAt()).isEqualTo(instance.lastModifiedAt());
-            assertThat(instance.steps()).containsOnlyKeys(ThreeStepSaga.STEPS_IN_EVENT_ORDER);
-            assertThat(instance.steps().values()).containsOnly(StepRecord.notRun());
-            assertThat(instance.outcome()).isNull();
-            assertThat(instance.failure()).isNull();
-            assertThat(storage.all()).isEmpty();
-        }
-
-        @Test
-        @DisplayName("produces one CREATED entry at createdAt")
-        void producesCreatedEntry() {
-            SagaInstance instance = started();
-
-            PendingWrite write = lifecycle.drain(instance.sagaId());
-
-            assertThat(write.instance()).isEqualTo(instance);
-            assertThat(write.entries()).singleElement().satisfies(entry -> {
+      assertThat(write.instance()).isEqualTo(instance);
+      assertThat(write.entries())
+          .singleElement()
+          .satisfies(
+              entry -> {
                 assertThat(entry.sagaId()).isEqualTo(instance.sagaId());
                 assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.CREATED);
                 assertThat(entry.occurredAt()).isEqualTo(instance.createdAt());
-            });
-        }
-
-        @Test
-        @DisplayName("an active instance of the same saga type and value is a duplicate")
-        void activeInstanceIsDuplicate() {
-            storage.save(stored("existing", ThreeStepSaga.class, SagaStatus.RUNNING), List.of());
-
-            assertThatThrownBy(EngineSagaLifecycleTest.this::started)
-                    .isInstanceOf(DuplicateSagaInstanceException.class);
-        }
-
-        @Test
-        @DisplayName("a terminal instance, or an active one of another saga type, is not a duplicate")
-        void terminalOrOtherTypeIsNotDuplicate() {
-            storage.save(stored("done", ThreeStepSaga.class, SagaStatus.COMPLETED), List.of());
-            storage.save(stored("failed", ThreeStepSaga.class, SagaStatus.FAILED), List.of());
-            storage.save(stored("other", CreateBookingSaga.class, SagaStatus.RUNNING), List.of());
-
-            assertThat(started().status()).isEqualTo(SagaStatus.CREATED);
-        }
-
-        @Test
-        @DisplayName("a second start on the same lifecycle, or one for another saga type, is rejected")
-        void secondStartRejected() {
-            started();
-
-            assertThatThrownBy(EngineSagaLifecycleTest.this::started).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> new EngineSagaLifecycle(threeStep, storage, sources)
-                    .start(CreateBookingSaga.class, "bookingId", "b-1"))
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
+              });
     }
 
-    @Nested
-    @DisplayName("transitions")
-    class Transitions {
+    @Test
+    @DisplayName("an active instance of the same saga type and value is a duplicate")
+    void activeInstanceIsDuplicate() {
+      storage.save(stored("existing", ThreeStepSaga.class, SagaStatus.RUNNING), List.of());
 
-        @Test
-        @DisplayName("recordStepCompleted marks the step COMPLETED with its aggregates and adds STEP_COMPLETED")
-        void recordStepCompleted() {
-            String sagaId = started().sagaId();
-            lifecycle.drain(sagaId);
+      assertThatThrownBy(EngineSagaLifecycleTest.this::started)
+          .isInstanceOf(DuplicateSagaInstanceException.class);
+    }
 
-            SagaInstance instance = lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP,
-                    List.of(RESERVATION));
+    @Test
+    @DisplayName("a terminal instance, or an active one of another saga type, is not a duplicate")
+    void terminalOrOtherTypeIsNotDuplicate() {
+      storage.save(stored("done", ThreeStepSaga.class, SagaStatus.COMPLETED), List.of());
+      storage.save(stored("failed", ThreeStepSaga.class, SagaStatus.FAILED), List.of());
+      storage.save(stored("other", CreateBookingSaga.class, SagaStatus.RUNNING), List.of());
 
-            assertThat(instance.steps().get(ThreeStepSaga.START_STEP))
-                    .isEqualTo(StepRecord.completed(List.of(RESERVATION)));
-            assertThat(instance.steps().get(ThreeStepSaga.RESERVED_STEP).status()).isEqualTo(StepStatus.NOT_RUN);
-            PendingWrite write = lifecycle.drain(sagaId);
-            assertThat(write.entries()).singleElement().satisfies(entry -> {
+      assertThat(started().status()).isEqualTo(SagaStatus.CREATED);
+    }
+
+    @Test
+    @DisplayName("a second start on the same lifecycle, or one for another saga type, is rejected")
+    void secondStartRejected() {
+      started();
+
+      assertThatThrownBy(EngineSagaLifecycleTest.this::started)
+          .isInstanceOf(IllegalStateException.class);
+      assertThatThrownBy(
+              () ->
+                  new EngineSagaLifecycle(threeStep, storage, sources)
+                      .start(CreateBookingSaga.class, "bookingId", "b-1"))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("transitions")
+  class Transitions {
+
+    @Test
+    @DisplayName(
+        "recordStepCompleted marks the step COMPLETED with its aggregates and adds STEP_COMPLETED")
+    void recordStepCompleted() {
+      String sagaId = started().sagaId();
+      lifecycle.drain(sagaId);
+
+      SagaInstance instance =
+          lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
+
+      assertThat(instance.steps().get(ThreeStepSaga.START_STEP))
+          .isEqualTo(StepRecord.completed(List.of(RESERVATION)));
+      assertThat(instance.steps().get(ThreeStepSaga.RESERVED_STEP).status())
+          .isEqualTo(StepStatus.NOT_RUN);
+      PendingWrite write = lifecycle.drain(sagaId);
+      assertThat(write.entries())
+          .singleElement()
+          .satisfies(
+              entry -> {
                 assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.STEP_COMPLETED);
                 assertThat(entry.stepName()).isEqualTo(ThreeStepSaga.START_STEP);
                 assertThat(entry.touchedAggregates()).containsExactly(RESERVATION);
                 assertThat(entry.occurredAt()).isEqualTo(instance.lastModifiedAt());
-            });
-        }
+              });
+    }
 
-        @Test
-        @DisplayName("an unknown step name is rejected")
-        void unknownStepRejected() {
-            String sagaId = started().sagaId();
+    @Test
+    @DisplayName("an unknown step name is rejected")
+    void unknownStepRejected() {
+      String sagaId = started().sagaId();
 
-            assertThatThrownBy(() -> lifecycle.recordStepCompleted(sagaId, "noSuchStep", List.of()))
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
+      assertThatThrownBy(() -> lifecycle.recordStepCompleted(sagaId, "noSuchStep", List.of()))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
 
-        @Test
-        @DisplayName("advance makes the instance RUNNING and adds no entry")
-        void advanceAddsNoEntry() {
-            String sagaId = started().sagaId();
-            lifecycle.drain(sagaId);
+    @Test
+    @DisplayName("advance makes the instance RUNNING and adds no entry")
+    void advanceAddsNoEntry() {
+      String sagaId = started().sagaId();
+      lifecycle.drain(sagaId);
 
-            SagaInstance instance = lifecycle.advance(sagaId);
+      SagaInstance instance = lifecycle.advance(sagaId);
 
-            assertThat(instance.status()).isEqualTo(SagaStatus.RUNNING);
-            assertThat(lifecycle.drain(sagaId).entries()).isEmpty();
-        }
+      assertThat(instance.status()).isEqualTo(SagaStatus.RUNNING);
+      assertThat(lifecycle.drain(sagaId).entries()).isEmpty();
+    }
 
-        @Test
-        @DisplayName("complete records the outcome step and adds COMPLETED")
-        void complete() {
-            String sagaId = started().sagaId();
-            lifecycle.drain(sagaId);
+    @Test
+    @DisplayName("complete records the outcome step and adds COMPLETED")
+    void complete() {
+      String sagaId = started().sagaId();
+      lifecycle.drain(sagaId);
 
-            SagaInstance instance = lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
+      SagaInstance instance = lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
 
-            assertThat(instance.status()).isEqualTo(SagaStatus.COMPLETED);
-            assertThat(instance.outcome()).isEqualTo(ThreeStepSaga.END_STEP);
-            assertThat(lifecycle.drain(sagaId).entries()).singleElement().satisfies(entry -> {
+      assertThat(instance.status()).isEqualTo(SagaStatus.COMPLETED);
+      assertThat(instance.outcome()).isEqualTo(ThreeStepSaga.END_STEP);
+      assertThat(lifecycle.drain(sagaId).entries())
+          .singleElement()
+          .satisfies(
+              entry -> {
                 assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.COMPLETED);
                 assertThat(entry.outcomeStep()).isEqualTo(ThreeStepSaga.END_STEP);
-            });
-        }
+              });
+    }
 
-        @Test
-        @DisplayName("fail records the failure and adds FAILED")
-        void fail() {
-            String sagaId = started().sagaId();
-            lifecycle.drain(sagaId);
-            SagaFailure failure = SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("boom"),
-                    START);
+    @Test
+    @DisplayName("fail records the failure and adds FAILED")
+    void fail() {
+      String sagaId = started().sagaId();
+      lifecycle.drain(sagaId);
+      SagaFailure failure =
+          SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("boom"), START);
 
-            SagaInstance instance = lifecycle.fail(sagaId, failure);
+      SagaInstance instance = lifecycle.fail(sagaId, failure);
 
-            assertThat(instance.status()).isEqualTo(SagaStatus.FAILED);
-            assertThat(instance.failure()).isEqualTo(failure);
-            assertThat(lifecycle.drain(sagaId).entries()).singleElement().satisfies(entry -> {
+      assertThat(instance.status()).isEqualTo(SagaStatus.FAILED);
+      assertThat(instance.failure()).isEqualTo(failure);
+      assertThat(lifecycle.drain(sagaId).entries())
+          .singleElement()
+          .satisfies(
+              entry -> {
                 assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.FAILED);
                 assertThat(entry.failure()).isEqualTo(failure);
-            });
-        }
-
-        @Test
-        @DisplayName("a terminal working copy rejects every further transition")
-        void terminalRejected() {
-            String sagaId = started().sagaId();
-            lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
-            SagaFailure failure = SagaFailure.of(ThreeStepSaga.END_STEP, new IllegalStateException(), START);
-
-            assertThatThrownBy(() -> lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.END_STEP, List.of()))
-                    .isInstanceOf(InvalidSagaTransitionException.class);
-            assertThatThrownBy(() -> lifecycle.advance(sagaId)).isInstanceOf(InvalidSagaTransitionException.class);
-            assertThatThrownBy(() -> lifecycle.complete(sagaId, ThreeStepSaga.END_STEP))
-                    .isInstanceOf(InvalidSagaTransitionException.class);
-            assertThatThrownBy(() -> lifecycle.fail(sagaId, failure))
-                    .isInstanceOf(InvalidSagaTransitionException.class);
-        }
-
-        @Test
-        @DisplayName("a sagaId other than the working copy's is not found")
-        void otherSagaIdNotFound() {
-            started();
-
-            assertThatThrownBy(() -> lifecycle.advance("other")).isInstanceOf(InvalidSagaTransitionException.class);
-            assertThatThrownBy(() -> lifecycle.drain("other")).isInstanceOf(InvalidSagaTransitionException.class);
-        }
-
-        @Test
-        @DisplayName("a lifecycle holding no instance rejects transitions")
-        void emptyLifecycleRejects() {
-            assertThatThrownBy(() -> lifecycle.advance("saga-1")).isInstanceOf(InvalidSagaTransitionException.class);
-        }
+              });
     }
 
-    @Nested
-    @DisplayName("load and drain")
-    class LoadAndDrain {
+    @Test
+    @DisplayName("a terminal working copy rejects every further transition")
+    void terminalRejected() {
+      String sagaId = started().sagaId();
+      lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
+      SagaFailure failure =
+          SagaFailure.of(ThreeStepSaga.END_STEP, new IllegalStateException(), START);
 
-        @Test
-        @DisplayName("drain returns the entries in transition order and clears them")
-        void drainInTransitionOrder() {
-            String sagaId = started().sagaId();
-            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
-            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.RESERVED_STEP, List.of());
-            lifecycle.complete(sagaId, ThreeStepSaga.RESERVED_STEP);
-
-            PendingWrite write = lifecycle.drain(sagaId);
-
-            assertThat(kinds(write)).containsExactly(SagaLifecycleEventKind.CREATED,
-                    SagaLifecycleEventKind.STEP_COMPLETED, SagaLifecycleEventKind.STEP_COMPLETED,
-                    SagaLifecycleEventKind.COMPLETED);
-            assertThat(write.entries()).extracting(SagaLifecycleEntry::stepName)
-                    .containsExactly(null, ThreeStepSaga.START_STEP, ThreeStepSaga.RESERVED_STEP, null);
-            assertThat(write.entries()).extracting(SagaLifecycleEntry::occurredAt).isSorted();
-            assertThat(lifecycle.drain(sagaId).entries()).isEmpty();
-            assertThat(lifecycle.drain(sagaId).instance()).isEqualTo(write.instance());
-        }
-
-        @Test
-        @DisplayName("load seeds the working copy from a locked read")
-        void loadSeedsWorkingCopy() {
-            SagaInstance locked = stored("saga-9", ThreeStepSaga.class, SagaStatus.RUNNING);
-            EngineSagaLifecycle resumed = new EngineSagaLifecycle(threeStep, storage, sources);
-
-            resumed.load(locked);
-            resumed.advance("saga-9");
-
-            PendingWrite write = resumed.drain("saga-9");
-            assertThat(write.instance().sagaId()).isEqualTo("saga-9");
-            assertThat(write.instance().createdAt()).isEqualTo(START);
-            assertThat(write.entries()).isEmpty();
-        }
-
-        @Test
-        @DisplayName("load rejects an instance of another saga type and a second instance")
-        void loadRejects() {
-            EngineSagaLifecycle resumed = new EngineSagaLifecycle(threeStep, storage, sources);
-
-            assertThatThrownBy(() -> resumed.load(stored("b", CreateBookingSaga.class, SagaStatus.RUNNING)))
-                    .isInstanceOf(IllegalArgumentException.class);
-            resumed.load(stored("a", ThreeStepSaga.class, SagaStatus.RUNNING));
-            assertThatThrownBy(() -> resumed.load(stored("c", ThreeStepSaga.class, SagaStatus.RUNNING)))
-                    .isInstanceOf(IllegalStateException.class);
-        }
+      assertThatThrownBy(
+              () -> lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.END_STEP, List.of()))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+      assertThatThrownBy(() -> lifecycle.advance(sagaId))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+      assertThatThrownBy(() -> lifecycle.complete(sagaId, ThreeStepSaga.END_STEP))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+      assertThatThrownBy(() -> lifecycle.fail(sagaId, failure))
+          .isInstanceOf(InvalidSagaTransitionException.class);
     }
 
-    @Nested
-    @DisplayName("pending retry (specs/005-step-retry research §9, tasks.md T055)")
-    class PendingRetries {
+    @Test
+    @DisplayName("a sagaId other than the working copy's is not found")
+    void otherSagaIdNotFound() {
+      started();
 
-        private PendingRetry claimFor(String triggerStep) {
-            SagaFailure failure = SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("timeout"),
-                    START, io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.TRANSIENT, 1);
-            return new PendingRetry(triggerStep, 2, failure);
-        }
+      assertThatThrownBy(() -> lifecycle.advance("other"))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+      assertThatThrownBy(() -> lifecycle.drain("other"))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+    }
 
-        @Test
-        @DisplayName("attemptFailed sets the claim, keeps the status and produces one ATTEMPT_FAILED entry")
-        void attemptFailed() {
-            String sagaId = started().sagaId();
-            lifecycle.drain(sagaId);
-            PendingRetry claim = claimFor(ThreeStepSaga.START_STEP);
+    @Test
+    @DisplayName("a lifecycle holding no instance rejects transitions")
+    void emptyLifecycleRejects() {
+      assertThatThrownBy(() -> lifecycle.advance("saga-1"))
+          .isInstanceOf(InvalidSagaTransitionException.class);
+    }
+  }
 
-            SagaInstance instance = lifecycle.attemptFailed(sagaId, claim);
+  @Nested
+  @DisplayName("load and drain")
+  class LoadAndDrain {
 
-            assertThat(instance.pendingRetry()).isEqualTo(claim);
-            assertThat(instance.status()).isEqualTo(SagaStatus.CREATED);
-            assertThat(lifecycle.drain(sagaId).entries()).singleElement().satisfies(entry -> {
+    @Test
+    @DisplayName("drain returns the entries in transition order and clears them")
+    void drainInTransitionOrder() {
+      String sagaId = started().sagaId();
+      lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
+      lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.RESERVED_STEP, List.of());
+      lifecycle.complete(sagaId, ThreeStepSaga.RESERVED_STEP);
+
+      PendingWrite write = lifecycle.drain(sagaId);
+
+      assertThat(kinds(write))
+          .containsExactly(
+              SagaLifecycleEventKind.CREATED,
+              SagaLifecycleEventKind.STEP_COMPLETED,
+              SagaLifecycleEventKind.STEP_COMPLETED,
+              SagaLifecycleEventKind.COMPLETED);
+      assertThat(write.entries())
+          .extracting(SagaLifecycleEntry::stepName)
+          .containsExactly(null, ThreeStepSaga.START_STEP, ThreeStepSaga.RESERVED_STEP, null);
+      assertThat(write.entries()).extracting(SagaLifecycleEntry::occurredAt).isSorted();
+      assertThat(lifecycle.drain(sagaId).entries()).isEmpty();
+      assertThat(lifecycle.drain(sagaId).instance()).isEqualTo(write.instance());
+    }
+
+    @Test
+    @DisplayName("load seeds the working copy from a locked read")
+    void loadSeedsWorkingCopy() {
+      SagaInstance locked = stored("saga-9", ThreeStepSaga.class, SagaStatus.RUNNING);
+      EngineSagaLifecycle resumed = new EngineSagaLifecycle(threeStep, storage, sources);
+
+      resumed.load(locked);
+      resumed.advance("saga-9");
+
+      PendingWrite write = resumed.drain("saga-9");
+      assertThat(write.instance().sagaId()).isEqualTo("saga-9");
+      assertThat(write.instance().createdAt()).isEqualTo(START);
+      assertThat(write.entries()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("load rejects an instance of another saga type and a second instance")
+    void loadRejects() {
+      EngineSagaLifecycle resumed = new EngineSagaLifecycle(threeStep, storage, sources);
+
+      assertThatThrownBy(
+              () -> resumed.load(stored("b", CreateBookingSaga.class, SagaStatus.RUNNING)))
+          .isInstanceOf(IllegalArgumentException.class);
+      resumed.load(stored("a", ThreeStepSaga.class, SagaStatus.RUNNING));
+      assertThatThrownBy(() -> resumed.load(stored("c", ThreeStepSaga.class, SagaStatus.RUNNING)))
+          .isInstanceOf(IllegalStateException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("pending retry (specs/005-step-retry research §9, tasks.md T055)")
+  class PendingRetries {
+
+    private PendingRetry claimFor(String triggerStep) {
+      SagaFailure failure =
+          SagaFailure.of(
+              ThreeStepSaga.RESERVED_STEP,
+              new IllegalStateException("timeout"),
+              START,
+              io.github.gkosharovdev.sagaforge.core.failure.FailureClassification.TRANSIENT,
+              1);
+      return new PendingRetry(triggerStep, 2, failure);
+    }
+
+    @Test
+    @DisplayName(
+        "attemptFailed sets the claim, keeps the status and produces one ATTEMPT_FAILED entry")
+    void attemptFailed() {
+      String sagaId = started().sagaId();
+      lifecycle.drain(sagaId);
+      PendingRetry claim = claimFor(ThreeStepSaga.START_STEP);
+
+      SagaInstance instance = lifecycle.attemptFailed(sagaId, claim);
+
+      assertThat(instance.pendingRetry()).isEqualTo(claim);
+      assertThat(instance.status()).isEqualTo(SagaStatus.CREATED);
+      assertThat(lifecycle.drain(sagaId).entries())
+          .singleElement()
+          .satisfies(
+              entry -> {
                 assertThat(entry.kind()).isEqualTo(SagaLifecycleEventKind.ATTEMPT_FAILED);
                 assertThat(entry.stepName()).isEqualTo(ThreeStepSaga.RESERVED_STEP);
                 assertThat(entry.failure()).isEqualTo(claim.lastFailure());
-            });
-        }
-
-        @Test
-        @DisplayName("only a commit for the claim's trigger step clears it; other transitions keep it")
-        void clearedOnlyForItsTriggerStep() {
-            String sagaId = started().sagaId();
-            lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.RESERVED_STEP));
-
-            lifecycle.clearPendingRetry(ThreeStepSaga.START_STEP);
-            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of());
-            SagaInstance advanced = lifecycle.advance(sagaId);
-            assertThat(advanced.pendingRetry()).isNotNull();
-
-            lifecycle.clearPendingRetry(ThreeStepSaga.RESERVED_STEP);
-            assertThat(lifecycle.drain(sagaId).instance().pendingRetry()).isNull();
-        }
-
-        @Test
-        @DisplayName("a terminal transition drops the claim")
-        void droppedWhenTerminal() {
-            String sagaId = started().sagaId();
-            lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.START_STEP));
-
-            SagaInstance failed = lifecycle.fail(sagaId, SagaFailure.of(ThreeStepSaga.START_STEP,
-                    new IllegalStateException("final"), START));
-
-            assertThat(failed.pendingRetry()).isNull();
-        }
+              });
     }
 
-    @Nested
-    @DisplayName("outcome events (011)")
-    class OutcomeEvents {
+    @Test
+    @DisplayName("only a commit for the claim's trigger step clears it; other transitions keep it")
+    void clearedOnlyForItsTriggerStep() {
+      String sagaId = started().sagaId();
+      lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.RESERVED_STEP));
 
-        private final EngineSagaLifecycle unwind = new EngineSagaLifecycle(SagaModel.of(UnwindSaga.class), storage,
-                sources);
+      lifecycle.clearPendingRetry(ThreeStepSaga.START_STEP);
+      lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of());
+      SagaInstance advanced = lifecycle.advance(sagaId);
+      assertThat(advanced.pendingRetry()).isNotNull();
 
-        private String unwindWithCompleted(String... steps) {
-            String sagaId = unwind.start(UnwindSaga.class, "orderId", ORDER).sagaId();
-            for (String step : steps) {
-                unwind.recordStepCompleted(sagaId, step, List.of());
-            }
-            return sagaId;
-        }
+      lifecycle.clearPendingRetry(ThreeStepSaga.RESERVED_STEP);
+      assertThat(lifecycle.drain(sagaId).instance().pendingRetry()).isNull();
+    }
 
-        private CompensationTrigger abort() {
-            return CompensationTrigger.failureOutcome(UnwindSaga.ABORT, "Aborted", START);
-        }
+    @Test
+    @DisplayName("a terminal transition drops the claim")
+    void droppedWhenTerminal() {
+      String sagaId = started().sagaId();
+      lifecycle.attemptFailed(sagaId, claimFor(ThreeStepSaga.START_STEP));
 
-        @Test
-        @DisplayName("complete: SagaCompleted with the outcome step, id sagaId:COMPLETED, cleared by drain")
-        void completed() {
-            String sagaId = started().sagaId();
-            SagaInstance instance = lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
+      SagaInstance failed =
+          lifecycle.fail(
+              sagaId,
+              SagaFailure.of(ThreeStepSaga.START_STEP, new IllegalStateException("final"), START));
 
-            PendingWrite write = lifecycle.drain(sagaId);
+      assertThat(failed.pendingRetry()).isNull();
+    }
+  }
 
-            assertThat(write.outcome()).get().isInstanceOfSatisfying(SagaCompleted.class, completed -> {
+  @Nested
+  @DisplayName("outcome events (011)")
+  class OutcomeEvents {
+
+    private final EngineSagaLifecycle unwind =
+        new EngineSagaLifecycle(SagaModel.of(UnwindSaga.class), storage, sources);
+
+    private String unwindWithCompleted(String... steps) {
+      String sagaId = unwind.start(UnwindSaga.class, "orderId", ORDER).sagaId();
+      for (String step : steps) {
+        unwind.recordStepCompleted(sagaId, step, List.of());
+      }
+      return sagaId;
+    }
+
+    private CompensationTrigger abort() {
+      return CompensationTrigger.failureOutcome(UnwindSaga.ABORT, "Aborted", START);
+    }
+
+    @Test
+    @DisplayName(
+        "complete: SagaCompleted with the outcome step, id sagaId:COMPLETED, cleared by drain")
+    void completed() {
+      String sagaId = started().sagaId();
+      SagaInstance instance = lifecycle.complete(sagaId, ThreeStepSaga.END_STEP);
+
+      PendingWrite write = lifecycle.drain(sagaId);
+
+      assertThat(write.outcome())
+          .get()
+          .isInstanceOfSatisfying(
+              SagaCompleted.class,
+              completed -> {
                 assertThat(completed.eventId()).isEqualTo(sagaId + ":COMPLETED");
                 assertThat(completed.sagaType()).isEqualTo(ThreeStepSaga.class.getName());
                 assertThat(completed.sagaId()).isEqualTo(sagaId);
                 assertThat(completed.associations()).isEqualTo(Map.of("orderId", ORDER));
                 assertThat(completed.occurredAt()).isEqualTo(instance.lastModifiedAt());
                 assertThat(completed.outcomeStep()).isEqualTo(ThreeStepSaga.END_STEP);
-            });
-            assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
-        }
+              });
+      assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
+    }
 
-        @Test
-        @DisplayName("fail: SagaFailed in phase STEP naming the failed step, cause type and attempts, with no trigger")
-        void failed() {
-            String sagaId = started().sagaId();
-            SagaFailure failure = SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("boom"),
-                    START);
-            lifecycle.fail(sagaId, failure);
+    @Test
+    @DisplayName(
+        "fail: SagaFailed in phase STEP naming the failed step, cause type and attempts, with no trigger")
+    void failed() {
+      String sagaId = started().sagaId();
+      SagaFailure failure =
+          SagaFailure.of(ThreeStepSaga.RESERVED_STEP, new IllegalStateException("boom"), START);
+      lifecycle.fail(sagaId, failure);
 
-            assertThat(lifecycle.drain(sagaId).outcome()).get().isInstanceOfSatisfying(SagaFailed.class, failed -> {
+      assertThat(lifecycle.drain(sagaId).outcome())
+          .get()
+          .isInstanceOfSatisfying(
+              SagaFailed.class,
+              failed -> {
                 assertThat(failed.eventId()).isEqualTo(sagaId + ":FAILED");
                 assertThat(failed.phase()).isEqualTo(FailurePhase.STEP);
                 assertThat(failed.failedStep()).isEqualTo(ThreeStepSaga.RESERVED_STEP);
@@ -437,69 +502,79 @@ class EngineSagaLifecycleTest {
                 assertThat(failed.causeType()).isEqualTo(IllegalStateException.class.getName());
                 assertThat(failed.attempts()).isEqualTo(failure.attempts());
                 assertThat(failed.compensationTrigger()).isNull();
-            });
-        }
+              });
+    }
 
-        @Test
-        @DisplayName("compensation ending: SagaCompensated with the persisted trigger")
-        void compensated() {
-            String sagaId = unwindWithCompleted(UnwindSaga.A);
-            unwind.startCompensation(sagaId, abort());
-            assertThat(unwind.drain(sagaId).outcome()).isEmpty();
+    @Test
+    @DisplayName("compensation ending: SagaCompensated with the persisted trigger")
+    void compensated() {
+      String sagaId = unwindWithCompleted(UnwindSaga.A);
+      unwind.startCompensation(sagaId, abort());
+      assertThat(unwind.drain(sagaId).outcome()).isEmpty();
 
-            unwind.recordCompensated(sagaId, UnwindSaga.A);
+      unwind.recordCompensated(sagaId, UnwindSaga.A);
 
-            assertThat(unwind.drain(sagaId).outcome()).get().isInstanceOfSatisfying(SagaCompensated.class,
-                    compensated -> {
-                        assertThat(compensated.eventId()).isEqualTo(sagaId + ":COMPENSATED");
-                        assertThat(compensated.trigger().kind())
-                                .isEqualTo(CompensationTriggerKind.FAILURE_OUTCOME);
-                        assertThat(compensated.trigger().stepName()).isEqualTo(UnwindSaga.ABORT);
-                    });
-        }
+      assertThat(unwind.drain(sagaId).outcome())
+          .get()
+          .isInstanceOfSatisfying(
+              SagaCompensated.class,
+              compensated -> {
+                assertThat(compensated.eventId()).isEqualTo(sagaId + ":COMPENSATED");
+                assertThat(compensated.trigger().kind())
+                    .isEqualTo(CompensationTriggerKind.FAILURE_OUTCOME);
+                assertThat(compensated.trigger().stepName()).isEqualTo(UnwindSaga.ABORT);
+              });
+    }
 
-        @Test
-        @DisplayName("a compensation start with nothing to compensate ends COMPENSATED in the same write")
-        void compensatedAtStart() {
-            String sagaId = unwindWithCompleted();
-            unwind.startCompensation(sagaId, abort());
+    @Test
+    @DisplayName(
+        "a compensation start with nothing to compensate ends COMPENSATED in the same write")
+    void compensatedAtStart() {
+      String sagaId = unwindWithCompleted();
+      unwind.startCompensation(sagaId, abort());
 
-            assertThat(unwind.drain(sagaId).outcome()).get().isInstanceOf(SagaCompensated.class);
-        }
+      assertThat(unwind.drain(sagaId).outcome()).get().isInstanceOf(SagaCompensated.class);
+    }
 
-        @Test
-        @DisplayName("compensation failure: SagaFailed in phase COMPENSATION naming the step and the trigger")
-        void compensationFailed() {
-            String sagaId = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
-            unwind.startCompensation(sagaId, abort());
-            unwind.drain(sagaId);
-            SagaFailure failure = SagaFailure.of(UnwindSaga.B, new IllegalArgumentException("undo failed"), START);
+    @Test
+    @DisplayName(
+        "compensation failure: SagaFailed in phase COMPENSATION naming the step and the trigger")
+    void compensationFailed() {
+      String sagaId = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
+      unwind.startCompensation(sagaId, abort());
+      unwind.drain(sagaId);
+      SagaFailure failure =
+          SagaFailure.of(UnwindSaga.B, new IllegalArgumentException("undo failed"), START);
 
-            unwind.recordCompensationFailed(sagaId, UnwindSaga.B, failure);
+      unwind.recordCompensationFailed(sagaId, UnwindSaga.B, failure);
 
-            PendingWrite write = unwind.drain(sagaId);
-            assertThat(write.outcome()).get().isInstanceOfSatisfying(SagaFailed.class, failed -> {
+      PendingWrite write = unwind.drain(sagaId);
+      assertThat(write.outcome())
+          .get()
+          .isInstanceOfSatisfying(
+              SagaFailed.class,
+              failed -> {
                 assertThat(failed.eventId()).isEqualTo(sagaId + ":COMPENSATION_FAILED");
                 assertThat(failed.phase()).isEqualTo(FailurePhase.COMPENSATION);
                 assertThat(failed.failedStep()).isEqualTo(UnwindSaga.B);
                 assertThat(failed.causeType()).isEqualTo(IllegalArgumentException.class.getName());
                 assertThat(failed.compensationTrigger().stepName()).isEqualTo(UnwindSaga.ABORT);
-            });
-        }
-
-        @Test
-        @DisplayName("non-terminal transitions produce no outcome")
-        void nonTerminalTransitions() {
-            String sagaId = started().sagaId();
-            lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
-            lifecycle.advance(sagaId);
-            assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
-
-            String unwinding = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
-            unwind.startCompensation(unwinding, abort());
-            assertThat(unwind.drain(unwinding).outcome()).isEmpty();
-            unwind.recordCompensated(unwinding, UnwindSaga.B);
-            assertThat(unwind.drain(unwinding).outcome()).isEmpty();
-        }
+              });
     }
+
+    @Test
+    @DisplayName("non-terminal transitions produce no outcome")
+    void nonTerminalTransitions() {
+      String sagaId = started().sagaId();
+      lifecycle.recordStepCompleted(sagaId, ThreeStepSaga.START_STEP, List.of(RESERVATION));
+      lifecycle.advance(sagaId);
+      assertThat(lifecycle.drain(sagaId).outcome()).isEmpty();
+
+      String unwinding = unwindWithCompleted(UnwindSaga.A, UnwindSaga.B);
+      unwind.startCompensation(unwinding, abort());
+      assertThat(unwind.drain(unwinding).outcome()).isEmpty();
+      unwind.recordCompensated(unwinding, UnwindSaga.B);
+      assertThat(unwind.drain(unwinding).outcome()).isEmpty();
+    }
+  }
 }

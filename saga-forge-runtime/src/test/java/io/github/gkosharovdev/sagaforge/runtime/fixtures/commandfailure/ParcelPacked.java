@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** Runs {@link ParcelSaga#pack}, which sends {@link ShipParcel}. */
 @DomainEvent(aggregate = Parcel.class)
-public record ParcelPacked(@AggregateIdentifier String parcelId) {
-}
+public record ParcelPacked(@AggregateIdentifier String parcelId) {}

@@ -6,5 +6,4 @@ import io.github.gkosharovdev.sagaforge.example.checkout.StockReservation;
 
 /** Inventory holds the order's items. Published by the Inventory service. */
 @DomainEvent(aggregate = StockReservation.class)
-public record StockReservedEvent(@AggregateIdentifier String reservationId, String orderId) {
-}
+public record StockReservedEvent(@AggregateIdentifier String reservationId, String orderId) {}

@@ -2,9 +2,6 @@ package io.github.gkosharovdev.sagaforge.runtime.telemetry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
@@ -28,135 +25,157 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.api.trace.TracerBuilder;
 import io.opentelemetry.api.trace.TracerProvider;
 import io.opentelemetry.context.propagation.ContextPropagators;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
-/** FR-012 and SC-007: faulty instrumentation never changes a saga (specs/010-otel-observability tasks.md T004). */
+/**
+ * FR-012 and SC-007: faulty instrumentation never changes a saga (specs/010-otel-observability
+ * tasks.md T004).
+ */
 class FaultyInstrumentationTest {
 
-    /** An event whose {@code toString} throws. */
-    @DomainEvent(aggregate = Trip.class)
-    public record Odd(@AggregateIdentifier String tripId) {
+  /** An event whose {@code toString} throws. */
+  @DomainEvent(aggregate = Trip.class)
+  public record Odd(@AggregateIdentifier String tripId) {
 
-        @Override
-        public String toString() {
-            throw new IllegalStateException("toString broke");
-        }
+    @Override
+    public String toString() {
+      throw new IllegalStateException("toString broke");
     }
+  }
 
-    @Saga
-    public static final class OddSaga {
+  @Saga
+  public static final class OddSaga {
 
-        @SagaId
-        private String sagaId;
+    @SagaId private String sagaId;
 
-        @StartSaga
-        @SagaStep(associationProperty = "tripId")
-        public void started(Odd event) {
-        }
+    @StartSaga
+    @SagaStep(associationProperty = "tripId")
+    public void started(Odd event) {}
 
-        @EndSaga
-        @SagaStep(associationProperty = "tripId")
-        public void ended(HotelBooked event) {
-        }
-    }
+    @EndSaga
+    @SagaStep(associationProperty = "tripId")
+    public void ended(HotelBooked event) {}
+  }
 
-    /** An OpenTelemetry whose tracer throws from every {@code spanBuilder} call. */
-    private static final class ThrowingOpenTelemetry implements OpenTelemetry {
+  /** An OpenTelemetry whose tracer throws from every {@code spanBuilder} call. */
+  private static final class ThrowingOpenTelemetry implements OpenTelemetry {
 
+    @Override
+    public TracerProvider getTracerProvider() {
+      Tracer tracer =
+          name -> {
+            throw new IllegalStateException("tracer broke");
+          };
+      return new TracerProvider() {
         @Override
-        public TracerProvider getTracerProvider() {
-            Tracer tracer = name -> {
-                throw new IllegalStateException("tracer broke");
-            };
-            return new TracerProvider() {
-                @Override
-                public Tracer get(String name) {
-                    return tracer;
-                }
-
-                @Override
-                public Tracer get(String name, String version) {
-                    return tracer;
-                }
-
-                @Override
-                public TracerBuilder tracerBuilder(String name) {
-                    return new TracerBuilder() {
-                        @Override
-                        public TracerBuilder setSchemaUrl(String schemaUrl) {
-                            return this;
-                        }
-
-                        @Override
-                        public TracerBuilder setInstrumentationVersion(String version) {
-                            return this;
-                        }
-
-                        @Override
-                        public Tracer build() {
-                            return tracer;
-                        }
-                    };
-                }
-            };
+        public Tracer get(String name) {
+          return tracer;
         }
 
         @Override
-        public ContextPropagators getPropagators() {
-            return ContextPropagators.noop();
+        public Tracer get(String name, String version) {
+          return tracer;
         }
+
+        @Override
+        public TracerBuilder tracerBuilder(String name) {
+          return new TracerBuilder() {
+            @Override
+            public TracerBuilder setSchemaUrl(String schemaUrl) {
+              return this;
+            }
+
+            @Override
+            public TracerBuilder setInstrumentationVersion(String version) {
+              return this;
+            }
+
+            @Override
+            public Tracer build() {
+              return tracer;
+            }
+          };
+        }
+      };
     }
 
-    private static SagaRuntime engine(OpenTelemetry openTelemetry, SagaTelemetrySettings settings,
-            RecordingLogger logger) {
-        InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
-        SagaRuntime engine = SagaRuntime.builder().register(OddSaga.class)
-                .storage(new TransactionalInMemoryStorageProvider(boundary))
-                .contextStore(new InMemorySagaContextStore()).transactions(boundary)
-                .dispatcher(new RecordingEventDispatcher())
-                .openTelemetry(openTelemetry).telemetry(settings).logger(logger).build();
-        engine.start();
-        return engine;
+    @Override
+    public ContextPropagators getPropagators() {
+      return ContextPropagators.noop();
     }
+  }
 
-    @Test
-    @DisplayName("a content whose toString throws is skipped and logged once")
-    void throwingToString() {
-        RecordingLogger logger = new RecordingLogger();
-        TelemetryAssertions telemetry = new TelemetryAssertions();
-        SagaRuntime engine = engine(telemetry.openTelemetry(),
-                SagaTelemetrySettings.defaults().withRecordContents(true), logger);
+  private static SagaRuntime engine(
+      OpenTelemetry openTelemetry, SagaTelemetrySettings settings, RecordingLogger logger) {
+    InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
+    SagaRuntime engine =
+        SagaRuntime.builder()
+            .register(OddSaga.class)
+            .storage(new TransactionalInMemoryStorageProvider(boundary))
+            .contextStore(new InMemorySagaContextStore())
+            .transactions(boundary)
+            .dispatcher(new RecordingEventDispatcher())
+            .openTelemetry(openTelemetry)
+            .telemetry(settings)
+            .logger(logger)
+            .build();
+    engine.start();
+    return engine;
+  }
 
-        assertThat(engine.receive(new Odd("trip-1")).results().get(0).outcome()).isEqualTo(HandlingOutcome.WAITING);
-        assertThat(engine.receive(new Odd("trip-2")).results().get(0).outcome()).isEqualTo(HandlingOutcome.WAITING);
+  @Test
+  @DisplayName("a content whose toString throws is skipped and logged once")
+  void throwingToString() {
+    RecordingLogger logger = new RecordingLogger();
+    TelemetryAssertions telemetry = new TelemetryAssertions();
+    SagaRuntime engine =
+        engine(
+            telemetry.openTelemetry(),
+            SagaTelemetrySettings.defaults().withRecordContents(true),
+            logger);
 
-        assertThat(logger.byEvent("saga.telemetry.failed")).hasSize(1);
-        assertThat(telemetry.named("saga_forge.handle")).hasSize(2);
-    }
+    assertThat(engine.receive(new Odd("trip-1")).results().get(0).outcome())
+        .isEqualTo(HandlingOutcome.WAITING);
+    assertThat(engine.receive(new Odd("trip-2")).results().get(0).outcome())
+        .isEqualTo(HandlingOutcome.WAITING);
 
-    @Test
-    @DisplayName("a tracer that throws is skipped and logged once; the saga runs as without telemetry")
-    void throwingTracer() {
-        RecordingLogger logger = new RecordingLogger();
-        SagaRuntime engine = engine(new ThrowingOpenTelemetry(), SagaTelemetrySettings.defaults(), logger);
+    assertThat(logger.byEvent("saga.telemetry.failed")).hasSize(1);
+    assertThat(telemetry.named("saga_forge.handle")).hasSize(2);
+  }
 
-        assertThat(engine.receive(new Odd("trip-1")).results().get(0).outcome()).isEqualTo(HandlingOutcome.WAITING);
-        assertThat(engine.receive(new HotelBooked("trip-1")).results().get(0).outcome())
-                .isEqualTo(HandlingOutcome.COMPLETED);
+  @Test
+  @DisplayName(
+      "a tracer that throws is skipped and logged once; the saga runs as without telemetry")
+  void throwingTracer() {
+    RecordingLogger logger = new RecordingLogger();
+    SagaRuntime engine =
+        engine(new ThrowingOpenTelemetry(), SagaTelemetrySettings.defaults(), logger);
 
-        assertThat(logger.byEvent("saga.telemetry.failed")).extracting(logged -> logged.keys().get("kind"))
-                .doesNotHaveDuplicates().contains("saga_forge.handle");
-    }
+    assertThat(engine.receive(new Odd("trip-1")).results().get(0).outcome())
+        .isEqualTo(HandlingOutcome.WAITING);
+    assertThat(engine.receive(new HotelBooked("trip-1")).results().get(0).outcome())
+        .isEqualTo(HandlingOutcome.COMPLETED);
 
-    @Test
-    @DisplayName("a disabled tracer and meter record nothing")
-    void switchedOff() {
-        TelemetryAssertions telemetry = new TelemetryAssertions();
-        SagaRuntime engine = engine(telemetry.openTelemetry(),
-                SagaTelemetrySettings.defaults().withTracing(false).withMetrics(false), new RecordingLogger());
+    assertThat(logger.byEvent("saga.telemetry.failed"))
+        .extracting(logged -> logged.keys().get("kind"))
+        .doesNotHaveDuplicates()
+        .contains("saga_forge.handle");
+  }
 
-        engine.receive(new Odd("trip-1"));
+  @Test
+  @DisplayName("a disabled tracer and meter record nothing")
+  void switchedOff() {
+    TelemetryAssertions telemetry = new TelemetryAssertions();
+    SagaRuntime engine =
+        engine(
+            telemetry.openTelemetry(),
+            SagaTelemetrySettings.defaults().withTracing(false).withMetrics(false),
+            new RecordingLogger());
 
-        assertThat(telemetry.spans()).isEmpty();
-        assertThat(telemetry.collectMetrics()).isEmpty();
-    }
+    engine.receive(new Odd("trip-1"));
+
+    assertThat(telemetry.spans()).isEmpty();
+    assertThat(telemetry.collectMetrics()).isEmpty();
+  }
 }

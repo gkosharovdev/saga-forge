@@ -6,16 +6,14 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/**
- * Container for repeated {@link StartDeadline} annotations on one step.
- */
+/** Container for repeated {@link StartDeadline} annotations on one step. */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface StartDeadlines {
 
-    /**
-     * @return the deadlines the step starts
-     */
-    StartDeadline[] value();
+  /**
+   * @return the deadlines the step starts
+   */
+  StartDeadline[] value();
 }

@@ -10,40 +10,43 @@ import io.github.gkosharovdev.sagaforge.core.command.ScheduledCommandId;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 import java.time.Instant;
 
-/** Schedules and cancels a command through {@code CommandGateway.schedule}/{@code cancel} (specs/017 US4). */
+/**
+ * Schedules and cancels a command through {@code CommandGateway.schedule}/{@code cancel} (specs/017
+ * US4).
+ */
 @Saga
 public final class ShipmentSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    private SagaContext context;
+  private SagaContext context;
 
-    private CommandGateway commandGateway;
+  private CommandGateway commandGateway;
 
-    @StartSaga
-    @SagaStep(associationProperty = "shipmentId")
-    public void onBooked(ShipmentEvents.Booked event) {
-        ScheduledCommandId id = commandGateway.schedule(new ShipmentCommands.Ship(event.shipmentId()), event.at());
-        context.putState("scheduled", id.value());
-        if (event.cancelAtOnce()) {
-            context.putState("cancelledAtOnce", Boolean.toString(commandGateway.cancel(id)));
-        }
+  @StartSaga
+  @SagaStep(associationProperty = "shipmentId")
+  public void onBooked(ShipmentEvents.Booked event) {
+    ScheduledCommandId id =
+        commandGateway.schedule(new ShipmentCommands.Ship(event.shipmentId()), event.at());
+    context.putState("scheduled", id.value());
+    if (event.cancelAtOnce()) {
+      context.putState("cancelledAtOnce", Boolean.toString(commandGateway.cancel(id)));
     }
+  }
 
-    @SagaStep(associationProperty = "shipmentId")
-    public void onWithdrawn(ShipmentEvents.Withdrawn event) {
-        ScheduledCommandId id = new ScheduledCommandId(context.getState("scheduled", String.class).orElseThrow());
-        context.putState("withdrawn", Boolean.toString(commandGateway.cancel(id)));
-    }
+  @SagaStep(associationProperty = "shipmentId")
+  public void onWithdrawn(ShipmentEvents.Withdrawn event) {
+    ScheduledCommandId id =
+        new ScheduledCommandId(context.getState("scheduled", String.class).orElseThrow());
+    context.putState("withdrawn", Boolean.toString(commandGateway.cancel(id)));
+  }
 
-    @SagaStep(associationProperty = "shipmentId")
-    public void onMisused(ShipmentEvents.Misused event) {
-        commandGateway.schedule(new ShipmentCommands.Note(event.shipmentId()), Instant.EPOCH);
-    }
+  @SagaStep(associationProperty = "shipmentId")
+  public void onMisused(ShipmentEvents.Misused event) {
+    commandGateway.schedule(new ShipmentCommands.Note(event.shipmentId()), Instant.EPOCH);
+  }
 
-    @EndSaga
-    @SagaStep(associationProperty = "shipmentId")
-    public void onShipped(ShipmentEvents.Shipped event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "shipmentId")
+  public void onShipped(ShipmentEvents.Shipped event) {}
 }

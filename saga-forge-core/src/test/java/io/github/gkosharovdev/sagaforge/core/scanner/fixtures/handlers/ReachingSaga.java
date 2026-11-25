@@ -7,18 +7,16 @@ import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 
 /**
- * A valid one-step saga whose event, {@link ReachedEventWithoutIdentifier}, is invalid. Used to show that
- * event types are reached from step signatures.
+ * A valid one-step saga whose event, {@link ReachedEventWithoutIdentifier}, is invalid. Used to
+ * show that event types are reached from step signatures.
  */
 @Saga
 public class ReachingSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @EndSaga
-    @SagaStep(associationProperty = "id")
-    public void handle(ReachedEventWithoutIdentifier event) {
-    }
+  @StartSaga
+  @EndSaga
+  @SagaStep(associationProperty = "id")
+  public void handle(ReachedEventWithoutIdentifier event) {}
 }

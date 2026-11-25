@@ -24,197 +24,285 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The 006 storage delta without a database (specs/006-saga-compensation contracts/storage-delta.md, tasks.md T049):
- * the codec of the compensation trigger, the completion sequence and the step compensation states, and the
- * {@code ForwardTransition} rules that keep them moving forward.
+ * The 006 storage delta without a database (specs/006-saga-compensation contracts/storage-delta.md,
+ * tasks.md T049): the codec of the compensation trigger, the completion sequence and the step
+ * compensation states, and the {@code ForwardTransition} rules that keep them moving forward.
  */
 class CompensationPersistenceTest {
 
-    private static final Instant AT = Instant.parse("2026-01-01T10:00:00Z");
-    private static final SagaFailure FINAL = new SagaFailure("pay", "com.example.Refused", "no", AT,
-            FailureClassification.FINAL, 1);
-    private static final SagaFailure EXHAUSTED = new SagaFailure("book", "com.example.Busy", null, AT,
-            FailureClassification.EXHAUSTED, 3);
-    private static final CompensationTrigger REJECTED =
-            CompensationTrigger.failureOutcome("reject", "com.example.DeliveryRejected", AT);
+  private static final Instant AT = Instant.parse("2026-01-01T10:00:00Z");
+  private static final SagaFailure FINAL =
+      new SagaFailure("pay", "com.example.Refused", "no", AT, FailureClassification.FINAL, 1);
+  private static final SagaFailure EXHAUSTED =
+      new SagaFailure("book", "com.example.Busy", null, AT, FailureClassification.EXHAUSTED, 3);
+  private static final CompensationTrigger REJECTED =
+      CompensationTrigger.failureOutcome("reject", "com.example.DeliveryRejected", AT);
 
-    private static final CompensationTrigger COMMAND_FAILED = CompensationTrigger.commandFailed(new CommandFailure(
-            CommandId.of("s-1", "pay", "com.example.Charge", 1), FailureClassification.EXHAUSTED,
-            "com.example.Busy", 3), AT);
+  private static final CompensationTrigger COMMAND_FAILED =
+      CompensationTrigger.commandFailed(
+          new CommandFailure(
+              CommandId.of("s-1", "pay", "com.example.Charge", 1),
+              FailureClassification.EXHAUSTED,
+              "com.example.Busy",
+              3),
+          AT);
 
-    static Stream<CompensationTrigger> triggers() {
-        return Stream.of(REJECTED, CompensationTrigger.failed(FINAL, AT), CompensationTrigger.failed(EXHAUSTED, AT),
-                COMMAND_FAILED, CompensationTrigger.deadlineExpired("onPaymentWindowExpired",
-                        "io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached", "paymentWindow", AT));
-    }
+  static Stream<CompensationTrigger> triggers() {
+    return Stream.of(
+        REJECTED,
+        CompensationTrigger.failed(FINAL, AT),
+        CompensationTrigger.failed(EXHAUSTED, AT),
+        COMMAND_FAILED,
+        CompensationTrigger.deadlineExpired(
+            "onPaymentWindowExpired",
+            "io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached",
+            "paymentWindow",
+            AT));
+  }
 
-    static Stream<StepCompensation> compensations() {
-        return Stream.of(StepCompensation.notAttempted(), StepCompensation.compensated(AT),
-                StepCompensation.nothingToCompensate(AT), StepCompensation.failed(FINAL),
-                StepCompensation.failed(EXHAUSTED));
-    }
+  static Stream<StepCompensation> compensations() {
+    return Stream.of(
+        StepCompensation.notAttempted(),
+        StepCompensation.compensated(AT),
+        StepCompensation.nothingToCompensate(AT),
+        StepCompensation.failed(FINAL),
+        StepCompensation.failed(EXHAUSTED));
+  }
 
-    private static StepRecord completed(int sequence, StepCompensation compensation) {
-        return new StepRecord(StepStatus.COMPLETED, List.of(), 1, List.of(), sequence, compensation);
-    }
+  private static StepRecord completed(int sequence, StepCompensation compensation) {
+    return new StepRecord(StepStatus.COMPLETED, List.of(), 1, List.of(), sequence, compensation);
+  }
 
-    private static SagaInstance instance(SagaStatus status, Map<String, StepRecord> steps,
-            CompensationTrigger trigger) {
-        return new SagaInstance("s-1", "com.example.Saga", Map.of(), Map.of("orderId", "o-1"), status, AT, AT, steps,
-                null, null, null, trigger);
-    }
+  private static SagaInstance instance(
+      SagaStatus status, Map<String, StepRecord> steps, CompensationTrigger trigger) {
+    return new SagaInstance(
+        "s-1",
+        "com.example.Saga",
+        Map.of(),
+        Map.of("orderId", "o-1"),
+        status,
+        AT,
+        AT,
+        steps,
+        null,
+        null,
+        null,
+        trigger);
+  }
 
-    @ParameterizedTest
-    @MethodSource("triggers")
-    @DisplayName("every trigger kind round-trips through compensation_trigger")
-    void triggerRoundTrip(CompensationTrigger trigger) {
-        String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, trigger);
+  @ParameterizedTest
+  @MethodSource("triggers")
+  @DisplayName("every trigger kind round-trips through compensation_trigger")
+  void triggerRoundTrip(CompensationTrigger trigger) {
+    String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, trigger);
 
-        assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, json)).isEqualTo(trigger);
-    }
+    assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, json))
+        .isEqualTo(trigger);
+  }
 
-    @Test
-    @DisplayName("012: a command-failed trigger keeps its command type; a trigger stored before 012 reads without one")
-    void commandTypeRoundTrip() {
-        String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, COMMAND_FAILED);
-        String before012 = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, REJECTED);
+  @Test
+  @DisplayName(
+      "012: a command-failed trigger keeps its command type; a trigger stored before 012 reads without one")
+  void commandTypeRoundTrip() {
+    String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, COMMAND_FAILED);
+    String before012 = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, REJECTED);
 
-        assertThat(json).contains("\"commandType\":\"com.example.Charge\"");
-        assertThat(before012).doesNotContain("commandType");
-        assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, before012).commandType()).isNull();
-    }
+    assertThat(json).contains("\"commandType\":\"com.example.Charge\"");
+    assertThat(before012).doesNotContain("commandType");
+    assertThat(
+            SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, before012).commandType())
+        .isNull();
+  }
 
-    @Test
-    @DisplayName("no trigger is SQL NULL")
-    void noTriggerIsNull() {
-        assertThat(SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, null)).isNull();
-        assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, null)).isNull();
-    }
+  @Test
+  @DisplayName("no trigger is SQL NULL")
+  void noTriggerIsNull() {
+    assertThat(SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, null)).isNull();
+    assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, null)).isNull();
+  }
 
-    @ParameterizedTest
-    @MethodSource("compensations")
-    @DisplayName("every compensation state and the sequence round-trip through the steps JSON")
-    void stepRoundTrip(StepCompensation compensation) {
-        Map<String, StepRecord> steps = Map.of("pay", completed(4, compensation), "end", StepRecord.notRun());
+  @ParameterizedTest
+  @MethodSource("compensations")
+  @DisplayName("every compensation state and the sequence round-trip through the steps JSON")
+  void stepRoundTrip(StepCompensation compensation) {
+    Map<String, StepRecord> steps =
+        Map.of("pay", completed(4, compensation), "end", StepRecord.notRun());
 
-        Map<String, StepRecord> decoded = SagaInstanceRows.decodeSteps(SagaInstanceRows.encodeSteps(steps));
+    Map<String, StepRecord> decoded =
+        SagaInstanceRows.decodeSteps(SagaInstanceRows.encodeSteps(steps));
 
-        assertThat(decoded).isEqualTo(steps);
-    }
+    assertThat(decoded).isEqualTo(steps);
+  }
 
-    @Test
-    @DisplayName("a completed step without a sequence (pre-006 JSON) is rejected with the upgrade hint")
-    void completedWithoutSequenceRejected() {
-        String json = "{\"pay\": {\"status\": \"COMPLETED\", \"touchedAggregates\": []}}";
+  @Test
+  @DisplayName(
+      "a completed step without a sequence (pre-006 JSON) is rejected with the upgrade hint")
+  void completedWithoutSequenceRejected() {
+    String json = "{\"pay\": {\"status\": \"COMPLETED\", \"touchedAggregates\": []}}";
 
-        assertThatThrownBy(() -> SagaInstanceRows.decodeSteps(json))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("holds no sequence")
-                .hasMessageContaining("schema-upgrade-006.sql");
-    }
+    assertThatThrownBy(() -> SagaInstanceRows.decodeSteps(json))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("holds no sequence")
+        .hasMessageContaining("schema-upgrade-006.sql");
+  }
 
-    @Test
-    @DisplayName("a NOT_RUN step without a sequence decodes to 0 and no compensation")
-    void notRunWithoutSequence() {
-        StepRecord decoded = SagaInstanceRows.decodeSteps("{\"end\": {\"status\": \"NOT_RUN\", "
-                + "\"touchedAggregates\": []}}").get("end");
+  @Test
+  @DisplayName("a NOT_RUN step without a sequence decodes to 0 and no compensation")
+  void notRunWithoutSequence() {
+    StepRecord decoded =
+        SagaInstanceRows.decodeSteps(
+                "{\"end\": {\"status\": \"NOT_RUN\", " + "\"touchedAggregates\": []}}")
+            .get("end");
 
-        assertThat(decoded.completionSequence()).isZero();
-        assertThat(decoded.compensation()).isNull();
-    }
+    assertThat(decoded.completionSequence()).isZero();
+    assertThat(decoded.compensation()).isNull();
+  }
 
-    @Test
-    @DisplayName("a forward move of the compensation states is accepted")
-    void forwardMovesAccepted() {
-        SagaInstance running = instance(SagaStatus.RUNNING, Map.of("pay", completed(1, null)), null);
-        SagaInstance compensating = instance(SagaStatus.COMPENSATING,
-                Map.of("pay", completed(1, StepCompensation.notAttempted())), REJECTED);
-        SagaInstance compensated = instance(SagaStatus.COMPENSATED,
-                Map.of("pay", completed(1, StepCompensation.compensated(AT))), REJECTED);
-        SagaInstance compensationFailed = instance(SagaStatus.COMPENSATION_FAILED,
-                Map.of("pay", completed(1, StepCompensation.failed(FINAL))), REJECTED);
+  @Test
+  @DisplayName("a forward move of the compensation states is accepted")
+  void forwardMovesAccepted() {
+    SagaInstance running = instance(SagaStatus.RUNNING, Map.of("pay", completed(1, null)), null);
+    SagaInstance compensating =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of("pay", completed(1, StepCompensation.notAttempted())),
+            REJECTED);
+    SagaInstance compensated =
+        instance(
+            SagaStatus.COMPENSATED,
+            Map.of("pay", completed(1, StepCompensation.compensated(AT))),
+            REJECTED);
+    SagaInstance compensationFailed =
+        instance(
+            SagaStatus.COMPENSATION_FAILED,
+            Map.of("pay", completed(1, StepCompensation.failed(FINAL))),
+            REJECTED);
 
-        assertThatCode(() -> {
-            ForwardTransition.requireForwardTransition(running, compensating);
-            ForwardTransition.requireForwardTransition(compensating, compensated);
-            ForwardTransition.requireForwardTransition(compensating, compensationFailed);
-            ForwardTransition.requireForwardTransition(compensated, compensated);
-        }).doesNotThrowAnyException();
-    }
+    assertThatCode(
+            () -> {
+              ForwardTransition.requireForwardTransition(running, compensating);
+              ForwardTransition.requireForwardTransition(compensating, compensated);
+              ForwardTransition.requireForwardTransition(compensating, compensationFailed);
+              ForwardTransition.requireForwardTransition(compensated, compensated);
+            })
+        .doesNotThrowAnyException();
+  }
 
-    @Test
-    @DisplayName("012: COMPENSATED -> FAILED is accepted from COMPENSATING, never from a terminal status")
-    void compensatedToFailedOnlyWithTheInstance() {
-        SagaInstance compensating = instance(SagaStatus.COMPENSATING, Map.of(
+  @Test
+  @DisplayName(
+      "012: COMPENSATED -> FAILED is accepted from COMPENSATING, never from a terminal status")
+  void compensatedToFailedOnlyWithTheInstance() {
+    SagaInstance compensating =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of(
                 "pay", completed(1, StepCompensation.compensated(AT)),
-                "ship", completed(2, StepCompensation.compensated(AT))), REJECTED);
-        Map<String, StepRecord> refundFailed = Map.of(
-                "pay", completed(1, StepCompensation.failed(EXHAUSTED)),
-                "ship", completed(2, StepCompensation.compensated(AT)));
+                "ship", completed(2, StepCompensation.compensated(AT))),
+            REJECTED);
+    Map<String, StepRecord> refundFailed =
+        Map.of(
+            "pay", completed(1, StepCompensation.failed(EXHAUSTED)),
+            "ship", completed(2, StepCompensation.compensated(AT)));
 
-        assertThatCode(() -> ForwardTransition.requireForwardTransition(compensating,
-                instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED))).doesNotThrowAnyException();
-        SagaInstance compensated = instance(SagaStatus.COMPENSATED, compensating.steps(), REJECTED);
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated,
-                instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED)))
-                .isInstanceOf(ConcurrentSagaUpdateException.class);
-    }
+    assertThatCode(
+            () ->
+                ForwardTransition.requireForwardTransition(
+                    compensating, instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED)))
+        .doesNotThrowAnyException();
+    SagaInstance compensated = instance(SagaStatus.COMPENSATED, compensating.steps(), REJECTED);
+    assertThatThrownBy(
+            () ->
+                ForwardTransition.requireForwardTransition(
+                    compensated, instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED)))
+        .isInstanceOf(ConcurrentSagaUpdateException.class);
+  }
 
-    @Test
-    @DisplayName("a changed completion sequence is rejected")
-    void sequenceChangeRejected() {
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(
-                instance(SagaStatus.RUNNING, Map.of("pay", completed(1, null)), null),
-                instance(SagaStatus.RUNNING, Map.of("pay", completed(2, null)), null)))
-                .isInstanceOf(ConcurrentSagaUpdateException.class)
-                .hasMessageContaining("completionSequence");
-    }
+  @Test
+  @DisplayName("a changed completion sequence is rejected")
+  void sequenceChangeRejected() {
+    assertThatThrownBy(
+            () ->
+                ForwardTransition.requireForwardTransition(
+                    instance(SagaStatus.RUNNING, Map.of("pay", completed(1, null)), null),
+                    instance(SagaStatus.RUNNING, Map.of("pay", completed(2, null)), null)))
+        .isInstanceOf(ConcurrentSagaUpdateException.class)
+        .hasMessageContaining("completionSequence");
+  }
 
-    @Test
-    @DisplayName("a backwards or sideways compensation move is rejected")
-    void backwardsCompensationRejected() {
-        SagaInstance compensated = instance(SagaStatus.COMPENSATING, Map.of(
+  @Test
+  @DisplayName("a backwards or sideways compensation move is rejected")
+  void backwardsCompensationRejected() {
+    SagaInstance compensated =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of(
                 "pay", completed(1, StepCompensation.compensated(AT)),
-                "ship", completed(2, StepCompensation.notAttempted())), REJECTED);
-        SagaInstance undone = instance(SagaStatus.COMPENSATING, Map.of(
+                "ship", completed(2, StepCompensation.notAttempted())),
+            REJECTED);
+    SagaInstance undone =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of(
                 "pay", completed(1, StepCompensation.notAttempted()),
-                "ship", completed(2, StepCompensation.notAttempted())), REJECTED);
+                "ship", completed(2, StepCompensation.notAttempted())),
+            REJECTED);
 
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated, undone))
-                .isInstanceOf(ConcurrentSagaUpdateException.class)
-                .hasMessageContaining("recorded compensation COMPENSATED");
-        SagaInstance nothing = instance(SagaStatus.COMPENSATING,
-                Map.of("pay", completed(1, StepCompensation.nothingToCompensate(AT))), REJECTED);
-        SagaInstance nowAttempted = instance(SagaStatus.COMPENSATING,
-                Map.of("pay", completed(1, StepCompensation.notAttempted())), REJECTED);
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(nothing, nowAttempted))
-                .isInstanceOf(ConcurrentSagaUpdateException.class);
-    }
+    assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated, undone))
+        .isInstanceOf(ConcurrentSagaUpdateException.class)
+        .hasMessageContaining("recorded compensation COMPENSATED");
+    SagaInstance nothing =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of("pay", completed(1, StepCompensation.nothingToCompensate(AT))),
+            REJECTED);
+    SagaInstance nowAttempted =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of("pay", completed(1, StepCompensation.notAttempted())),
+            REJECTED);
+    assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(nothing, nowAttempted))
+        .isInstanceOf(ConcurrentSagaUpdateException.class);
+  }
 
-    @Test
-    @DisplayName("a changed trigger is rejected")
-    void triggerChangeRejected() {
-        SagaInstance previous = instance(SagaStatus.COMPENSATING, Map.of(), REJECTED);
-        SagaInstance incoming = instance(SagaStatus.COMPENSATING, Map.of(),
-                CompensationTrigger.failureOutcome("other", "com.example.Other", AT));
+  @Test
+  @DisplayName("a changed trigger is rejected")
+  void triggerChangeRejected() {
+    SagaInstance previous = instance(SagaStatus.COMPENSATING, Map.of(), REJECTED);
+    SagaInstance incoming =
+        instance(
+            SagaStatus.COMPENSATING,
+            Map.of(),
+            CompensationTrigger.failureOutcome("other", "com.example.Other", AT));
 
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(previous, incoming))
-                .isInstanceOf(ConcurrentSagaUpdateException.class)
-                .hasMessageContaining("compensation trigger");
-    }
+    assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(previous, incoming))
+        .isInstanceOf(ConcurrentSagaUpdateException.class)
+        .hasMessageContaining("compensation trigger");
+  }
 
-    @Test
-    @DisplayName("COMPENSATING only moves to COMPENSATED or COMPENSATION_FAILED; both are terminal")
-    void statusRules() {
-        SagaInstance compensating = instance(SagaStatus.COMPENSATING, Map.of(), REJECTED);
-        SagaInstance running = new SagaInstance("s-1", "com.example.Saga", Map.of(), Map.of("orderId", "o-1"),
-                SagaStatus.RUNNING, AT, AT, Map.of(), null, null, null, null);
+  @Test
+  @DisplayName("COMPENSATING only moves to COMPENSATED or COMPENSATION_FAILED; both are terminal")
+  void statusRules() {
+    SagaInstance compensating = instance(SagaStatus.COMPENSATING, Map.of(), REJECTED);
+    SagaInstance running =
+        new SagaInstance(
+            "s-1",
+            "com.example.Saga",
+            Map.of(),
+            Map.of("orderId", "o-1"),
+            SagaStatus.RUNNING,
+            AT,
+            AT,
+            Map.of(),
+            null,
+            null,
+            null,
+            null);
 
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensating, running))
-                .isInstanceOf(ConcurrentSagaUpdateException.class);
-        SagaInstance compensated = instance(SagaStatus.COMPENSATED, Map.of(), REJECTED);
-        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated, compensating))
-                .isInstanceOf(ConcurrentSagaUpdateException.class)
-                .hasMessageContaining("status is terminal COMPENSATED");
-    }
+    assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensating, running))
+        .isInstanceOf(ConcurrentSagaUpdateException.class);
+    SagaInstance compensated = instance(SagaStatus.COMPENSATED, Map.of(), REJECTED);
+    assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated, compensating))
+        .isInstanceOf(ConcurrentSagaUpdateException.class)
+        .hasMessageContaining("status is terminal COMPENSATED");
+  }
 }

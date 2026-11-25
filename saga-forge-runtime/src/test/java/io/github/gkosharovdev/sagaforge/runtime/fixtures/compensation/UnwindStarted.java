@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** Starts {@link UnwindSaga}: step A. */
 @DomainEvent(aggregate = Order.class)
-public record UnwindStarted(@AggregateIdentifier String orderId) {
-}
+public record UnwindStarted(@AggregateIdentifier String orderId) {}

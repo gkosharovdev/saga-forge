@@ -6,5 +6,4 @@ import io.github.gkosharovdev.sagaforge.example.Order;
 
 /** The order's stock was reserved and the order completed. Ends {@code OrderProcessingSaga}. */
 @DomainEvent(aggregate = Order.class)
-public record OrderCompletedEvent(@AggregateIdentifier String orderId) {
-}
+public record OrderCompletedEvent(@AggregateIdentifier String orderId) {}

@@ -4,5 +4,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /** Books a courier through {@link CourierService}, which may fail on purpose. */
 @Command
-public record BookCourier(String orderId) {
-}
+public record BookCourier(String orderId) {}

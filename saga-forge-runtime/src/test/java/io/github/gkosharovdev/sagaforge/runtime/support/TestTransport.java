@@ -1,165 +1,186 @@
 package io.github.gkosharovdev.sagaforge.runtime.support;
 
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicReference;
-
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Transport stand-in for engine tests: an {@link EventDispatcher} that records what the engine hands it, and delivers
- * events to an {@link EventReceiver}. It uses nothing of the engine but {@code EventReceiver} (SC-007).
+ * Transport stand-in for engine tests: an {@link EventDispatcher} that records what the engine
+ * hands it, and delivers events to an {@link EventReceiver}. It uses nothing of the engine but
+ * {@code EventReceiver} (SC-007).
  *
- * <p><strong>Test-only scaffolding.</strong> This class lives in {@code src/test} and must never move to
- * {@code src/main}; the production transports are separate modules (Constitution Principle IV).</p>
+ * <p><strong>Test-only scaffolding.</strong> This class lives in {@code src/test} and must never
+ * move to {@code src/main}; the production transports are separate modules (Constitution Principle
+ * IV).
  *
  * <ul>
- *   <li>{@link #connect(EventReceiver)} sets the receiver; {@link #deliver(Object)} calls its {@code receive} and
- *       records the {@link HandlingReport}.</li>
- *   <li>After {@link #loopBack()}, every dispatched event is delivered back into the receiver synchronously, from
- *       inside {@code dispatch}, as a synchronous in-memory transport would.</li>
- *   <li>{@link #connectCommands(CommandReceiver)} sets the command receiver; {@link #reportFailure(CommandFailure)}
- *       reports a failed outbox command as a transport would (012) and records the {@link SetAside} its callback
- *       made: whether it ran, and whether the transaction it ran in committed or rolled back.</li>
+ *   <li>{@link #connect(EventReceiver)} sets the receiver; {@link #deliver(Object)} calls its
+ *       {@code receive} and records the {@link HandlingReport}.
+ *   <li>After {@link #loopBack()}, every dispatched event is delivered back into the receiver
+ *       synchronously, from inside {@code dispatch}, as a synchronous in-memory transport would.
+ *   <li>{@link #connectCommands(CommandReceiver)} sets the command receiver; {@link
+ *       #reportFailure(CommandFailure)} reports a failed outbox command as a transport would (012)
+ *       and records the {@link SetAside} its callback made: whether it ran, and whether the
+ *       transaction it ran in committed or rolled back.
  * </ul>
  *
- * <p>Thread-safe.</p>
+ * <p>Thread-safe.
  */
 public final class TestTransport implements EventDispatcher {
 
-    /** How the transaction a set-aside callback ran in ended. */
-    public enum Ending { COMMITTED, ROLLED_BACK, UNKNOWN }
+  /** How the transaction a set-aside callback ran in ended. */
+  public enum Ending {
+    COMMITTED,
+    ROLLED_BACK,
+    UNKNOWN
+  }
 
-    /**
-     * One call of the set-aside callback a {@link #reportFailure} passed: the report and how the transaction ended.
-     * {@code UNKNOWN} when the transaction is not an {@link InMemoryTransactionBoundary} one.
-     */
-    public record SetAside(CommandFailure report, Ending ending) {
+  /**
+   * One call of the set-aside callback a {@link #reportFailure} passed: the report and how the
+   * transaction ended. {@code UNKNOWN} when the transaction is not an {@link
+   * InMemoryTransactionBoundary} one.
+   */
+  public record SetAside(CommandFailure report, Ending ending) {}
+
+  private final List<SetAside> setAsides = new CopyOnWriteArrayList<>();
+  private volatile CommandReceiver commandReceiver;
+
+  private final List<Object> dispatched = new CopyOnWriteArrayList<>();
+  private final List<Class<?>> registeredSagaTypes = new CopyOnWriteArrayList<>();
+  private final List<HandlingReport> reports = new CopyOnWriteArrayList<>();
+  private volatile EventReceiver receiver;
+  private volatile boolean loopingBack;
+
+  /**
+   * @param receiver where {@link #deliver(Object)} hands events; must not be {@code null}
+   * @return this transport
+   * @throws IllegalArgumentException if {@code receiver} is {@code null}
+   */
+  public TestTransport connect(EventReceiver receiver) {
+    if (receiver == null) {
+      throw new IllegalArgumentException("receiver must not be null");
     }
+    this.receiver = receiver;
+    return this;
+  }
 
-    private final List<SetAside> setAsides = new CopyOnWriteArrayList<>();
-    private volatile CommandReceiver commandReceiver;
-
-    private final List<Object> dispatched = new CopyOnWriteArrayList<>();
-    private final List<Class<?>> registeredSagaTypes = new CopyOnWriteArrayList<>();
-    private final List<HandlingReport> reports = new CopyOnWriteArrayList<>();
-    private volatile EventReceiver receiver;
-    private volatile boolean loopingBack;
-
-    /**
-     * @param receiver where {@link #deliver(Object)} hands events; must not be {@code null}
-     * @return this transport
-     * @throws IllegalArgumentException if {@code receiver} is {@code null}
-     */
-    public TestTransport connect(EventReceiver receiver) {
-        if (receiver == null) {
-            throw new IllegalArgumentException("receiver must not be null");
-        }
-        this.receiver = receiver;
-        return this;
+  /**
+   * @param receiver where {@link #reportFailure(CommandFailure)} reports; must not be {@code null}
+   * @return this transport
+   * @throws IllegalArgumentException if {@code receiver} is {@code null}
+   */
+  public TestTransport connectCommands(CommandReceiver receiver) {
+    if (receiver == null) {
+      throw new IllegalArgumentException("receiver must not be null");
     }
+    this.commandReceiver = receiver;
+    return this;
+  }
 
-    /**
-     * @param receiver where {@link #reportFailure(CommandFailure)} reports; must not be {@code null}
-     * @return this transport
-     * @throws IllegalArgumentException if {@code receiver} is {@code null}
-     */
-    public TestTransport connectCommands(CommandReceiver receiver) {
-        if (receiver == null) {
-            throw new IllegalArgumentException("receiver must not be null");
-        }
-        this.commandReceiver = receiver;
-        return this;
+  /**
+   * Reports {@code report} through {@code CommandReceiver.receiveFailure}, passing a set-aside
+   * callback that records one {@link SetAside} once its transaction ends. Exceptions propagate, as
+   * a real transport would see them.
+   *
+   * @throws IllegalStateException if no command receiver is connected
+   */
+  public void reportFailure(CommandFailure report) {
+    CommandReceiver connected = commandReceiver;
+    if (connected == null) {
+      throw new IllegalStateException("no CommandReceiver connected");
     }
-
-    /**
-     * Reports {@code report} through {@code CommandReceiver.receiveFailure}, passing a set-aside callback that records
-     * one {@link SetAside} once its transaction ends. Exceptions propagate, as a real transport would see them.
-     *
-     * @throws IllegalStateException if no command receiver is connected
-     */
-    public void reportFailure(CommandFailure report) {
-        CommandReceiver connected = commandReceiver;
-        if (connected == null) {
-            throw new IllegalStateException("no CommandReceiver connected");
-        }
-        connected.receiveFailure(report, tx -> {
-            AtomicReference<Ending> ending = new AtomicReference<>(Ending.UNKNOWN);
-            tx.resource(InMemoryTransactionBoundary.Scope.class).ifPresentOrElse(scope -> {
-                scope.onCommit(() -> ending.set(Ending.COMMITTED));
-                scope.onRollback(() -> ending.set(Ending.ROLLED_BACK));
-                scope.onEnd(() -> setAsides.add(new SetAside(report, ending.get())));
-            }, () -> setAsides.add(new SetAside(report, Ending.UNKNOWN)));
+    connected.receiveFailure(
+        report,
+        tx -> {
+          AtomicReference<Ending> ending = new AtomicReference<>(Ending.UNKNOWN);
+          tx.resource(InMemoryTransactionBoundary.Scope.class)
+              .ifPresentOrElse(
+                  scope -> {
+                    scope.onCommit(() -> ending.set(Ending.COMMITTED));
+                    scope.onRollback(() -> ending.set(Ending.ROLLED_BACK));
+                    scope.onEnd(() -> setAsides.add(new SetAside(report, ending.get())));
+                  },
+                  () -> setAsides.add(new SetAside(report, Ending.UNKNOWN)));
         });
-    }
+  }
 
-    /** @return every set-aside callback run, once its transaction ended, in order; unmodifiable */
-    public List<SetAside> setAsides() {
-        return List.copyOf(setAsides);
-    }
+  /**
+   * @return every set-aside callback run, once its transaction ended, in order; unmodifiable
+   */
+  public List<SetAside> setAsides() {
+    return List.copyOf(setAsides);
+  }
 
-    /**
-     * Makes every later {@link #dispatch(Object)} deliver the event back into the receiver synchronously.
-     *
-     * @return this transport
-     */
-    public TestTransport loopBack() {
-        loopingBack = true;
-        return this;
-    }
+  /**
+   * Makes every later {@link #dispatch(Object)} deliver the event back into the receiver
+   * synchronously.
+   *
+   * @return this transport
+   */
+  public TestTransport loopBack() {
+    loopingBack = true;
+    return this;
+  }
 
-    /**
-     * Delivers an event to the connected receiver and records its report.
-     *
-     * @param event the domain event
-     * @return the receiver's report
-     * @throws IllegalStateException if no receiver is connected
-     */
-    public HandlingReport deliver(Object event) {
-        EventReceiver connected = receiver;
-        if (connected == null) {
-            throw new IllegalStateException("no EventReceiver connected");
-        }
-        HandlingReport report = connected.receive(event);
-        reports.add(report);
-        return report;
+  /**
+   * Delivers an event to the connected receiver and records its report.
+   *
+   * @param event the domain event
+   * @return the receiver's report
+   * @throws IllegalStateException if no receiver is connected
+   */
+  public HandlingReport deliver(Object event) {
+    EventReceiver connected = receiver;
+    if (connected == null) {
+      throw new IllegalStateException("no EventReceiver connected");
     }
+    HandlingReport report = connected.receive(event);
+    reports.add(report);
+    return report;
+  }
 
-    @Override
-    public void dispatch(Object domainEvent) {
-        if (domainEvent == null) {
-            throw new IllegalArgumentException("domainEvent must not be null");
-        }
-        dispatched.add(domainEvent);
-        if (loopingBack) {
-            deliver(domainEvent);
-        }
+  @Override
+  public void dispatch(Object domainEvent) {
+    if (domainEvent == null) {
+      throw new IllegalArgumentException("domainEvent must not be null");
     }
+    dispatched.add(domainEvent);
+    if (loopingBack) {
+      deliver(domainEvent);
+    }
+  }
 
-    @Override
-    public void registerSagaType(Class<?> sagaClass) {
-        if (sagaClass == null) {
-            throw new IllegalArgumentException("sagaClass must not be null");
-        }
-        registeredSagaTypes.add(sagaClass);
+  @Override
+  public void registerSagaType(Class<?> sagaClass) {
+    if (sagaClass == null) {
+      throw new IllegalArgumentException("sagaClass must not be null");
     }
+    registeredSagaTypes.add(sagaClass);
+  }
 
-    /** @return the reports of every delivery that returned, in order; unmodifiable */
-    public List<HandlingReport> reports() {
-        return List.copyOf(reports);
-    }
+  /**
+   * @return the reports of every delivery that returned, in order; unmodifiable
+   */
+  public List<HandlingReport> reports() {
+    return List.copyOf(reports);
+  }
 
-    /** @return every dispatched event, in order; unmodifiable */
-    public List<Object> dispatched() {
-        return List.copyOf(dispatched);
-    }
+  /**
+   * @return every dispatched event, in order; unmodifiable
+   */
+  public List<Object> dispatched() {
+    return List.copyOf(dispatched);
+  }
 
-    /** @return every registered saga type, in registration order; unmodifiable */
-    public List<Class<?>> registeredSagaTypes() {
-        return List.copyOf(registeredSagaTypes);
-    }
+  /**
+   * @return every registered saga type, in registration order; unmodifiable
+   */
+  public List<Class<?>> registeredSagaTypes() {
+    return List.copyOf(registeredSagaTypes);
+  }
 }

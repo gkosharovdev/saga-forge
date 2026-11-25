@@ -6,22 +6,17 @@ import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 
-/**
- * Invalid fixture: @SagaStep method with a non-@DomainEvent parameter.
- */
+/** Invalid fixture: @SagaStep method with a non-@DomainEvent parameter. */
 @Saga
 public class StepWithNonDomainEventParamSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleStart(NotADomainEvent event) {
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleStart(NotADomainEvent event) {}
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleEnd(TestEvent2 event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleEnd(TestEvent2 event) {}
 }

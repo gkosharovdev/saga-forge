@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** An order event of {@link PaymentWindowSaga}. */
 @DomainEvent(aggregate = Order.class)
-public record OrderPlaced(@AggregateIdentifier String orderId, String paymentWindow) {
-}
+public record OrderPlaced(@AggregateIdentifier String orderId, String paymentWindow) {}

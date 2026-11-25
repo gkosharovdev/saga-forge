@@ -6,22 +6,17 @@ import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 
-/**
- * Invalid fixture: abstract class annotated with @Saga.
- */
+/** Invalid fixture: abstract class annotated with @Saga. */
 @Saga
 public abstract class AbstractSagaClass {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleStart(TestEvent event) {
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleStart(TestEvent event) {}
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleEnd(TestEvent2 event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleEnd(TestEvent2 event) {}
 }

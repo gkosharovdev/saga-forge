@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** Start event of {@link FailureSaga}. */
 @DomainEvent(aggregate = Parcel.class)
-public record ParcelRequested(@AggregateIdentifier String parcelId, long weight) {
-}
+public record ParcelRequested(@AggregateIdentifier String parcelId, long weight) {}

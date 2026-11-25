@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** The delivery partner accepted the delivery: {@link DeliverySaga} completes. */
 @DomainEvent(aggregate = Order.class)
-public record DeliveryAccepted(@AggregateIdentifier String orderId) {
-}
+public record DeliveryAccepted(@AggregateIdentifier String orderId) {}

@@ -7,5 +7,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
  * {@code @AggregateIdentifier}.
  */
 @Command
-public record ValidServiceCommand(String reference) {
-}
+public record ValidServiceCommand(String reference) {}

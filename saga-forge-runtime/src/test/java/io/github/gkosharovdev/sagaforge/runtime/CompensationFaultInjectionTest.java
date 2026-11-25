@@ -8,6 +8,10 @@ import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelDelivered;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelFixture;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelSaga;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ShipParcel;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.Aborted;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.BDone;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.CDone;
@@ -15,10 +19,6 @@ import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.Compensati
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.DeliveryFixture;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.UnwindFixture;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.UnwindSaga;
-import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelDelivered;
-import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelFixture;
-import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelSaga;
-import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ShipParcel;
 import io.github.gkosharovdev.sagaforge.runtime.support.TestTransport;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,131 +30,152 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * Crashes at every storage call of a compensation run, then a restart and a redelivery (specs/006-saga-compensation
- * SC-002, SC-003, FR-012; tasks.md T055): every committed step with a compensation is compensated exactly once, in
- * reverse completion order, and none is skipped. "Compensated" means committed: a compensation whose own unit of work
- * a crash rolled back runs again on resume (its method is invoked twice, with the same command identities), but
- * exactly one {@code STEP_COMPENSATED} per step is ever committed. Rolled-back steps at every step boundary are covered by
- * {@code CompensationSelectionPropertyTest}.
+ * Crashes at every storage call of a compensation run, then a restart and a redelivery
+ * (specs/006-saga-compensation SC-002, SC-003, FR-012; tasks.md T055): every committed step with a
+ * compensation is compensated exactly once, in reverse completion order, and none is skipped.
+ * "Compensated" means committed: a compensation whose own unit of work a crash rolled back runs
+ * again on resume (its method is invoked twice, with the same command identities), but exactly one
+ * {@code STEP_COMPENSATED} per step is ever committed. Rolled-back steps at every step boundary are
+ * covered by {@code CompensationSelectionPropertyTest}.
  */
 class CompensationFaultInjectionTest {
 
-    /**
-     * Over A, B, C committed, the abort's run makes 4 locks (the abort's unit of work, then C, B, A) and 4 saves; a
-     * crash point past those runs everything without crashing.
-     */
-    static Stream<Arguments> crashPoints() {
-        List<Arguments> points = new ArrayList<>();
-        for (int n = 1; n <= 5; n++) {
-            points.add(Arguments.of("lock", n));
-            points.add(Arguments.of("save", n));
-        }
-        return points.stream();
+  /**
+   * Over A, B, C committed, the abort's run makes 4 locks (the abort's unit of work, then C, B, A)
+   * and 4 saves; a crash point past those runs everything without crashing.
+   */
+  static Stream<Arguments> crashPoints() {
+    List<Arguments> points = new ArrayList<>();
+    for (int n = 1; n <= 5; n++) {
+      points.add(Arguments.of("lock", n));
+      points.add(Arguments.of("save", n));
+    }
+    return points.stream();
+  }
+
+  /** The steps whose compensation committed, in commit order. */
+  static List<String> committedCompensations(UnwindFixture fixture, String sagaId) {
+    return fixture.storage().history(sagaId).stream()
+        .map(stored -> stored.entry())
+        .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
+        .map(entry -> entry.stepName())
+        .toList();
+  }
+
+  /** The compensations invoked, with immediate repeats (re-runs of a rolled-back one) collapsed. */
+  static List<String> invokedInOrder(UnwindFixture fixture) {
+    List<String> collapsed = new ArrayList<>();
+    for (String name : fixture.journal().compensations()) {
+      if (name.startsWith("undo")
+          && (collapsed.isEmpty() || !collapsed.get(collapsed.size() - 1).equals(name))) {
+        collapsed.add(name);
+      }
+    }
+    return collapsed;
+  }
+
+  @ParameterizedTest(name = "crash at {0} #{1}")
+  @MethodSource("crashPoints")
+  @DisplayName(
+      "a crash anywhere in the run, then a redelivery: C, B, A each compensated exactly once")
+  void crashThenResume(String where, int n) {
+    UnwindFixture fixture = UnwindFixture.withEveryCompensation();
+    String sagaId = fixture.start("o-1");
+    fixture.receive(new BDone("o-1"));
+    fixture.receive(new CDone("o-1"));
+    CompensationFaults faults = fixture.withFaults();
+    if (where.equals("lock")) {
+      faults.crashOnLock(n);
+    } else {
+      faults.crashOnSave(n);
     }
 
-    /** The steps whose compensation committed, in commit order. */
-    static List<String> committedCompensations(UnwindFixture fixture, String sagaId) {
-        return fixture.storage().history(sagaId).stream().map(stored -> stored.entry())
+    Throwable crashed = catchThrowable(() -> fixture.receive(new Aborted("o-1")));
+    HandlingOutcome finalOutcome =
+        crashed == null
+            ? HandlingOutcome.COMPENSATED
+            : fixture.restart().receive(new Aborted("o-1")).outcome();
+
+    assertThat(finalOutcome).isIn(HandlingOutcome.COMPENSATED, HandlingOutcome.DUPLICATE);
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
+    assertThat(committedCompensations(fixture, sagaId))
+        .as("committed after a crash at %s #%d", where, n)
+        .containsExactly(UnwindSaga.C, UnwindSaga.B, UnwindSaga.A);
+    assertThat(invokedInOrder(fixture)).containsExactly("undoC", "undoB", "undoA");
+  }
+
+  @Test
+  @DisplayName(
+      "a refund interrupted before its commit re-runs with the same CommandId: refunded once")
+  void interruptedRefundKeepsItsIdentity() {
+    DeliveryFixture fixture = new DeliveryFixture();
+    String sagaId = fixture.placedAndCharged("o-1");
+    // Save 1: the rejection's unit of work; save 2: the refund's unit of work, after the refund was
+    // handled.
+    fixture.withFaults().crashOnSave(2);
+
+    assertThat(catchThrowable(() -> fixture.reject("o-1", "no capacity"))).isNotNull();
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATING);
+    SagaStatus after =
+        fixture.restart().reject("o-1", "no capacity").outcome() == HandlingOutcome.COMPENSATED
+            ? fixture.committed(sagaId).status()
+            : null;
+
+    assertThat(after).isEqualTo(SagaStatus.COMPENSATED);
+    assertThat(fixture.payments().refundIds()).hasSize(2);
+    assertThat(fixture.payments().refundIds().get(1))
+        .isEqualTo(fixture.payments().refundIds().get(0));
+    assertThat(fixture.payments().refunds()).hasSize(1);
+  }
+
+  /**
+   * 012 SC-003: a crash anywhere in the reaction to a failed command, then what a transport does
+   * next. A crash before the compensation start commits rolls the set-aside back with it, so the
+   * report comes again; a crash after it leaves the message set aside and the instance {@code
+   * COMPENSATING}, which the next event resumes. Either way each step is compensated exactly once,
+   * newest first, and the message is set aside once.
+   */
+  @ParameterizedTest(name = "crash at {0} #{1}")
+  @MethodSource("crashPoints")
+  @DisplayName(
+      "012: a crash anywhere in a command failure's reaction, then a resume: one compensation per step")
+  void commandFailureCrashThenResume(String where, int n) {
+    ParcelFixture fixture = new ParcelFixture();
+    String sagaId = fixture.packed("p-1");
+    CommandFailure report =
+        ParcelFixture.report(fixture.sent(ShipParcel.class), FailureClassification.FINAL, 1);
+    CompensationFaults faults = fixture.withFaults();
+    if (where.equals("lock")) {
+      faults.crashOnLock(n);
+    } else {
+      faults.crashOnSave(n);
+    }
+
+    Throwable crashed = catchThrowable(() -> fixture.transport().reportFailure(report));
+    if (crashed != null) {
+      fixture.restart();
+      if (committedSetAsides(fixture) == 0) {
+        fixture.transport().reportFailure(report);
+      } else {
+        fixture.receive(new ParcelDelivered("p-1"));
+      }
+    }
+
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
+    assertThat(
+            fixture.storage().history(sagaId).stream()
+                .map(stored -> stored.entry())
                 .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
-                .map(entry -> entry.stepName()).toList();
-    }
+                .map(entry -> entry.stepName())
+                .toList())
+        .as("committed after a crash at %s #%d", where, n)
+        .containsExactly(ParcelSaga.PACK, ParcelSaga.PAY, ParcelSaga.BOOK);
+    assertThat(committedSetAsides(fixture)).isEqualTo(1);
+  }
 
-    /** The compensations invoked, with immediate repeats (re-runs of a rolled-back one) collapsed. */
-    static List<String> invokedInOrder(UnwindFixture fixture) {
-        List<String> collapsed = new ArrayList<>();
-        for (String name : fixture.journal().compensations()) {
-            if (name.startsWith("undo") && (collapsed.isEmpty() || !collapsed.get(collapsed.size() - 1).equals(name))) {
-                collapsed.add(name);
-            }
-        }
-        return collapsed;
-    }
-
-    @ParameterizedTest(name = "crash at {0} #{1}")
-    @MethodSource("crashPoints")
-    @DisplayName("a crash anywhere in the run, then a redelivery: C, B, A each compensated exactly once")
-    void crashThenResume(String where, int n) {
-        UnwindFixture fixture = UnwindFixture.withEveryCompensation();
-        String sagaId = fixture.start("o-1");
-        fixture.receive(new BDone("o-1"));
-        fixture.receive(new CDone("o-1"));
-        CompensationFaults faults = fixture.withFaults();
-        if (where.equals("lock")) {
-            faults.crashOnLock(n);
-        } else {
-            faults.crashOnSave(n);
-        }
-
-        Throwable crashed = catchThrowable(() -> fixture.receive(new Aborted("o-1")));
-        HandlingOutcome finalOutcome = crashed == null ? HandlingOutcome.COMPENSATED
-                : fixture.restart().receive(new Aborted("o-1")).outcome();
-
-        assertThat(finalOutcome).isIn(HandlingOutcome.COMPENSATED, HandlingOutcome.DUPLICATE);
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
-        assertThat(committedCompensations(fixture, sagaId)).as("committed after a crash at %s #%d", where, n)
-                .containsExactly(UnwindSaga.C, UnwindSaga.B, UnwindSaga.A);
-        assertThat(invokedInOrder(fixture)).containsExactly("undoC", "undoB", "undoA");
-    }
-
-    @Test
-    @DisplayName("a refund interrupted before its commit re-runs with the same CommandId: refunded once")
-    void interruptedRefundKeepsItsIdentity() {
-        DeliveryFixture fixture = new DeliveryFixture();
-        String sagaId = fixture.placedAndCharged("o-1");
-        // Save 1: the rejection's unit of work; save 2: the refund's unit of work, after the refund was handled.
-        fixture.withFaults().crashOnSave(2);
-
-        assertThat(catchThrowable(() -> fixture.reject("o-1", "no capacity"))).isNotNull();
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATING);
-        SagaStatus after = fixture.restart().reject("o-1", "no capacity").outcome() == HandlingOutcome.COMPENSATED
-                ? fixture.committed(sagaId).status() : null;
-
-        assertThat(after).isEqualTo(SagaStatus.COMPENSATED);
-        assertThat(fixture.payments().refundIds()).hasSize(2);
-        assertThat(fixture.payments().refundIds().get(1)).isEqualTo(fixture.payments().refundIds().get(0));
-        assertThat(fixture.payments().refunds()).hasSize(1);
-    }
-
-    /**
-     * 012 SC-003: a crash anywhere in the reaction to a failed command, then what a transport does next. A crash before
-     * the compensation start commits rolls the set-aside back with it, so the report comes again; a crash after it
-     * leaves the message set aside and the instance {@code COMPENSATING}, which the next event resumes. Either way each
-     * step is compensated exactly once, newest first, and the message is set aside once.
-     */
-    @ParameterizedTest(name = "crash at {0} #{1}")
-    @MethodSource("crashPoints")
-    @DisplayName("012: a crash anywhere in a command failure's reaction, then a resume: one compensation per step")
-    void commandFailureCrashThenResume(String where, int n) {
-        ParcelFixture fixture = new ParcelFixture();
-        String sagaId = fixture.packed("p-1");
-        CommandFailure report = ParcelFixture.report(fixture.sent(ShipParcel.class), FailureClassification.FINAL, 1);
-        CompensationFaults faults = fixture.withFaults();
-        if (where.equals("lock")) {
-            faults.crashOnLock(n);
-        } else {
-            faults.crashOnSave(n);
-        }
-
-        Throwable crashed = catchThrowable(() -> fixture.transport().reportFailure(report));
-        if (crashed != null) {
-            fixture.restart();
-            if (committedSetAsides(fixture) == 0) {
-                fixture.transport().reportFailure(report);
-            } else {
-                fixture.receive(new ParcelDelivered("p-1"));
-            }
-        }
-
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
-        assertThat(fixture.storage().history(sagaId).stream().map(stored -> stored.entry())
-                .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
-                .map(entry -> entry.stepName()).toList()).as("committed after a crash at %s #%d", where, n)
-                .containsExactly(ParcelSaga.PACK, ParcelSaga.PAY, ParcelSaga.BOOK);
-        assertThat(committedSetAsides(fixture)).isEqualTo(1);
-    }
-
-    private static long committedSetAsides(ParcelFixture fixture) {
-        return fixture.transport().setAsides().stream()
-                .filter(setAside -> setAside.ending() == TestTransport.Ending.COMMITTED).count();
-    }
+  private static long committedSetAsides(ParcelFixture fixture) {
+    return fixture.transport().setAsides().stream()
+        .filter(setAside -> setAside.ending() == TestTransport.Ending.COMMITTED)
+        .count();
+  }
 }

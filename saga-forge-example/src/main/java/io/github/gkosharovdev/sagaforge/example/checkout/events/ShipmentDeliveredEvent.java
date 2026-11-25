@@ -6,5 +6,4 @@ import io.github.gkosharovdev.sagaforge.example.checkout.Shipment;
 
 /** The customer received the parcel. Published by the Logistics service. */
 @DomainEvent(aggregate = Shipment.class)
-public record ShipmentDeliveredEvent(@AggregateIdentifier String shipmentId, String orderId) {
-}
+public record ShipmentDeliveredEvent(@AggregateIdentifier String shipmentId, String orderId) {}

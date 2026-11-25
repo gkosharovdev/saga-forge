@@ -5,21 +5,16 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 
-/**
- * Invalid fixture: no @StartSaga method.
- */
+/** Invalid fixture: no @StartSaga method. */
 @Saga
 public class NoStartSagaSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @SagaStep(associationProperty = "orderId")
-    public void handleStep(TestEvent event) {
-    }
+  @SagaStep(associationProperty = "orderId")
+  public void handleStep(TestEvent event) {}
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleEnd(TestEvent2 event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleEnd(TestEvent2 event) {}
 }

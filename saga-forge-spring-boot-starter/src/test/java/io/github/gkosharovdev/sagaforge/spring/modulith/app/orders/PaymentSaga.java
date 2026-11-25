@@ -9,26 +9,27 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.payments.PaymentEvents.PaymentTaken;
 import io.github.gkosharovdev.sagaforge.spring.modulith.app.payments.PaymentEvents.TakePayment;
 
-/** Takes the payment for a placed order; refuses a negative amount after the payment was recorded. */
+/**
+ * Takes the payment for a placed order; refuses a negative amount after the payment was recorded.
+ */
 @Saga
 public class PaymentSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    private CommandGateway commandGateway;
+  private CommandGateway commandGateway;
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void onPlaced(OrderPlaced event) {
-        commandGateway.send(new TakePayment(event.orderId(), event.amount()));
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void onPlaced(OrderPlaced event) {
+    commandGateway.send(new TakePayment(event.orderId(), event.amount()));
+  }
+
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void onPaid(PaymentTaken event) {
+    if (event.amount().signum() < 0) {
+      throw new IllegalStateException("negative payment for " + event.orderId());
     }
-
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void onPaid(PaymentTaken event) {
-        if (event.amount().signum() < 0) {
-            throw new IllegalStateException("negative payment for " + event.orderId());
-        }
-    }
+  }
 }

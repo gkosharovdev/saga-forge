@@ -24,128 +24,156 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Publishing and sending outside any unit of work (specs/004-saga-engine tasks.md T049, User Story 1 scenario 7,
- * FR-016, FR-018, quickstart.md scenario 21).
+ * Publishing and sending outside any unit of work (specs/004-saga-engine tasks.md T049, User Story
+ * 1 scenario 7, FR-016, FR-018, quickstart.md scenario 21).
  */
 class OutsideUnitOfWorkTest {
 
-    private static final String ORDER = "order-1";
+  private static final String ORDER = "order-1";
 
-    private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
-    private final TransactionalInMemoryStorageProvider storage = new TransactionalInMemoryStorageProvider(boundary);
-    private final RecordingEventDispatcher dispatcher = new RecordingEventDispatcher();
-    private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
-    private final ReservationService reservations = new ReservationService();
-    private SagaRuntime engine;
+  private final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
+  private final TransactionalInMemoryStorageProvider storage =
+      new TransactionalInMemoryStorageProvider(boundary);
+  private final RecordingEventDispatcher dispatcher = new RecordingEventDispatcher();
+  private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
+  private final ReservationService reservations = new ReservationService();
+  private SagaRuntime engine;
 
-    @BeforeEach
-    void setUp() {
-        ThreeStepSagaProbe.reset();
-        boundary.participant(reservations);
-        engine = SagaRuntime.builder()
-                .register(ThreeStepSaga.class, ReservationService.class, InvoiceService.class, ShipmentService.class)
-                .storage(storage)
-                .contextStore(new InMemorySagaContextStore())
-                .transactions(boundary)
-                .dispatcher(dispatcher)
-                .outbox(outbox)
-                .handlerInstances(new MapHandlerInstanceProvider().register(reservations)
-                        .register(new InvoiceService()).register(new ShipmentService()))
-                .build();
-        engine.start();
-    }
+  @BeforeEach
+  void setUp() {
+    ThreeStepSagaProbe.reset();
+    boundary.participant(reservations);
+    engine =
+        SagaRuntime.builder()
+            .register(
+                ThreeStepSaga.class,
+                ReservationService.class,
+                InvoiceService.class,
+                ShipmentService.class)
+            .storage(storage)
+            .contextStore(new InMemorySagaContextStore())
+            .transactions(boundary)
+            .dispatcher(dispatcher)
+            .outbox(outbox)
+            .handlerInstances(
+                new MapHandlerInstanceProvider()
+                    .register(reservations)
+                    .register(new InvoiceService())
+                    .register(new ShipmentService()))
+            .build();
+    engine.start();
+  }
 
-    @Test
-    @DisplayName("publish outside a unit of work dispatches at once and starts nothing; receiving it back starts a saga")
-    void publishDispatchesImmediately() {
-        OrderPlaced placed = new OrderPlaced(ORDER, 250L, 3);
+  @Test
+  @DisplayName(
+      "publish outside a unit of work dispatches at once and starts nothing; receiving it back starts a saga")
+  void publishDispatchesImmediately() {
+    OrderPlaced placed = new OrderPlaced(ORDER, 250L, 3);
 
-        engine.eventPublisher().publish(placed);
+    engine.eventPublisher().publish(placed);
 
-        assertThat(dispatcher.dispatched()).containsExactly(placed);
-        assertThat(storage.committed().all()).isEmpty();
-        assertThat(boundary.begins()).isZero();
-        assertThat(outbox.received()).isEmpty();
+    assertThat(dispatcher.dispatched()).containsExactly(placed);
+    assertThat(storage.committed().all()).isEmpty();
+    assertThat(boundary.begins()).isZero();
+    assertThat(outbox.received()).isEmpty();
 
-        assertThat(engine.receive(dispatcher.dispatched().get(0)).results()).singleElement()
-                .satisfies(result -> {
-                    assertThat(result.started()).isTrue();
-                    assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
-                });
-        assertThat(storage.committed().all()).singleElement()
-                .satisfies(instance -> assertThat(instance.status()).isEqualTo(SagaStatus.COMPLETED));
-    }
+    assertThat(engine.receive(dispatcher.dispatched().get(0)).results())
+        .singleElement()
+        .satisfies(
+            result -> {
+              assertThat(result.started()).isTrue();
+              assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
+            });
+    assertThat(storage.committed().all())
+        .singleElement()
+        .satisfies(instance -> assertThat(instance.status()).isEqualTo(SagaStatus.COMPLETED));
+  }
 
-    @Test
-    @DisplayName("publish rejects null and non-@DomainEvent objects")
-    void publishRejectsInvalidEvents() {
-        assertThatThrownBy(() -> engine.eventPublisher().publish(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> engine.eventPublisher().publish("not an event"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThat(dispatcher.dispatched()).isEmpty();
-    }
+  @Test
+  @DisplayName("publish rejects null and non-@DomainEvent objects")
+  void publishRejectsInvalidEvents() {
+    assertThatThrownBy(() -> engine.eventPublisher().publish(null))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> engine.eventPublisher().publish("not an event"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(dispatcher.dispatched()).isEmpty();
+  }
 
-    @Test
-    @DisplayName("send outside a unit of work commits the handler's change and hands its events off without a saga")
-    void sendCommitsAndHandsOff() {
-        engine.commandGateway().send(new ReserveItems(ORDER, 3));
+  @Test
+  @DisplayName(
+      "send outside a unit of work commits the handler's change and hands its events off without a saga")
+  void sendCommitsAndHandsOff() {
+    engine.commandGateway().send(new ReserveItems(ORDER, 3));
 
-        assertThat(reservations.changedAggregates()).containsExactly(ReservationService.reservationIdFor(ORDER));
-        assertThat(boundary.commits()).isEqualTo(1);
-        assertThat(outbox.received()).singleElement().satisfies(batch -> {
-            assertThat(batch.sagaType()).isNull();
-            assertThat(batch.sagaId()).isNull();
-            assertThat(batch.unitOfWorkId()).isNotBlank();
-            assertThat(batch.events()).containsExactly(
-                    new ItemsReserved(ReservationService.reservationIdFor(ORDER), ORDER, 3));
-        });
-        // A outgoing event is not received back by the engine: no saga reacted to it.
-        assertThat(storage.committed().all()).isEmpty();
-    }
+    assertThat(reservations.changedAggregates())
+        .containsExactly(ReservationService.reservationIdFor(ORDER));
+    assertThat(boundary.commits()).isEqualTo(1);
+    assertThat(outbox.received())
+        .singleElement()
+        .satisfies(
+            batch -> {
+              assertThat(batch.sagaType()).isNull();
+              assertThat(batch.sagaId()).isNull();
+              assertThat(batch.unitOfWorkId()).isNotBlank();
+              assertThat(batch.events())
+                  .containsExactly(
+                      new ItemsReserved(ReservationService.reservationIdFor(ORDER), ORDER, 3));
+            });
+    // A outgoing event is not received back by the engine: no saga reacted to it.
+    assertThat(storage.committed().all()).isEmpty();
+  }
 
-    @Test
-    @DisplayName("a failing handler outside a unit of work rolls its change back, hands nothing off and rethrows")
-    void sendFailureRollsBack() {
-        IllegalStateException failure = new IllegalStateException("reservation failed by test");
-        reservations.failNext(failure);
+  @Test
+  @DisplayName(
+      "a failing handler outside a unit of work rolls its change back, hands nothing off and rethrows")
+  void sendFailureRollsBack() {
+    IllegalStateException failure = new IllegalStateException("reservation failed by test");
+    reservations.failNext(failure);
 
-        assertThatThrownBy(() -> engine.commandGateway().send(new ReserveItems(ORDER, 3))).isSameAs(failure);
+    assertThatThrownBy(() -> engine.commandGateway().send(new ReserveItems(ORDER, 3)))
+        .isSameAs(failure);
 
-        assertThat(reservations.changedAggregates()).isEmpty();
-        assertThat(boundary.commits()).isZero();
-        assertThat(boundary.rollbacks()).isEqualTo(1);
-        assertThat(boundary.isActive()).isFalse();
-        assertThat(outbox.received()).isEmpty();
-    }
+    assertThat(reservations.changedAggregates()).isEmpty();
+    assertThat(boundary.commits()).isZero();
+    assertThat(boundary.rollbacks()).isEqualTo(1);
+    assertThat(boundary.isActive()).isFalse();
+    assertThat(outbox.received()).isEmpty();
+  }
 
-    @Test
-    @DisplayName("send rejects null and non-@Command objects before beginning a transaction")
-    void sendRejectsInvalidCommands() {
-        assertThatThrownBy(() -> engine.commandGateway().send(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> engine.commandGateway().send("not a command"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThat(boundary.begins()).isZero();
-    }
+  @Test
+  @DisplayName("send rejects null and non-@Command objects before beginning a transaction")
+  void sendRejectsInvalidCommands() {
+    assertThatThrownBy(() -> engine.commandGateway().send(null))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> engine.commandGateway().send("not a command"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(boundary.begins()).isZero();
+  }
 
-    @Test
-    @DisplayName("before start, receive, send and publish throw IllegalStateException")
-    void notStartedEngineRejectsWork() {
-        SagaRuntime notStarted = SagaRuntime.builder()
-                .register(ThreeStepSaga.class, ReservationService.class, InvoiceService.class, ShipmentService.class)
-                .storage(storage)
-                .contextStore(new InMemorySagaContextStore())
-                .transactions(boundary)
-                .dispatcher(dispatcher)
-                .handlerInstances(new MapHandlerInstanceProvider().register(reservations))
-                .build();
+  @Test
+  @DisplayName("before start, receive, send and publish throw IllegalStateException")
+  void notStartedEngineRejectsWork() {
+    SagaRuntime notStarted =
+        SagaRuntime.builder()
+            .register(
+                ThreeStepSaga.class,
+                ReservationService.class,
+                InvoiceService.class,
+                ShipmentService.class)
+            .storage(storage)
+            .contextStore(new InMemorySagaContextStore())
+            .transactions(boundary)
+            .dispatcher(dispatcher)
+            .handlerInstances(new MapHandlerInstanceProvider().register(reservations))
+            .build();
 
-        assertThat(notStarted.isStarted()).isFalse();
-        assertThatThrownBy(() -> notStarted.receive(new OrderPlaced(ORDER, 1L, 1)))
-                .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> notStarted.commandGateway().send(new ReserveItems(ORDER, 1)))
-                .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> notStarted.eventPublisher().publish(new OrderPlaced(ORDER, 1L, 1)))
-                .isInstanceOf(IllegalStateException.class);
-        assertThat(outbox.received()).isEmpty();
-    }
+    assertThat(notStarted.isStarted()).isFalse();
+    assertThatThrownBy(() -> notStarted.receive(new OrderPlaced(ORDER, 1L, 1)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> notStarted.commandGateway().send(new ReserveItems(ORDER, 1)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> notStarted.eventPublisher().publish(new OrderPlaced(ORDER, 1L, 1)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(outbox.received()).isEmpty();
+  }
 }
