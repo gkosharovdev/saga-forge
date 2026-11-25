@@ -60,6 +60,12 @@ public final class ModulithMessageStore implements MessageStore {
 
     @Override
     public void append(LocalTransaction tx, List<NewMessage> entries) {
+        entries.stream().filter(NewMessage::isScheduled).findFirst().ifPresent(entry -> {
+            throw new UnsupportedOperationException("Spring Modulith interop cannot store message "
+                    + entry.messageId() + " with a due time: the event publication registry has no 'not before'."
+                    + " Deadlines and scheduled commands need Saga Forge's own message log"
+                    + " (saga-forge.transport.modulith-interop=false); see specs/017-saga-deadlines D5");
+        });
         for (NewMessage entry : entries) {
             SagaForgeEnvelope envelope = new SagaForgeEnvelope(entry.messageId(), entry.kind().name(),
                     entry.payloadType(), String.valueOf(serializer.serialize(entry.payload())));
@@ -167,6 +173,12 @@ public final class ModulithMessageStore implements MessageStore {
             }
         }
         return withPayload;
+    }
+
+    /** Spring Modulith interop keeps no due times ({@code specs/017-saga-deadlines} D5). */
+    @Override
+    public boolean supportsScheduling() {
+        return false;
     }
 
     @Override

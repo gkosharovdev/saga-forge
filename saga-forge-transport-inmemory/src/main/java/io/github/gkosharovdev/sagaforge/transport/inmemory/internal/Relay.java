@@ -117,6 +117,23 @@ public final class Relay {
         messageStore.append(tx, LogAppender.entries(batch, clock.instant(), instrumentation.currentContext()));
     }
 
+    /** Whether the message store keeps due times and cancels ({@code specs/017-saga-deadlines}). */
+    public boolean supportsScheduling() {
+        return messageStore.supportsScheduling();
+    }
+
+    /**
+     * Cancels scheduled messages in the unit of work's transaction ({@code Outbox.cancel}, 017).
+     *
+     * @param messageIds the scheduled messages to cancel
+     * @return the ids that were waiting and are now cancelled
+     */
+    public java.util.Set<String> cancel(java.util.Collection<String> messageIds) {
+        LocalTransaction tx = transactions.current().orElseThrow(() -> new IllegalStateException(
+                "the in-memory transport's outbox cancels only inside the unit of work's transaction"));
+        return messageStore.cancel(tx, messageIds, clock.instant());
+    }
+
     /**
      * Appends an event published outside any unit of work: in the host's active transaction if there is one,
      * otherwise in a transaction of its own, then signals.

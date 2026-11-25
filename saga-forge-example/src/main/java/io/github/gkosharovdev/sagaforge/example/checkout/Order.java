@@ -27,7 +27,7 @@ public class Order {
     public enum Status { PLACED, CONFIRMED, REJECTED, CANCELLED }
 
     /** Why checkout turned an order down; shown to the customer. */
-    public enum RejectionReason { OUT_OF_STOCK, PAYMENT_NOT_AUTHORIZED }
+    public enum RejectionReason { OUT_OF_STOCK, PAYMENT_NOT_AUTHORIZED, PAYMENT_TIMED_OUT }
 
     @AggregateIdentifier
     private final String orderId;
@@ -35,18 +35,26 @@ public class Order {
     private final List<OrderLine> lines;
     private final BigDecimal amount;
     private final String deliveryAddress;
+    private final boolean express;
     private Status status = Status.PLACED;
 
+    /** An order with standard checkout. */
     public Order(String orderId, List<OrderLine> lines, BigDecimal amount, String deliveryAddress) {
+        this(orderId, lines, amount, deliveryAddress, false);
+    }
+
+    /** An order with standard or, if {@code express}, express checkout. */
+    public Order(String orderId, List<OrderLine> lines, BigDecimal amount, String deliveryAddress, boolean express) {
         this.orderId = orderId;
         this.lines = List.copyOf(lines);
         this.amount = amount;
         this.deliveryAddress = deliveryAddress;
+        this.express = express;
     }
 
     /** The event the application publishes once the order is saved; it starts {@code CheckoutSaga}. */
     public OrderPlacedEvent placed() {
-        return new OrderPlacedEvent(orderId, lines, amount, deliveryAddress);
+        return new OrderPlacedEvent(orderId, lines, amount, deliveryAddress, express);
     }
 
     /** Confirms the order and records {@link OrderConfirmedEvent}, which starts {@code FulfilmentSaga}. */

@@ -159,6 +159,7 @@ final class JdbcFake {
         row.put("pending_retry", SagaInstanceRows.encodePendingRetry(instance.pendingRetry()));
         row.put("compensation_trigger", SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD,
                 instance.compensationTrigger()));
+        row.put("open_deadlines", SagaInstanceRows.encodeOpenDeadlines(instance.openDeadlines()));
         row.put("associations",
                 JsonCodec.encodeObject("associations", new LinkedHashMap<String, Object>(instance.associations())));
         return row;

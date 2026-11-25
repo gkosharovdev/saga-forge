@@ -215,6 +215,21 @@ class EngineCommandGatewayTest {
         }
 
         @Override
+        public String nextScheduledMessageId() {
+            return "uow-1:scheduled:1";
+        }
+
+        @Override
+        public void recordScheduled(io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage message) {
+            throw new UnsupportedOperationException("not used by these tests");
+        }
+
+        @Override
+        public boolean cancelScheduled(String messageId) {
+            return false;
+        }
+
+        @Override
         public void record(Object domainEvent) {
             recorded.add(domainEvent);
         }

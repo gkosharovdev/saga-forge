@@ -125,6 +125,17 @@ public final class Diagnostics {
     }
 
     /**
+     * {@code saga.deadline.ignored}: a {@code DeadlineReached} found its instance missing, not {@code RUNNING}, or no
+     * longer holding the deadline open under the delivered id (specs/017-saga-deadlines FR-014); no step ran.
+     *
+     * @param reason {@code NOT_RUNNING}, {@code NOT_OPEN} or {@code REPLACED}
+     */
+    void deadlineIgnored(Correlation about, String deadlineName, String deadlineId, String reason) {
+        logger.log(Level.INFO, Line.of("saga.deadline.ignored").saga(about).instance(about)
+                .with("deadline", deadlineName).with("deadlineId", deadlineId).with("reason", reason).toString());
+    }
+
+    /**
      * {@code saga.command.failure.ignored}: a transport reported a failed outbox command the instance cannot react to
      * (012 FR-012, contracts/runtime-reaction.md "Diagnostics"); the message was only set aside. No failure message.
      */
@@ -160,7 +171,7 @@ public final class Diagnostics {
     void compensationStarted(Correlation about, CompensationTrigger trigger) {
         logger.log(Level.INFO, Line.of("saga.compensation.started").saga(about).instance(about).unitOfWork(about)
                 .with("trigger", trigger.kind()).with("step", trigger.stepName())
-                .with("eventType", trigger.eventType())
+                .with("eventType", trigger.eventType()).with("deadline", trigger.deadlineName())
                 .with("cause", trigger.failure() == null ? null : describe(trigger.failure())).toString());
     }
 

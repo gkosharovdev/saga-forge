@@ -86,6 +86,16 @@ class InMemoryTransportConfigurationTest {
     }
 
     @Test
+    @DisplayName("017: an application Clock bean is the transport's clock")
+    void sharedClock() {
+        java.time.Clock clock = java.time.Clock.fixed(java.time.Instant.parse("2026-03-01T10:00:00Z"),
+                java.time.ZoneOffset.UTC);
+        withDatabase().withBean(java.time.Clock.class, () -> clock).run(context -> assertThat(
+                org.springframework.test.util.ReflectionTestUtils.getField(context.getBean(InMemoryTransport.class),
+                        "clock")).isSameAs(clock));
+    }
+
+    @Test
     @DisplayName("a host-defined MessageStore wins")
     void hostLogWins() {
         MessageStore own = stub(MessageStore.class);

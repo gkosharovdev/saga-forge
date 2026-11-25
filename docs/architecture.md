@@ -27,6 +27,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
 | Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
 | Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
+| Saga deadlines and scheduled commands (`@StartDeadline`/`@DeadlineExpired`, `DeadlineReached`, trigger kind `DEADLINE_EXPIRED`, `SagaInstance.openDeadlines`, `CommandGateway.schedule`/`cancel`, `MessageStore` due times and `cancel`, status `CANCELLED`, rules R24 to R29, Properties 40 to 43) | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites ([017](../specs/017-saga-deadlines/spec.md)); not with Spring Modulith interop (G-017-01) |
 
 ## Module responsibilities
 
@@ -231,6 +232,7 @@ stateDiagram-v2
     UNCONSUMED --> UNCONSUMED: leased / failed, retried after backoff / lease expired
     UNCONSUMED --> CONSUMED: delivered
     UNCONSUMED --> SET_ASIDE: 10 failures, a final command failure or unreadable payload
+    UNCONSUMED --> CANCELLED: cancelled before it was leased (a deadline or scheduled command)
     SET_ASIDE --> UNCONSUMED: operator redelivers
     CONSUMED --> [*]: removed after 7 days
 ```
@@ -441,6 +443,31 @@ sees the trigger's event type, not the event (G-006-06); compensations run on th
 instance (G-006-08); a failed compensation is never retried and there is no operator path out of
 `COMPENSATION_FAILED` (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02); a
 failed command reaches no saga that already ended (G-012-01, G-012-02), and no step can take the failure (G-012-03).
+
+### Saga deadlines
+
+This is now **implemented** ([017](../specs/017-saga-deadlines/spec.md), closing G-ENG-25). A deadline is a message
+with a due time (`notBefore`) in the transport's message store, appended in the starting unit of work's transaction
+and not leased before it is due; the pattern is the scheduled message of an outbox, as in Axon's `DeadlineManager`
+and NServiceBus's saga timeouts, without a separate scheduler:
+
+- **Declared.** `@StartDeadline(name, duration | durationFrom, cancelledBy)` on a step; one `@DeadlineExpired(name)`
+  timeout step per deadline, which takes `DeadlineReached` or nothing (rules R24 to R29). One framework event type,
+  filtered by name, keeps Property 11 (one step per event type) for ordinary events.
+- **Open deadlines** live on the instance (`SagaInstance.openDeadlines`: name → id, due time, starting step), so the
+  check "still waiting?" is a read of committed state, not of the message store.
+- **Closed** when a `cancelledBy` step completes, when started again (replaced), and whenever the instance leaves
+  `RUNNING`; the stored message is cancelled (`CANCELLED`) in the same transaction. A delivery whose instance is not
+  `RUNNING`, or whose id is no longer open, runs no step (`IGNORED`, `saga.deadline.ignored`).
+- **Timed out.** The timeout step runs in an ordinary unit of work; with `@StartCompensation` the trigger kind is
+  `DEADLINE_EXPIRED` and names the deadline.
+- **Scheduled commands.** `CommandGateway.schedule(command, at)` stores an outbox command with a due time and returns a
+  `ScheduledCommandId`; `cancel` withdraws a pending one.
+
+Known limitations: no deadlines with Spring Modulith interop (G-017-01); one running instance per message store until
+013 (G-017-02); overdue messages run in stored, not due, order (G-017-03); latency is bounded by the relay's poll
+interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command is not
+cancelled with its saga (G-017-06).
 
 ## jMolecules consideration
 

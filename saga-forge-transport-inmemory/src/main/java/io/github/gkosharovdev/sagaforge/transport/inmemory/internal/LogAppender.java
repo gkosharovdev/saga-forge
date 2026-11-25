@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 
@@ -17,7 +18,10 @@ final class LogAppender {
     private LogAppender() {
     }
 
-    /** One entry per event, in recording order, then one per outbox command, in send order. */
+    /**
+     * One entry per event, in recording order, then one per outbox command, in send order, then one per scheduled
+     * message ({@code specs/017-saga-deadlines}): its own id, no ordering key, held back until its {@code notBefore}.
+     */
     static List<NewMessage> entries(OutgoingMessages batch, Instant now, Map<String, String> traceContext) {
         List<NewMessage> entries = new ArrayList<>(batch.events().size() + batch.commands().size());
         List<Object> events = batch.events();
@@ -33,6 +37,12 @@ final class LogAppender {
                     command, outgoing.commandId(), OrderingKeys.ofCommand(command, outgoing.commandId()),
                     batch.sagaType(), batch.sagaId(), now, traceContext));
         }
+        batch.scheduled().forEach(scheduled -> {
+            Object payload = scheduled.payload();
+            entries.add(new NewMessage(scheduled.messageId(), scheduled.kind(), payload.getClass().getName(), payload,
+                    scheduled.commandId(), null, batch.sagaType(), batch.sagaId(), now, traceContext,
+                    scheduled.notBefore()));
+        });
         return entries;
     }
 

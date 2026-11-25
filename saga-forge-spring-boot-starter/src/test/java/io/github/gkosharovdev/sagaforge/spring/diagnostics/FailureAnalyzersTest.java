@@ -42,4 +42,26 @@ class FailureAnalyzersTest {
         assertThat(analysis.getDescription()).contains("model error R13").contains("runtime error: no loader");
         assertThat(analysis.getAction()).contains("Fix each error");
     }
+
+    @Test
+    @DisplayName("017: a deadline refused under Spring Modulith interop is told to keep Saga Forge's own log")
+    void deadlinesUnderModulithInterop() {
+        StartupReport report = new StartupReport(new ValidationReport(List.of(), List.of()), List.of(
+                "@Saga class CheckoutSaga declares deadline 'paymentWindow', but the outbox (TransportOutbox) cannot"
+                        + " schedule messages. Deadlines need an IN_TRANSACTION outbox."));
+        SagaRuntimeStartupException cause = new SagaRuntimeStartupException(report);
+
+        FailureAnalysis analysis = new DeadlinesRequireOwnLogFailureAnalyzer(
+                new org.springframework.mock.env.MockEnvironment()).analyze(new IllegalStateException("failed", cause));
+
+        assertThat(analysis.getDescription()).contains("deadline 'paymentWindow'").contains("Spring Modulith interop");
+        assertThat(analysis.getAction())
+                .isEqualTo("Set saga-forge.transport.modulith-interop=false to keep Saga Forge's own message log.");
+        assertThat(new DeadlinesRequireOwnLogFailureAnalyzer(new org.springframework.mock.env.MockEnvironment()
+                .withProperty("saga-forge.transport.modulith-interop", "false")).analyze(cause))
+                .as("interop off: the general analyzer explains it").isNull();
+        assertThat(new DeadlinesRequireOwnLogFailureAnalyzer(new org.springframework.mock.env.MockEnvironment())
+                .analyze(new SagaRuntimeStartupException(new StartupReport(new ValidationReport(List.of(),
+                        List.of("model error R13")), List.of())))).as("another refusal").isNull();
+    }
 }

@@ -420,8 +420,14 @@ The concrete implementation uses Java reflection to validate all annotation rule
 | R21 | — (`specs/006-saga-compensation` FR-009, FR-010) | `@SagaCompensation` methods return `void`, declare no parameter or exactly one parameter of type `CompensationTrigger`, and are not `@SagaStep` methods |
 | R22 | — (`specs/006-saga-compensation` FR-008) | At most one `@SagaCompensation` targets a given step, and none targets a `@StartCompensation` step |
 | R23 | — (`specs/007-in-memory-transport` FR-010) | Each `@Command(delivery = OUTBOX)` type among the classes passed to `validateAll` is handled by a `@CommandHandler` of a passed-in host (model rule, `validateAll` only; R13 already rejects more than one) |
+| R24 | 40 (`specs/017-saga-deadlines` FR-009, FR-010) | Each `@StartDeadline` name is non-blank and declared at most once per step (several steps may start it; a later start replaces an open one); it has exactly one `@DeadlineExpired` step, and every `@DeadlineExpired` names a deadline the saga starts; `@StartDeadline` and `@DeadlineExpired` appear only on `@SagaStep` methods |
+| R25 | 40 (`specs/017-saga-deadlines` FR-009) | A `@StartDeadline` declares exactly one of `duration` and `durationFrom`; a fixed `duration` that is not a `${...}` placeholder is an ISO-8601 duration that is not negative |
+| R26 | 41 (`specs/017-saga-deadlines` FR-012) | Every `cancelledBy` name is a `@SagaStep` method of the saga and not the deadline's own `@DeadlineExpired` step |
+| R27 | 40 (`specs/017-saga-deadlines` FR-010) | A `@DeadlineExpired` step takes no parameter or one `DeadlineReached` and declares no `associationProperty`; every other `@SagaStep` declares a non-blank `associationProperty` (its default is `""` since 017) |
+| R28 | 40 (`specs/017-saga-deadlines` FR-010) | A `@DeadlineExpired` step is not `@StartSaga` |
+| R29 | 41 (`specs/017-saga-deadlines` FR-012) | A step that is `@StartCompensation` or `@EndSaga` carries no `@StartDeadline` (leaving `RUNNING` would cancel it at once) |
 
-R1 to R11 and R19 to R22 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 and R23 run only in `validateAll`.
+R1 to R11, R19 to R22 and R24 to R29 run in `validate(Class<?>)` and, for each passed-in `@Saga` class, in `validateAll`. R12 to R18 and R23 run only in `validateAll`.
 
 ```java
 package io.github.gkosharovdev.sagaforge.core.scanner;
@@ -877,6 +883,30 @@ Properties 10 to 20 are added by feature spec `specs/002-transactional-step-sequ
 
 **Validates: Feature spec `specs/012-outbox-command-failure-feedback` FR-001 to FR-016, SC-001 to SC-004** (tests: `CommandFailureCompensationTest`, `IgnoredCommandFailureTest`, `CompensationCommandFailureTest`, `CompensationFaultInjectionTest`, `CommandFailureFeedbackTest`, `TransportAcceptanceSuite`, `OutboxCommandFailureParityTest`)
 
+### Property 40: Deadline model well-formedness
+
+*For any* `@Saga` class that passes validation, every deadline it starts (`@StartDeadline`) has a unique non-blank name, exactly one duration source (a fixed, non-negative ISO-8601 duration or `${key[:default]}`, or a `SagaContext` attribute), and exactly one `@DeadlineExpired` `@SagaStep` that takes no parameter or one `DeadlineReached`, has no `associationProperty` and is not `@StartSaga`. Properties 10 (step parameter is a `@DomainEvent`) and 11 (one step per event type) apply to the steps without `@DeadlineExpired`; timeout steps are unique per deadline name instead.
+
+**Validates: Feature spec `specs/017-saga-deadlines` FR-009, FR-010, FR-017** (tests: `DeadlineValidationTest`)
+
+### Property 41: Deadline cancellation
+
+*For any* committed unit of work *u* of an instance *i* and any deadline *d* open on *i* before *u*: if a step named in *d*'s `cancelledBy` completed in *u*, *d* was started again in *u*, *d*'s timeout step ran in *u*, or *u* moves *i* out of `RUNNING` (completion, compensation start, the `FAILED` write, a compensation command's failure), then *d* is not open on *i* after *u*, and *d*'s stored message is `CANCELLED` in *u*'s transaction unless it was leased at that moment. No step that leaves `RUNNING` starts a deadline (R29).
+
+**Validates: Feature spec `specs/017-saga-deadlines` FR-012, FR-014** (tests: `DeadlinePlanTest`, `DeadlineCancellationTest`, `DeadlineExpiryTest`)
+
+### Property 42: Deadline fires at most once and only while RUNNING
+
+*For any* delivered `DeadlineReached` for deadline *d* of instance *i*, the `@DeadlineExpired` step for *d* runs only in a unit of work that, under the instance lock, finds *i* `RUNNING` with *d* open under the delivered `deadlineId`; that unit of work closes *d*, so each `deadlineId` has at most one committed timeout step. Any other delivery (instance missing or not `RUNNING`, *d* cancelled, expired or replaced) writes nothing and is reported `IGNORED` with the diagnostic `saga.deadline.ignored`. A `@StartCompensation` timeout step records a `CompensationTrigger` of kind `DEADLINE_EXPIRED` with the deadline name, carried by the outcome event's `OutcomeTrigger`.
+
+**Validates: Feature spec `specs/017-saga-deadlines` FR-011, FR-013, FR-015, SC-001, SC-002** (tests: `DeadlineExpiryTest`, `DeadlineIgnoredTest`, `DeadlineInterleavingPropertyTest`)
+
+### Property 43: Not before due
+
+*For any* message stored with a `notBefore` (a deadline or a scheduled command), no lease returns it before `notBefore` by the leasing clock; once due it is leasable like any message, it never holds back another message (it has no ordering key), and a `CANCELLED` message is never leased again.
+
+**Validates: Feature spec `specs/017-saga-deadlines` FR-001 to FR-005, SC-003** (tests: `MessageStoreContract` scheduling cases on the in-memory and Postgres stores)
+
 ### Note: `.kiro/specs/saga-context-lifecycle/design.md` and the engine (004)
 
 None of that document's Properties 1 to 12 applies to the engine as written: they describe `getProperty`, `registerProperty` and `setContext`, which do not exist (`.specify/memory/memory.md` G-002-05). Its "Engine-Level Error Handling" rule (clear the context in a `finally`) is honored by `DomainEventScope.runWith`, which restores the previous binding however the work ends. That document is left unchanged (AGENTS.md). Properties 1 to 20 above are unchanged: the engine adds no annotation and no scanner rule. `specs/005-step-retry` adds the `@SagaStep.retry` attribute, rule R19 and Property 29, and leaves Properties 1 to 28 unchanged. `specs/006-saga-compensation` adds `@StartCompensation`, rules R20 to R22 and Properties 30 to 34, extends Property 27 with the compensation entries, and leaves Properties 1 to 26, 28 and 29 unchanged. `specs/007-in-memory-transport` adds `@Command.delivery` (`CommandDelivery`), rule R23 and Property 35, renames the handoff SPI to `Outbox` (Property 26's wording follows), and leaves Properties 1 to 34 otherwise unchanged. `specs/008-spring-boot-starter` extends Property 26 with `recordedEvents` and changes no annotation, rule or other property. `specs/009-saga-test-fixture` adds the `CommandInterceptor` SPI and Property 36 and changes no annotation, rule or other property. `specs/010-otel-observability` adds OpenTelemetry instrumentation to the runtime and the in-memory transport and Property 37, and changes no annotation, rule or other property. `specs/011-saga-outcome-events` adds Property 38 (outcome events, framework events that are not `@DomainEvent`s, so the existing "Non-@DomainEvent param" rule rejects a step that takes one), renames `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` in Properties 27 and 30 to 34 (Property 27's entry list drops the `REQUIRES_INTERVENTION` kind), and changes no annotation or scanner rule `specs/012-outbox-command-failure-feedback` adds Property 39 and the `COMMAND_FAILED` compensation trigger kind (an outbox command the saga sent failed for good; the trigger and `OutcomeTrigger` gain a `commandType`), and changes no annotation, scanner rule or other property.
@@ -926,6 +956,11 @@ The `ReflectiveAnnotationScanner` collects all validation errors for a saga clas
 | Compensation is a step (R21) | `@SagaCompensation` method also `@SagaStep` | `"@SagaCompensation method {methodName} in {className} cannot also be annotated with @SagaStep"` |
 | Duplicate compensation (R22) | >1 `@SagaCompensation` for one step | `"@SagaCompensation methods {methodName}, {methodName} in {className} both compensate step {stepName}"` |
 | Outbox command without handler (R23, model error) | `@Command(delivery = OUTBOX)` type passed to `validateAll` with no `@CommandHandler` among the passed-in hosts | `"Command {commandType} is delivered through the outbox but has no @CommandHandler"` |
+| Deadline without timeout step, timeout step without deadline, deadline started twice by one step, more than one timeout step (R24) | as named | `"@Saga class {Saga}: deadline '{name}' is started by step {step} but no @DeadlineExpired step handles it"`, `"... @DeadlineExpired step {step} names deadline '{name}', which no step starts"`, `"... deadline '{name}' is started more than once by step {step}"`, `"... deadline '{name}' has more than one @DeadlineExpired step: {steps}"` |
+| Deadline duration (R25) | both or neither of `duration`/`durationFrom`; unparseable or negative fixed duration | `"@Saga class {Saga}: deadline '{name}' on step {step} must declare exactly one of duration and durationFrom"`, `"... has duration '{value}', which is not an ISO-8601 duration"` / `"..., which is negative"` |
+| Deadline cancellation (R26) | unknown `cancelledBy` step, or the deadline's own timeout step | `"@Saga class {Saga}: deadline '{name}' is cancelled by '{step}', which is not a step of this saga"`, `"... is cancelled by its own @DeadlineExpired step {step}"` |
+| Timeout step shape (R27, R28) | wrong parameter, an `associationProperty`, `@StartSaga`, or not a `@SagaStep`; an event step without `associationProperty` | `"@Saga class {Saga}: @DeadlineExpired step {step} must take no parameter or one DeadlineReached"`, `"... must not declare an associationProperty"`, `"... cannot also be @StartSaga"`, `"... method {m} declares @StartDeadline or @DeadlineExpired but is not a @SagaStep"`, `"@SagaStep method {m} in {Saga} must declare an associationProperty"` |
+| Deadline on a step that leaves RUNNING (R29) | `@StartDeadline` on a `@StartCompensation` or `@EndSaga` step | `"@Saga class {Saga}: step {step} starts deadline '{name}' but also leaves RUNNING, so it would be cancelled at once"` |
 | Compensation of a trigger step (R22) | `forStep` names a `@StartCompensation` step | `"@SagaCompensation method {methodName} in {className} compensates step {stepName}, which is a @StartCompensation step"` |
 
 All class names and type names are simple names. For a `@CommandHandler` constructor, `{methodName}` is the declaring class's simple name. Lists in R9, R13, R18 and R22 messages are sorted in ascending lexicographic order (method names for R9 and R22, full `{className}.{methodName}` strings for R13 and R18), and R9, R13, and R18 emit one error per duplicated type, ordered by the type's simple name.

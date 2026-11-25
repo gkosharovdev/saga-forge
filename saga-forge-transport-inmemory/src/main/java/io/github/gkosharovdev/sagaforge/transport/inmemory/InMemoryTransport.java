@@ -197,6 +197,16 @@ public final class InMemoryTransport {
         public void committed(OutgoingMessages batch) {
             relay.signal();
         }
+
+        @Override
+        public boolean supportsScheduling() {
+            return relay.supportsScheduling();
+        }
+
+        @Override
+        public java.util.Set<String> cancel(java.util.Collection<String> messageIds) {
+            return relay.cancel(messageIds);
+        }
     }
 
     /** Assembles an {@link InMemoryTransport}. */

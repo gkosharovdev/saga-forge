@@ -27,6 +27,7 @@ final class CommandIds {
     private final String sagaId;
     private final Map<String, Integer> sentPerType = new HashMap<>();
     private String step;
+    private String occurrence;
 
     /**
      * @param sagaId the instance the unit of work runs
@@ -37,7 +38,16 @@ final class CommandIds {
 
     /** Begins a run of {@code stepName}: commands sent from now on are counted for it, from 1 per type. */
     void startStep(String stepName) {
+        startStep(stepName, null);
+    }
+
+    /**
+     * Begins one occurrence of {@code stepName}, a step that can run more than once for the instance (a
+     * {@code @DeadlineExpired} step, keyed by its deadline id, 017); {@code null} as {@link #startStep(String)}.
+     */
+    void startStep(String stepName, String occurrence) {
         step = stepName;
+        this.occurrence = occurrence;
         sentPerType.clear();
     }
 
@@ -50,7 +60,7 @@ final class CommandIds {
             throw new IllegalStateException("No step is running in the unit of work of saga instance " + sagaId);
         }
         int ordinal = sentPerType.merge(commandType.getName(), 1, Integer::sum);
-        return CommandId.of(sagaId, step, commandType.getName(), ordinal);
+        return CommandId.of(sagaId, step, commandType.getName(), ordinal, occurrence);
     }
 
     /**

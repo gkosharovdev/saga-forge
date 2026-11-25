@@ -55,7 +55,7 @@ public final class EngineRuntime {
             Diagnostics diagnostics) {
         List<SagaModel> sagas = registered.stream()
                 .filter(type -> type.isAnnotationPresent(Saga.class))
-                .map(SagaModel::of)
+                .map(type -> SagaModel.of(type, settings.properties()))
                 .toList();
         AggregateAccess access = AggregateAccess.of(registered, settings.handlerInstances(),
                 settings.aggregateResolvers());

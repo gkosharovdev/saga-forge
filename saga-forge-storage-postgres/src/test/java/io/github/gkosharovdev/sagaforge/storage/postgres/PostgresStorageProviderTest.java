@@ -119,6 +119,26 @@ class PostgresStorageProviderTest {
         }
 
         @Test
+        @DisplayName("017: open deadlines survive a restart and are cleared when the instance completes")
+        void openDeadlinesSurviveRestart() {
+            Map<String, io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline> deadlines = Map.of(
+                    "paymentWindow", new io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline(
+                            "s-1:deadline:paymentWindow:uow-1", MODIFIED_AT.plusSeconds(900), "handleOrderCreated",
+                            MODIFIED_AT),
+                    "reminder", new io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline(
+                            "s-1:deadline:reminder:uow-1", MODIFIED_AT.plusSeconds(60), "handleOrderCreated",
+                            MODIFIED_AT));
+            SagaInstance waiting = running("s-1", Map.of(), Map.of("orderId", "o-1")).withOpenDeadlines(deadlines);
+            provider.save(waiting);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(waiting);
+
+            SagaInstance completed = new SagaInstance("s-1", SAGA_TYPE, Map.of(), Map.of("orderId", "o-1"),
+                    SagaStatus.COMPLETED, CREATED_AT, MODIFIED_AT, waiting.steps(), "processPayment", null);
+            provider.save(completed);
+            assertThat(restarted().findById("s-1")).get().isEqualTo(completed);
+        }
+
+        @Test
         @DisplayName("006: the trigger, completion sequences and compensation states survive a restart")
         void compensationFieldsSurviveRestart() {
             io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger trigger =

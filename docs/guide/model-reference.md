@@ -90,6 +90,33 @@ Other types a model uses:
   completed are compensated. A compensation that throws is never retried: the instance ends `COMPENSATION_FAILED`.
   A compensation can run again after a crash, so the commands it sends must be idempotent (pass `CommandId` on).
 
+### `@StartDeadline`
+
+- **Where**: on a `@SagaStep`, repeatable for different names; a step starts a name at most once (R24). A step that
+  ends `RUNNING` (`@EndSaga`, `@StartCompensation`) starts none (R29).
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `name` | `String` | required | the deadline's name; exactly one `@DeadlineExpired` step handles it (R24) |
+  | `duration` | `String` | `""` | ISO-8601 (`"PT15M"`) or `"${key}"` / `"${key:PT15M}"`, resolved at startup; not negative (R25) |
+  | `durationFrom` | `String` | `""` | the `SagaContext` attribute holding the duration as an ISO-8601 `String`, read after the step returned |
+  | `cancelledBy` | `String[]` | `{}` | steps of the saga whose completion closes the deadline; not its own timeout step (R26) |
+
+- Exactly one of `duration` and `durationFrom` (R25).
+- **Effect**: when the step's unit of work commits, the deadline is stored due at completion time plus the duration.
+  It closes when a `cancelledBy` step completes, when it is started again (replaced), and when the instance leaves
+  `RUNNING`. Needs a scheduling `IN_TRANSACTION` outbox. See [Deadlines](deadlines.md).
+
+### `@DeadlineExpired`
+
+- **Where**: on the `@SagaStep` that runs when the named deadline comes due; its `associationProperty` is left empty
+  and it takes no parameter or one `DeadlineReached` (R27); never `@StartSaga` (R28). Usually also
+  `@StartCompensation` (trigger kind `DEADLINE_EXPIRED`); may be `@EndSaga` or a plain step.
+- **Attributes**: `value`, the deadline's name.
+- **Runs when**: the deadline comes due while the instance is `RUNNING` and that start of the deadline is still open;
+  otherwise the delivery is `IGNORED`.
+
 ### `@RetryPolicy`
 
 - **Where**: only as the value of `@SagaStep(retry = ...)`.

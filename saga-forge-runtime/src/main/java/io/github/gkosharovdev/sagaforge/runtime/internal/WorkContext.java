@@ -103,6 +103,11 @@ final class WorkContext {
         commandIds.startStep(methodName);
     }
 
+    /** {@link #running(String)} for one occurrence of a step that can run more than once (017). */
+    void running(String methodName, String occurrence) {
+        commandIds.startStep(methodName, occurrence);
+    }
+
     /** Reports a failure; the first report is kept and fails the unit of work, even if the reporter catches it. */
     void reportFailure(Throwable failure) {
         unitOfWork.failed(failure);

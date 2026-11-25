@@ -1,5 +1,12 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.github.gkosharovdev.sagaforge.core.command.ScheduledCommandId;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
+import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
@@ -106,17 +113,19 @@ final class EngineCommandGateway implements CommandGateway {
     private final Map<Class<?>, CommandRoute> routes;
     private final TransactionBoundary transactions;
     private final boolean outboxStoresCommands;
+    private final boolean outboxSchedules;
     private final Consumer<Runnable> standaloneUnitsOfWork;
     private final Diagnostics diagnostics;
     private final CommandInterceptor interceptor;
     private final SagaInstrumentation instrumentation;
 
     private EngineCommandGateway(Map<Class<?>, CommandRoute> routes, TransactionBoundary transactions,
-            boolean outboxStoresCommands, Consumer<Runnable> standaloneUnitsOfWork, Diagnostics diagnostics,
-            CommandInterceptor interceptor, SagaInstrumentation instrumentation) {
+            boolean outboxStoresCommands, boolean outboxSchedules, Consumer<Runnable> standaloneUnitsOfWork,
+            Diagnostics diagnostics, CommandInterceptor interceptor, SagaInstrumentation instrumentation) {
         this.routes = Map.copyOf(routes);
         this.transactions = transactions;
         this.outboxStoresCommands = outboxStoresCommands;
+        this.outboxSchedules = outboxSchedules;
         this.standaloneUnitsOfWork = standaloneUnitsOfWork;
         this.diagnostics = diagnostics;
         this.interceptor = interceptor;
@@ -150,6 +159,7 @@ final class EngineCommandGateway implements CommandGateway {
             factory.routesOf(host).forEach((commandType, route) -> addRoute(routes, commandType, route));
         }
         return new EngineCommandGateway(routes, settings.transactions(), settings.outbox().supportsCommands(),
+                settings.outbox().supportsScheduling(),
                 handlerCall -> HandleCommand.run(settings, diagnostics, handlerCall), diagnostics,
                 settings.commandInterceptor(),
                 new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics));
@@ -195,6 +205,75 @@ final class EngineCommandGateway implements CommandGateway {
             }
             intercept(command, id, route, "in_unit_of_work");
             unitOfWork.commandHandled(id);
+        } catch (RuntimeException | Error failure) {
+            transactions.current().ifPresent(LocalTransaction::setRollbackOnly);
+            unitOfWork.failed(failure);
+            throw failure;
+        }
+    }
+
+    /**
+     * Stores {@code command} with the current unit of work to be handled at {@code at} (017 FR-007,
+     * contracts/outbox-and-gateway.md "CommandGateway"); outside one, in a unit of work of its own. Its
+     * {@link CommandId} is assigned now, scoped to the sending step, so a final failure reaches the saga (012).
+     */
+    @Override
+    public ScheduledCommandId schedule(Object command, Instant at) {
+        if (at == null) {
+            throw new IllegalArgumentException("at must not be null");
+        }
+        requireScheduling();
+        Optional<BoundUnitOfWork> bound = BoundUnitOfWork.current();
+        if (bound.isPresent()) {
+            return scheduleWithin(bound.get(), command, at);
+        }
+        requireCommand(command);
+        AtomicReference<ScheduledCommandId> scheduled = new AtomicReference<>();
+        standaloneUnitsOfWork.accept(() -> scheduled.set(schedule(command, at)));
+        return scheduled.get();
+    }
+
+    /**
+     * Withdraws a scheduled command: one scheduled in the current unit of work is dropped from its batch, an earlier
+     * one is cancelled through {@code Outbox.cancel} in the unit of work's transaction (017).
+     */
+    @Override
+    public boolean cancel(ScheduledCommandId id) {
+        if (id == null) {
+            throw new IllegalArgumentException("id must not be null");
+        }
+        requireScheduling();
+        Optional<BoundUnitOfWork> bound = BoundUnitOfWork.current();
+        if (bound.isPresent()) {
+            return bound.get().cancelScheduled(id.value());
+        }
+        AtomicBoolean cancelled = new AtomicBoolean();
+        standaloneUnitsOfWork.accept(() -> cancelled.set(cancel(id)));
+        return cancelled.get();
+    }
+
+    private void requireScheduling() {
+        if (!outboxSchedules) {
+            throw new UnsupportedOperationException("The engine's Outbox cannot schedule messages; scheduled commands"
+                    + " need an IN_TRANSACTION outbox over a message store that supports scheduling, such as"
+                    + " InMemoryTransport with PostgresMessageStore");
+        }
+    }
+
+    private ScheduledCommandId scheduleWithin(BoundUnitOfWork unitOfWork, Object command, Instant at) {
+        try {
+            requireCommand(command);
+            if (!isOutbox(command)) {
+                throw new IllegalArgumentException("Command " + command.getClass().getName() + " is not"
+                        + " @Command(delivery = OUTBOX); only outbox commands can be scheduled");
+            }
+            if (!routes.containsKey(command.getClass())) {
+                throw new NoCommandHandlerException(command.getClass());
+            }
+            CommandId id = unitOfWork.nextCommandId(command.getClass());
+            String messageId = unitOfWork.nextScheduledMessageId();
+            unitOfWork.recordScheduled(new ScheduledMessage(messageId, MessageKind.COMMAND, command, id, at));
+            return new ScheduledCommandId(messageId);
         } catch (RuntimeException | Error failure) {
             transactions.current().ifPresent(LocalTransaction::setRollbackOnly);
             unitOfWork.failed(failure);

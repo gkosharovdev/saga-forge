@@ -38,7 +38,7 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
@@ -46,6 +46,8 @@ with your own bean.
   any new upgrade script.
 - `schema-upgrade-011.sql` renames the status `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` and removes the
   history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
+- `schema-upgrade-017.sql` adds the message store's due time and the `CANCELLED` status, for deadlines and scheduled
+  commands.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -61,7 +63,7 @@ management.endpoints.web.exposure.include=health,sagaforge
   age of the oldest unconsumed message:
 
   ```json
-  { "counts": { "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
   ```
 
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
@@ -127,9 +129,14 @@ Metrics:
 | `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `compensation_failed`) |
 | `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
 | `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
+| `saga_forge.deadlines` | counter | — | `saga_forge.saga.type`, `saga_forge.deadline.name`, `saga_forge.deadline.event` (`started`, `cancelled`, `expired`, `ignored`) |
 | `saga_forge.command.failures` | counter | — | `classification` (`final`, `exhausted`): outbox commands the transport gave up on and reported to their saga |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+
+A deadline delivery's `saga_forge.handle` span carries `saga_forge.deadline.name`; a delivery span of a message with a
+due time carries `saga_forge.message.not_before` on its first attempt. A deadline that arrives when its instance no
+longer waits on it is logged at INFO as `saga.deadline.ignored` with `reason=NOT_RUNNING`, `NOT_OPEN` or `REPLACED`.
 
 Runtime log lines written inside a unit of work carry `traceId=` and `spanId=`.
 

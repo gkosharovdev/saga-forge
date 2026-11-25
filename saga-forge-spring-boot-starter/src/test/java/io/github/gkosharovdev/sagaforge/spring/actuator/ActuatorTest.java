@@ -59,7 +59,8 @@ class ActuatorTest {
 
         Map<String, Object> payload = endpoint.status();
         assertThat(payload).containsKey("counts").doesNotContainKey("oldestUnconsumed");
-        assertThat(payload.get("counts")).isEqualTo(Map.of("CONSUMED", 0, "SET_ASIDE", 1, "UNCONSUMED", 0));
+        assertThat(payload.get("counts")).isEqualTo(Map.of("CANCELLED", 0, "CONSUMED", 0, "SET_ASIDE", 1,
+                "UNCONSUMED", 0));
         assertThat(health.health().getStatus()).isEqualTo(Status.DOWN);
         assertThat(health.health().getDetails()).containsEntry("setAside", 1);
     }

@@ -13,6 +13,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Model reference](model-reference.md) | know where each annotation goes, what it needs next to it, and its attributes |
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
+| [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
 | [Limitations](limitations.md) | know what to design around in 0.1.0 |

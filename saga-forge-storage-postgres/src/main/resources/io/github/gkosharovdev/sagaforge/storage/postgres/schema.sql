@@ -20,6 +20,10 @@ CREATE TABLE saga_instance (
     failure_attempts    INT,
     pending_retry       JSONB,
     compensation_trigger JSONB,
+    -- Open deadlines by name (specs/017-saga-deadlines FR-014); empty unless CREATED or RUNNING.
+    open_deadlines      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT open_deadlines_only_while_active
+        CHECK (open_deadlines = '{}'::jsonb OR status IN ('CREATED', 'RUNNING')),
     CONSTRAINT outcome_iff_completed
         CHECK ((status = 'COMPLETED') = (outcome IS NOT NULL)),
     CONSTRAINT failure_iff_failed
@@ -79,7 +83,7 @@ CREATE TABLE IF NOT EXISTS saga_message_store (
     source_saga_type  VARCHAR(512),
     source_saga_id    VARCHAR(255),
     recorded_at       TIMESTAMPTZ  NOT NULL,
-    status            VARCHAR(16)  NOT NULL CHECK (status IN ('UNCONSUMED', 'CONSUMED', 'SET_ASIDE')),
+    status            VARCHAR(16)  NOT NULL CHECK (status IN ('UNCONSUMED', 'CONSUMED', 'SET_ASIDE', 'CANCELLED')),
     attempts          INTEGER      NOT NULL DEFAULT 0,
     next_attempt_at   TIMESTAMPTZ  NOT NULL,
     last_failure      JSONB,
@@ -90,9 +94,12 @@ CREATE TABLE IF NOT EXISTS saga_message_store (
     external_ref      VARCHAR(255),
     -- Propagated trace context (specs/010-otel-observability contracts/message-context.md); NULL when none.
     trace_context     JSONB,
+    -- Not leasable before this time; NULL when due at once (specs/017-saga-deadlines research R1). Copied into
+    -- next_attempt_at on append, so the due index serves it; kept for operator queries.
+    not_before        TIMESTAMPTZ,
     CONSTRAINT command_id_iff_command CHECK ((kind = 'COMMAND') = (command_id IS NOT NULL)),
     CONSTRAINT lease_together CHECK ((leased_by IS NULL) = (leased_until IS NULL)),
-    CONSTRAINT consumed_at_iff_consumed CHECK ((status = 'CONSUMED') = (consumed_at IS NOT NULL)),
+    CONSTRAINT consumed_at_iff_consumed CHECK ((status IN ('CONSUMED', 'CANCELLED')) = (consumed_at IS NOT NULL)),
     CONSTRAINT reason_iff_set_aside CHECK ((status = 'SET_ASIDE') = (set_aside_reason IS NOT NULL))
 );
 
@@ -101,7 +108,7 @@ CREATE INDEX IF NOT EXISTS saga_message_store_head
 CREATE INDEX IF NOT EXISTS saga_message_store_due
     ON saga_message_store (next_attempt_at, position) WHERE status = 'UNCONSUMED';
 CREATE INDEX IF NOT EXISTS saga_message_store_consumed
-    ON saga_message_store (consumed_at) WHERE status = 'CONSUMED';
+    ON saga_message_store (consumed_at) WHERE status IN ('CONSUMED', 'CANCELLED');
 CREATE INDEX IF NOT EXISTS saga_message_store_source
     ON saga_message_store (source_saga_type, source_saga_id);
 

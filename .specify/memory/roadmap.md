@@ -68,7 +68,7 @@ building on unfinished work.
 | 014 | One event bus with Spring Modulith | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05 | W10 | P1 |
 | 016 | Marker SPI and jMolecules adapter | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
-| 017 | Durable scheduling: deadlines, scheduled commands, durable backoff | SF-11 | G-ENG-25, G-005-01, G-005-02 | W16 | P2 |
+| 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
 | 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
 | 020 | Spring context tests without a database | SF-12 | G-009-01 | W12 | P2 |
@@ -271,6 +271,11 @@ III: Properties 16 and 17 are restated over "aggregate marker" and "identifier m
 end, events harvested from aggregates.
 
 ### 017: Durable scheduling: deadlines, scheduled commands, durable backoff
+
+**Status (2026-11-25).** Deadlines and scheduled commands are implemented by `specs/017-saga-deadlines`, ahead of 013 by
+decision: they work with one running instance per message store, and 013 must keep due messages working under its
+leader lease (G-017-02). Durable `@RetryPolicy` backoff was left out and stays open (G-005-01, G-005-02). Gaps
+G-017-01 to G-017-10 in memory.md.
 
 **Problem.** Nothing in Saga Forge can wait in time. A saga waits for its next event forever (G-ENG-25). Retry backoff
 blocks the calling thread and is capped at 30 s (G-005-01, G-005-02). Every deadline lives in application tables and

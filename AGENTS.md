@@ -150,6 +150,25 @@
   `saga_forge.command.failures`, a `saga_forge.handle` span per report. Fixture: `SagaFixture.Builder.outboxCommandAttempts`
   (default 1); `saga-forge-test` has the in-memory transport as a test dependency for `OutboxCommandFailureParityTest`.
   Property 39.
+- Whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on 2026-11-25 (1,881 tests, 0 failures; the release build `-P release` with Javadoc also passes).
+- Implemented and tested, added by `specs/017-saga-deadlines` (closes G-ENG-25; taken ahead of 013): saga deadlines and
+  scheduled commands. Core gains `@StartDeadline(name, duration | durationFrom, cancelledBy)` (repeatable) and
+  `@DeadlineExpired(name)` on a `@SagaStep` with no `associationProperty`, taking nothing or `core.deadline.DeadlineReached`
+  (scanner rules R24 to R29, Properties 40 to 43); `OpenDeadline`, `SagaInstance.openDeadlines`,
+  `CompensationTriggerKind.DEADLINE_EXPIRED` with `deadlineName` on `CompensationTrigger`/`OutcomeTrigger`,
+  `DeadlineDurationException`; `CommandGateway.schedule(command, Instant)` → `ScheduledCommandId` and `cancel(id)`;
+  `Outbox.supportsScheduling`/`cancel`, `OutgoingMessages.scheduled`, `NewMessage.notBefore`, `MessageStore.cancel` and
+  `MessageStatus.CANCELLED`. The runtime stores a deadline as a message with a due time in the starting unit of work,
+  closes it on a `cancelledBy` step, on a restart of the same name and whenever the instance leaves `RUNNING`
+  (`EngineSagaLifecycle.replace`), and ignores a late delivery (`IGNORED`, `saga.deadline.ignored`); a startup check
+  rejects deadlines over an outbox that cannot schedule; `${key:default}` durations resolve through
+  `SagaRuntime.Builder.propertyResolver`. The in-memory transport and `PostgresMessageStore` schedule and cancel
+  (existing databases apply `schema-upgrade-017.sql`); the starter shares one `Clock`, resolves placeholders from the
+  `Environment` and refuses deadlines under Modulith interop (`DeadlinesRequireOwnLogFailureAnalyzer`). Fixture:
+  `whenTimeElapses`/`whenTimeReaches`/`givenTimeElapses`, `expectOpenDeadline`/`expectNoOpenDeadline`/
+  `expectDeadlineExpired`/`expectDeadlineIgnored`, `InstanceView.openDeadlines`, `Builder.property`. Telemetry counter
+  `saga_forge.deadlines`. Examples: `CheckoutSaga`'s payment window and `FulfilmentSaga`'s courier assignment. Durable
+  retry backoff (G-005-01/-02) is not part of it.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -195,7 +214,7 @@
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
   whatever the annotation model currently supports. Package `example.checkout` holds the README's domain story,
   `CheckoutSaga` and `FulfilmentSaga` (Inventory, Payments and Logistics as stand-in services), told in full in
-  `docs/use-cases.md` §1; saga-owned deadlines are added to it with 017 (G-DOC-04: two stories for now).
+  `docs/use-cases.md` §1, including the payment-window and courier-assignment deadlines (017) (G-DOC-04: two stories for now).
 - `saga-forge-example-spring` — the canonical saga as a Spring Boot application (Spring Data JDBC `Order`, service
   beans, no assembly code). Keep it in step with `saga-forge-example`; it keeps amounts as `String` in `SagaContext`
   (G-003-07).
@@ -296,8 +315,9 @@
   should write them so that writing again is harmless.
 - Deferred: whether a `@StartSaga` step may also be a `@CommandHandler`. Dropped for now: programmatic abort
   (e.g. `SagaLifecycle.abort()`) — don't add it without a spec.
-- No waiting timeouts: a saga waits indefinitely for its next event; deadlines stay a separate scheduled
-  process (G-ENG-25).
+- Waiting timeouts are saga deadlines (017): `@StartDeadline` on a step, one `@DeadlineExpired` timeout step per
+  deadline. Don't add a second scheduling mechanism; durable retry backoff (G-005-01/-02) should reuse the message
+  store's due times.
 - First adopter: booking-service. memory.md "Adoption backlog" ranks the gaps that matter for it; check it when
   choosing the next feature.
 - jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
@@ -331,6 +351,13 @@
   correct a `COMPENSATED` instance (G-012-01); a `COMPLETED` saga is not told (G-012-02); no step can take the failure,
   the reaction is always full compensation (G-012-03); a crash after the reaction's first commit resumes only on the
   next event (G-012-04); the fixture redelivers without backoff (G-012-05).
+
+- Saga deadlines (017), see memory.md G-017-01 to G-017-10: none with Spring Modulith interop (G-017-01); one running
+  instance per message store until 013 (G-017-02); overdue messages run in stored order (G-017-03); latency up to the
+  poll interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command
+  is not cancelled with its saga (G-017-06); a deadline does not resume a `COMPENSATING` instance (G-017-07);
+  implementation decisions (G-017-08); the fixture duplicates the scheduling (G-017-09); no Spring example or Spring
+  container test for deadlines (G-017-10).
 
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,

@@ -652,7 +652,9 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Remark**: a framework-owned declaration (for example a deadline attribute on `@SagaStep`, Constitution Principle II)
   plus a durable scheduler in the message store would cover it; relates to G-005-01 (no scheduled backoff), which
   needs the same scheduling mechanism.
-- **Status**: open (deferred; needs a spec).
+- **Status**: closed 2026-11-25 by `specs/017-saga-deadlines` (`@StartDeadline`/`@DeadlineExpired`, message-store due
+  times, `CommandGateway.schedule`/`cancel`). Remaining limits are G-017-01 to G-017-10. G-005-01/-02 (durable retry
+  backoff) stay open: 017 left them to a later spec.
 
 ### G-ENG-26: A step runs at most once per saga instance
 - **Description**: once a step completed, a further event of its type for the same instance is reported `DUPLICATE`
@@ -1126,7 +1128,8 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05)
 6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
-7. 017 durable scheduling (G-ENG-25, G-005-01, G-005-02)
+7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
+   left to a later spec
 8. 018 versioned schema migrations (G-003-25)
 9. 019 process metadata (G-ADOPT-05)
 10. 020 Spring context tests without a database (G-009-01; needs a scope decision, Principle IV)
@@ -1391,3 +1394,83 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   backoff between attempts. Instances, commands and outcome events still match (`OutboxCommandFailureParityTest`).
 - **Origin**: `specs/012-outbox-command-failure-feedback` T038.
 - **Status**: accepted.
+
+## Saga deadlines (017)
+
+### G-017-01: No deadlines or scheduled commands with Spring Modulith interop
+- **Description**: under `saga-forge.transport.modulith-interop` the transport's messages live in Modulith's event
+  publication registry, which has no due time. `ModulithMessageStore` reports `supportsScheduling() == false`, a saga
+  that declares a deadline fails startup, and `DeadlinesRequireOwnLogFailureAnalyzer` tells the user to switch interop
+  off. `CommandGateway.schedule` throws `UnsupportedOperationException` there.
+- **Origin**: `specs/017-saga-deadlines` research R13, FR-006.
+- **Status**: accepted (revisit with roadmap 014, one event bus with Spring Modulith).
+
+### G-017-02: One running instance per message store, also for deadlines
+- **Description**: due messages are leased by the one relay, like every message (G-007-09). Two running instances may
+  both deliver a due deadline; the runtime's open-deadline check makes the second delivery `IGNORED` only after the
+  first committed.
+- **Origin**: `specs/017-saga-deadlines` spec (taken ahead of 013 by decision).
+- **Remark**: 013 (active/standby relay) must keep leasing due messages under its leader lease.
+- **Status**: open (with 013).
+
+### G-017-03: Overdue messages are delivered in stored order, not due order
+- **Description**: after downtime the relay leases overdue messages by log position, so two deadlines that both came due
+  while the application was down may run in the opposite order of their due times. Each runs at most once.
+- **Origin**: `specs/017-saga-deadlines` research R11; SC-004 amended accordingly.
+- **Status**: accepted.
+
+### G-017-04: Deadline latency is bounded by the relay's poll interval
+- **Description**: nothing wakes the relay at a due time; a due message is picked up on the next poll
+  (`saga-forge.transport.poll-interval`), later when the relay is busy.
+- **Origin**: `specs/017-saga-deadlines` research R10.
+- **Status**: accepted.
+
+### G-017-05: A deadline leased before its cancel is delivered and ignored
+- **Description**: `MessageStore.cancel` only cancels messages not yet leased. A deadline the relay leased just before
+  the awaited event closed it is still delivered; the runtime finds it no longer open and reports `IGNORED`
+  (`saga.deadline.ignored`, reason `NOT_OPEN` or `NOT_RUNNING`). Costs one delivery, runs no step
+  (`DeadlineInterleavingPropertyTest`).
+- **Origin**: `specs/017-saga-deadlines` research R3.
+- **Status**: accepted.
+
+### G-017-06: A scheduled command is not cancelled when its saga ends
+- **Description**: only deadlines close when the instance leaves `RUNNING`. A command scheduled with
+  `CommandGateway.schedule` runs at its due time whatever the saga's status; the saga must keep its
+  `ScheduledCommandId` in `SagaContext` and cancel it itself. A failure of such a command reported after the saga ended
+  is ignored like any outbox command's (G-012-01, G-012-02).
+- **Origin**: `specs/017-saga-deadlines` FR-007 (no tie between scheduled commands and the instance); T050.
+- **Status**: accepted.
+
+### G-017-07: A deadline delivery does not resume a COMPENSATING instance
+- **Description**: an event for a `COMPENSATING` instance resumes its compensation (006), but a `DeadlineReached` for
+  one is `IGNORED` (`NOT_RUNNING`) and resumes nothing, so it does not help with G-006-05 / G-012-04.
+- **Origin**: `specs/017-saga-deadlines` FR-013 (a deadline never runs a step outside `RUNNING`); implementation
+  (`RunSteps.admit`, `DeadlineDelivery`).
+- **Status**: accepted (revisit with roadmap 015, saga operations).
+
+### G-017-08: Deadline and scheduling details decided during implementation
+- **Description**: (a) A timeout step may run more than once per instance when its deadline is started again, so its
+  commands get a `CommandId` with an occurrence key (the deadline id) and R24 was relaxed to let several steps start
+  the same name. (b) A deadline re-armed by its own timeout step counts from the delivery time, not the old due time.
+  (c) Scheduled outbox commands skip the per-step duplicate check that immediate outbox commands get: their identity is
+  the scheduled message id. (d) The transport's `saga_forge.message.not_before` span attribute is set only on a
+  message's first delivery attempt.
+- **Origin**: `specs/017-saga-deadlines` implementation (T020 to T041).
+- **Status**: accepted (recorded so later specs do not rediscover them).
+
+### G-017-09: The fixture duplicates the message store's scheduling
+- **Description**: `SagaFixture`'s `ScheduledMessages` re-implements due times, cancel and rollback for its loop-back
+  transport, beside `InMemoryMessageStore`; `DeadlineParityTest` keeps them in step. `when(event)` never delivers
+  merely-due messages; only `whenTimeElapses`/`whenTimeReaches` do. Same posture as G-009-02.
+- **Origin**: `specs/017-saga-deadlines` T037 to T041.
+- **Status**: accepted (with G-009-02).
+
+### G-017-10: No Spring example or Spring container test for deadlines
+- **Description**: T047 was not done. `saga-forge-example-spring` hosts only `OrderProcessingSaga`, whose stock answer
+  arrives in the same unit of work, so a deadline there could never come due and would be an artificial example.
+  Restart-before-due (SC-001) is proven at module level by `DeadlineRestartContainerTest` (Postgres, about 6 minutes
+  with the 10k overdue-deadline case) and the starter wiring by `DeadlineWiringTest`, but no Spring Boot application
+  test restarts with an open deadline.
+- **Origin**: `specs/017-saga-deadlines` T047 (skipped, 2026-11-25).
+- **Remark**: add it when the Spring example hosts the checkout sagas.
+- **Status**: open.

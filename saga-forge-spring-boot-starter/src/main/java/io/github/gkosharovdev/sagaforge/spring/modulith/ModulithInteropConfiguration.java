@@ -5,6 +5,7 @@ import java.time.Clock;
 
 import javax.sql.DataSource;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -44,7 +45,8 @@ public class ModulithInteropConfiguration {
     @Bean
     @ConditionalOnMissingBean(MessageStore.class)
     public ModulithMessageStore sagaForgeMessageStore(EventPublicationRepository registry, EventSerializer serializer,
-            DataSource dataSource, TransactionBoundary transactions, Environment environment) {
+            DataSource dataSource, TransactionBoundary transactions, Environment environment,
+            ObjectProvider<Clock> clock) {
         if (environment.getProperty("spring.modulith.events.republish-outstanding-events-on-restart", Boolean.class,
                 false)) {
             LOGGER.log(Level.INFO, "saga.transport.modulithInterop republish-outstanding-events-on-restart is on;"
@@ -52,6 +54,6 @@ public class ModulithInteropConfiguration {
         }
         ClassLoader loader = ModulithInteropConfiguration.class.getClassLoader();
         return new ModulithMessageStore(registry, serializer, new PostgresMessageStore(dataSource, transactions, loader),
-                loader, Clock.systemUTC());
+                loader, clock.getIfUnique(Clock::systemUTC));
     }
 }

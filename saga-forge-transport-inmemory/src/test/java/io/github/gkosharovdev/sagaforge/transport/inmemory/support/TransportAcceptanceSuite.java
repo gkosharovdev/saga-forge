@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory.support;
 
 import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness.await;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.time.Duration;
 import java.util.List;
@@ -29,7 +30,10 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssue
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.OrderPlaced;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentConfirmed;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RenewalSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RequestPayment;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.SubscriptionCancelled;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.SubscriptionStarted;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
 
 /**
@@ -40,6 +44,7 @@ public abstract class TransportAcceptanceSuite {
 
     /** The model every setup registers. */
     public static final Class<?>[] MODEL = { FulfilmentSaga.class, DeliverySaga.class, BillingSaga.class,
+            RenewalSaga.class,
             PaymentService.class, ShippingService.class, CardService.class, RequestPayment.class, BookShipment.class,
             ChargeCard.class };
 
@@ -62,6 +67,11 @@ public abstract class TransportAcceptanceSuite {
         void failDeliveriesOf(Class<?> type, int times);
 
         MessageStoreQueries queries();
+
+        /** @return whether the setup's outbox can schedule (017); Spring Modulith interop cannot */
+        default boolean supportsScheduling() {
+            return true;
+        }
 
         PaymentService payments();
 
@@ -193,6 +203,83 @@ public abstract class TransportAcceptanceSuite {
         assertThat(messagesOf(SagaFailed.class)).singleElement().satisfies(TransportAcceptanceSuite::consumedOutcome);
         assertThat(messagesOf(SagaCompleted.class)).filteredOn(m -> FulfilmentSaga.class.getName()
                 .equals(m.sourceSagaType())).singleElement().satisfies(TransportAcceptanceSuite::consumedOutcome);
+    }
+
+    private List<StoredMessage> renewals() {
+        return messagesOf(ChargeCard.class).stream()
+                .filter(message -> RenewalSaga.class.getName().equals(message.sourceSagaType())).toList();
+    }
+
+    private List<CardService.Charge> chargesOf(String subscriptionId) {
+        return setup.cards().charges().stream().filter(charge -> charge.invoiceId().equals(subscriptionId)).toList();
+    }
+
+    @Test
+    @DisplayName("017 US4: a scheduled command is held back until due, then handled once through the command receiver")
+    void scheduledCommandAfterDue() {
+        assumeTrue(setup.supportsScheduling(), "this setup's outbox cannot schedule");
+        java.time.Instant published = java.time.Instant.now();
+        setup.publish(new SubscriptionStarted("s-1", "PT0.5S"));
+
+        await(() -> !renewals().isEmpty(), WAIT, "the renewal to be stored");
+        assertThat(renewals()).singleElement().satisfies(message -> {
+            assertThat(message.orderingKey()).isNull();
+            assertThat(message.commandId().stepName()).isEqualTo("onStarted");
+        });
+        await(() -> !chargesOf("s-1").isEmpty(), WAIT, "the renewal charge");
+        assertThat(java.time.Duration.between(published, java.time.Instant.now()))
+                .isGreaterThanOrEqualTo(java.time.Duration.ofMillis(500));
+        await(() -> renewals().get(0).status() == MessageStatus.CONSUMED, WAIT, "the renewal to be consumed");
+        assertThat(chargesOf("s-1")).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("017 US4: a cancelled scheduled command is never handled")
+    void cancelledScheduledCommand() throws InterruptedException {
+        assumeTrue(setup.supportsScheduling(), "this setup's outbox cannot schedule");
+        setup.publish(new SubscriptionStarted("s-2", "PT0.6S"));
+        await(() -> setup.hasInstance(RenewalSaga.class, "RUNNING"), WAIT, "the renewal saga");
+
+        setup.publish(new SubscriptionCancelled("s-2"));
+
+        await(() -> setup.hasInstance(RenewalSaga.class, "COMPLETED"), WAIT, "the renewal saga to end");
+        assertThat(renewals()).singleElement()
+                .satisfies(message -> assertThat(message.status()).isEqualTo(MessageStatus.CANCELLED));
+        Thread.sleep(900);
+        assertThat(chargesOf("s-2")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("017 US4: a step that rolls back stores nothing it scheduled")
+    void rollbackStoresNothing() {
+        assumeTrue(setup.supportsScheduling(), "this setup's outbox cannot schedule");
+        setup.publish(new SubscriptionStarted(RenewalSaga.BROKEN + "s-3", "PT0S"));
+
+        await(() -> setup.hasInstance(RenewalSaga.class, "FAILED"), WAIT, "the renewal saga to fail");
+        assertThat(renewals()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("017 US4: a command scheduled in the past is due at once")
+    void pastIsDueAtOnce() {
+        assumeTrue(setup.supportsScheduling(), "this setup's outbox cannot schedule");
+        setup.publish(new SubscriptionStarted("s-4", "-PT1H"));
+
+        await(() -> !chargesOf("s-4").isEmpty(), WAIT, "the renewal charge");
+    }
+
+    @Test
+    @DisplayName("017 US4 + 012: a scheduled command that fails for good reaches the sender's failure feedback")
+    void scheduledCommandFailureFeedback() {
+        assumeTrue(setup.supportsScheduling(), "this setup's outbox cannot schedule");
+        setup.cards().decline();
+        setup.publish(new SubscriptionStarted("s-5", "PT0S"));
+
+        await(() -> setup.hasInstance(RenewalSaga.class, "COMPENSATED"), WAIT, "the renewal saga to compensate");
+        assertThat(renewals()).singleElement().satisfies(message -> {
+            assertThat(message.status()).isEqualTo(MessageStatus.SET_ASIDE);
+            assertThat(message.setAsideReason()).isEqualTo("FINAL_FAILURE");
+        });
     }
 
     private static void consumedOutcome(StoredMessage message) {

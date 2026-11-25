@@ -3,6 +3,8 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
+import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
@@ -36,6 +38,16 @@ import java.util.function.Supplier;
  * one reached by a non-start step {@code NOT_HANDLED}. On the first attempt of a handling call a retry claimed for the
  * trigger step by an earlier call returns {@link Resume}, so the loop claims the next attempt first (005 research §9).
  * None of these runs anything.</p>
+ *
+ * <p>A {@code DeadlineReached} (017) is admitted only if the instance is {@code RUNNING} and holds the deadline open
+ * under the delivered id; otherwise it is {@code IGNORED} ({@code saga.deadline.ignored}, reason {@code NOT_RUNNING},
+ * {@code NOT_OPEN} or {@code REPLACED}), whatever the status, so a {@code COMPENSATING} instance is not resumed by it.
+ * The timeout step runs even if it completed before for an earlier deadline of the same name.</p>
+ *
+ * <h2>Deadlines (017)</h2>
+ * <p>The timeout step's deadline is expired before it runs; after each completed step the {@link DeadlinePlan} cancels
+ * the deadlines the step cancels and starts the ones it declares. A timeout step that is {@code @StartCompensation}
+ * starts compensation with a {@code DEADLINE_EXPIRED} trigger.</p>
  *
  * <h2>Steps</h2>
  * <p>A fresh saga object with its fields injected runs the triggered step, then every queued event in recording order.
@@ -121,6 +133,7 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
     private boolean ended;
     private boolean compensationStarted;
     private CompensationTrigger lifecycleTrigger;
+    private DeadlinePlan deadlines;
 
     private RunSteps(Trigger trigger, Collaborators with, int attempt, boolean firstOfCall, Correlation correlation) {
         this.trigger = trigger;
@@ -176,13 +189,21 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
     @Override
     public Admission<AttemptResult> admit(Optional<SagaInstance> locked) {
         if (locked.isEmpty()) {
-            return Admission.skip(new Finished(unmatched()));
+            return Admission.skip(new Finished(trigger.event() instanceof DeadlineReached reached
+                    ? ignoredDeadline(reached, "NOT_RUNNING")
+                    : unmatched()));
         }
         SagaInstance instance = locked.get();
-        if (instance.status() == SagaStatus.COMPENSATING) {
+        if (trigger.event() instanceof DeadlineReached reached) {
+            String ignored = ignoredReason(instance, reached);
+            if (ignored != null) {
+                return Admission.skip(new Finished(ignoredDeadline(reached, ignored)));
+            }
+        } else if (instance.status() == SagaStatus.COMPENSATING) {
             return Admission.skip(new Compensating(correlation.inUnitOfWork(null)));
         }
-        if (!trigger.step().start() && isCompleted(instance, trigger.step().name())) {
+        if (!trigger.step().start() && !trigger.step().expiresDeadline()
+                && isCompleted(instance, trigger.step().name())) {
             return Admission.skip(new Finished(duplicate()));
         }
         if (EngineSagaLifecycle.isTerminal(instance.status())) {
@@ -198,9 +219,27 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
         return Admission.proceed();
     }
 
+    /** Why {@code reached} must not run a step of {@code instance}; {@code null} if it may (017 FR-014). */
+    private static String ignoredReason(SagaInstance instance, DeadlineReached reached) {
+        if (instance.status() != SagaStatus.RUNNING) {
+            return "NOT_RUNNING";
+        }
+        OpenDeadline open = instance.openDeadlines().get(reached.deadlineName());
+        if (open == null) {
+            return "NOT_OPEN";
+        }
+        return open.deadlineId().equals(reached.deadlineId()) ? null : "REPLACED";
+    }
+
     @Override
     public Void perform(WorkContext context) {
         rememberCommitted(context.lifecycle().current());
+        deadlines = new DeadlinePlan(trigger.saga(), trigger.sagaId(), context.unitOfWorkId(),
+                context.settings().sources()::now, () -> new EngineSagaContext(trigger.sagaId(),
+                        context.settings().contextStore(), context.settings().sources().clock()));
+        if (trigger.step().expiresDeadline()) {
+            deadlines.expire(trigger.step().deadlineName(), context.lifecycle());
+        }
         Object saga = context.newSagaObject();
         queue.add(new Queued(trigger.step(), new Recording(trigger.event())));
         context.recording(() -> runQueued(saga, context));
@@ -241,7 +280,8 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
         EngineSagaLifecycle lifecycle = context.lifecycle();
         while (!queue.isEmpty()) {
             Queued next = queue.poll();
-            if (completedSteps.contains(next.step().name())) {
+            boolean timeoutStep = next.step().expiresDeadline() && next.recording().event() == trigger.event();
+            if (completedSteps.contains(next.step().name()) && !timeoutStep) {
                 // A repeated event for a step already completed: not run, stored in the outbox like any non-queued event.
                 with.diagnostics().eventDuplicate(correlation, next.step().name());
                 continue;
@@ -253,8 +293,11 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
                 return;
             }
             if (next.step().startsCompensation()) {
-                lifecycleTrigger = CompensationTrigger.failureOutcome(next.step().name(),
-                        next.recording().event().getClass().getName(), context.settings().sources().now());
+                lifecycleTrigger = next.step().expiresDeadline()
+                        ? CompensationTrigger.deadlineExpired(next.step().name(), DeadlineReached.class.getName(),
+                                next.step().deadlineName(), context.settings().sources().now())
+                        : CompensationTrigger.failureOutcome(next.step().name(),
+                                next.recording().event().getClass().getName(), context.settings().sources().now());
                 lifecycle.startCompensation(trigger.sagaId(), lifecycleTrigger);
                 compensationStarted = true;
                 return;
@@ -269,7 +312,8 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
         stepsRun.add(currentStep);
         touched = new ArrayList<>();
         handledInStep = new ArrayList<>();
-        context.running(currentStep);
+        boolean timeoutRun = next.step().expiresDeadline() && next.recording().event() instanceof DeadlineReached;
+        context.running(currentStep, timeoutRun ? ((DeadlineReached) next.recording().event()).deadlineId() : null);
         try (SagaInstrumentation.Traced span = with.instrumentation().start(SagaInstrumentation.STEP)) {
             span.set(SagaInstrumentation.SAGA_TYPE, trigger.saga().typeName())
                     .set(SagaInstrumentation.STEP_NAME, currentStep)
@@ -284,6 +328,7 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
         }
         context.lifecycle().recordStepCompleted(trigger.sagaId(), currentStep, touched, attempt, handledInStep);
         completedSteps.add(currentStep);
+        deadlines.stepCompleted(currentStep, context.lifecycle());
     }
 
     private static AggregateReference touchedAggregateOf(Object domainEvent, WorkContext context) {
@@ -326,6 +371,12 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
     private SagaHandlingResult duplicate() {
         with.diagnostics().eventDuplicate(correlation.inUnitOfWork(null), currentStep);
         return resultWithoutUnitOfWork(HandlingOutcome.DUPLICATE, trigger.sagaId());
+    }
+
+    private SagaHandlingResult ignoredDeadline(DeadlineReached reached, String reason) {
+        with.diagnostics().deadlineIgnored(correlation.inUnitOfWork(null), reached.deadlineName(),
+                reached.deadlineId(), reason);
+        return resultWithoutUnitOfWork(HandlingOutcome.IGNORED, trigger.sagaId());
     }
 
     private SagaHandlingResult notStarted() {

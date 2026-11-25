@@ -71,4 +71,39 @@ public interface CommandGateway {
      *                                    by the loader or resolver
      */
     void send(Object command);
+
+    /**
+     * Stores {@code command} to be handled at {@code at} or soon after ({@code specs/017-saga-deadlines} FR-007). The
+     * command is stored with the caller's unit of work, so it is scheduled only if that unit of work commits; with no
+     * active unit of work, a unit of work of its own is opened, as for {@link #send(Object)}. When due, it is handled
+     * like a {@code @Command(delivery = OUTBOX)} command sent at scheduling time, with the {@link CommandId} assigned
+     * now: from a saga step, a final failure of it is reported to the saga.
+     *
+     * <p>Requires an outbox that can schedule messages; the default implementation throws
+     * {@link UnsupportedOperationException}.</p>
+     *
+     * @param command the command; non-null, its class annotated {@code @Command(delivery = OUTBOX)}
+     * @param at      when it becomes due; a time in the past is due at once
+     * @return the handle to {@linkplain #cancel(ScheduledCommandId) cancel} it with
+     * @throws IllegalArgumentException      if {@code command} or {@code at} is {@code null}, or the command's type is
+     *                                       not an outbox command
+     * @throws UnsupportedOperationException if the outbox cannot schedule messages
+     */
+    default ScheduledCommandId schedule(Object command, java.time.Instant at) {
+        throw new UnsupportedOperationException("this CommandGateway cannot schedule commands");
+    }
+
+    /**
+     * Withdraws a scheduled command that has not been handed over yet, in the caller's unit of work (or one of its
+     * own). A command scheduled earlier in the same unit of work is simply never stored.
+     *
+     * @param id the handle {@link #schedule(Object, java.time.Instant)} returned; non-null
+     * @return whether a pending command was withdrawn; {@code false} if it is being delivered, was handled, was
+     *         already cancelled, or is unknown
+     * @throws IllegalArgumentException      if {@code id} is {@code null}
+     * @throws UnsupportedOperationException if the outbox cannot schedule messages
+     */
+    default boolean cancel(ScheduledCommandId id) {
+        throw new UnsupportedOperationException("this CommandGateway cannot cancel scheduled commands");
+    }
 }

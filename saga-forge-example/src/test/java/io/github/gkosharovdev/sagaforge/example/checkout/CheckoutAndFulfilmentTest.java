@@ -114,4 +114,20 @@ class CheckoutAndFulfilmentTest {
         assertThat(big.status()).isEqualTo(Order.Status.REJECTED);
         assertThat(provider.authorizations()).isEmpty();
     }
+
+    @Test
+    @DisplayName("no courier in two hours: fulfilment voids the authorisation, releases the stock and cancels the order")
+    void courierDeadline() {
+        fixture.when(order.placed());
+
+        fixture.whenTimeElapses(java.time.Duration.ofHours(2))
+                .instance(FulfilmentSaga.class, "o-1")
+                .expectDeadlineExpired("courierAssignment")
+                .expectCompensatedAfter("onCourierNotAssigned");
+
+        String paymentId = provider.authorizations().keySet().iterator().next();
+        assertThat(provider.state(paymentId)).isEqualTo(PaymentProvider.State.VOIDED);
+        assertThat(inventory.available("sku-mug")).isEqualTo(5);
+        assertThat(order.status()).isEqualTo(Order.Status.CANCELLED);
+    }
 }

@@ -99,6 +99,11 @@ final class PostgresTransportHarness implements AutoCloseable {
         return receiver;
     }
 
+    /** Hands {@code event} to the engine directly, as an in-process caller would, without the relay. */
+    void engineReceive(Object event) {
+        engine.receive(event);
+    }
+
     void publish(Object event) {
         engine.eventPublisher().publish(event);
     }

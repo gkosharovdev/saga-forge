@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
@@ -11,8 +12,10 @@ import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineSagaLifecycle.PendingWrite;
+import io.opentelemetry.api.common.Attributes;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,11 +45,13 @@ import java.util.function.Supplier;
  *   <li>{@code work.perform(context)}; the work binds this unit of work as the thread's recorder around user code
  *       ({@link WorkContext#recording(Runnable)}).</li>
  *   <li>A reported failure, or a transaction found rollback-only, fails the unit of work.</li>
- *   <li>Instance scope: drain the lifecycle and {@code save(instance, entries)}.</li>
+ *   <li>Instance scope: drain the lifecycle; cancel the scheduled messages of the deadlines it closed with
+ *       {@code Outbox.cancel(ids)}, inside the transaction (017); then {@code save(instance, entries)}.</li>
  *   <li>Build the batch: every recorded event the work did not run itself, in recording order, then the outcome event
  *       of the drained write if it has one (011; unless outcome events are switched off); the outbox commands, in send
- *       order; every recorded event, then the outcome event, as {@code recordedEvents}. It is empty when there is no
- *       event to hand on and no command, unless the outbox observes recorded events and some were recorded.</li>
+ *       order; every recorded event, then the outcome event, as {@code recordedEvents}; the deadlines the lifecycle
+ *       opened and the commands scheduled, as {@code scheduled} (017). It is empty when there is no event to hand on,
+ *       no command and nothing scheduled, unless the outbox observes recorded events and some were recorded.</li>
  *   <li>{@code IN_TRANSACTION}: {@code store(batch)} before {@code commit()}, inside the transaction, and
  *       {@code committed(batch)} once the caller {@linkplain Committed#release() releases} the result.
  *       {@code AFTER_COMMIT}: {@code store(batch)} on release, after the caller released the instance lock; its
@@ -179,6 +184,7 @@ final class UnitOfWork implements BoundUnitOfWork {
     private final EngineSettings settings;
     private final Diagnostics diagnostics;
     private final CommandGateway gateway;
+    private final SagaInstrumentation instrumentation;
     private final SagaModel saga;
     private final String sagaId;
     private final String unitOfWorkId;
@@ -187,6 +193,10 @@ final class UnitOfWork implements BoundUnitOfWork {
     private final CommandIds commandIds;
     private final List<Recording> recorded = new ArrayList<>();
     private final List<OutgoingCommand> outboxCommands = new ArrayList<>();
+    private final List<ScheduledMessage> scheduled = new ArrayList<>();
+    private final List<String> toCancel = new ArrayList<>();
+    private List<String> cancelledDeadlines = List.of();
+    private int scheduledCommands;
     private Work<?, ?> work;
     private WorkContext context;
     private Optional<OutgoingMessages> batch = Optional.empty();
@@ -195,9 +205,10 @@ final class UnitOfWork implements BoundUnitOfWork {
     private Throwable firstFailure;
 
     private UnitOfWork(Scope scope, EngineSettings settings, Diagnostics diagnostics, CommandGateway gateway,
-            SagaModel saga, String sagaId, String unitOfWorkId, Correlation correlation,
-            EngineSagaLifecycle lifecycle) {
+            SagaInstrumentation instrumentation, SagaModel saga, String sagaId, String unitOfWorkId,
+            Correlation correlation, EngineSagaLifecycle lifecycle) {
         this.scope = scope;
+        this.instrumentation = instrumentation;
         this.settings = settings;
         this.diagnostics = diagnostics;
         this.gateway = gateway;
@@ -218,7 +229,8 @@ final class UnitOfWork implements BoundUnitOfWork {
     static UnitOfWork forInstance(Collaborators with, SagaModel saga, String sagaId, Correlation about) {
         EngineSettings settings = with.settings();
         String id = about.unitOfWorkId() != null ? about.unitOfWorkId() : settings.sources().newUnitOfWorkId();
-        return new UnitOfWork(Scope.INSTANCE, settings, with.diagnostics(), with.gateway(), saga, sagaId, id,
+        return new UnitOfWork(Scope.INSTANCE, settings, with.diagnostics(), with.gateway(), with.instrumentation(),
+                saga, sagaId, id,
                 about.instance(sagaId).inUnitOfWork(id),
                 new EngineSagaLifecycle(saga, settings.storage(), settings.sources()));
     }
@@ -229,14 +241,15 @@ final class UnitOfWork implements BoundUnitOfWork {
      */
     static UnitOfWork forNewInstance(Collaborators with, SagaModel saga, EngineSagaLifecycle lifecycle,
             String sagaId) {
-        return new UnitOfWork(Scope.NEW_INSTANCE, with.settings(), with.diagnostics(), with.gateway(), saga, sagaId,
+        return new UnitOfWork(Scope.NEW_INSTANCE, with.settings(), with.diagnostics(), with.gateway(),
+                with.instrumentation(), saga, sagaId,
                 null, new Correlation(null, saga.typeName(), sagaId, null), lifecycle);
     }
 
     /** A unit of work outside any saga instance, with a fresh unit of work id. */
     static UnitOfWork standalone(EngineSettings settings, Diagnostics diagnostics) {
         String id = settings.sources().newUnitOfWorkId();
-        return new UnitOfWork(Scope.STANDALONE, settings, diagnostics, null, null, null, id,
+        return new UnitOfWork(Scope.STANDALONE, settings, diagnostics, null, null, null, null, id,
                 new Correlation(null, null, null, id), null);
     }
 
@@ -347,6 +360,24 @@ final class UnitOfWork implements BoundUnitOfWork {
         outboxCommands.add(command);
     }
 
+    @Override
+    public String nextScheduledMessageId() {
+        return unitOfWorkId + ":scheduled:" + (++scheduledCommands);
+    }
+
+    @Override
+    public void recordScheduled(ScheduledMessage message) {
+        scheduled.add(message);
+    }
+
+    @Override
+    public boolean cancelScheduled(String messageId) {
+        if (scheduled.removeIf(message -> message.messageId().equals(messageId))) {
+            return true;
+        }
+        return settings.outbox().cancel(List.of(messageId)).contains(messageId);
+    }
+
     /** Throws the first reported failure, if any. */
     void failIfReported() {
         if (firstFailure != null) {
@@ -372,6 +403,12 @@ final class UnitOfWork implements BoundUnitOfWork {
         if (lifecycle != null) {
             PendingWrite write = lifecycle.drain(sagaId);
             outcome = settings.outcomeEvents() ? write.outcome() : Optional.empty();
+            scheduled.addAll(write.scheduled());
+            toCancel.addAll(write.cancelled().keySet());
+            cancelledDeadlines = write.cancelled().values().stream().toList();
+            if (!toCancel.isEmpty()) {
+                settings.outbox().cancel(List.copyOf(toCancel));
+            }
             writing = true;
             settings.storage().save(write.instance(), write.entries());
             writing = false;
@@ -382,6 +419,25 @@ final class UnitOfWork implements BoundUnitOfWork {
         }
         writing = true;
         transaction.commit();
+        countDeadlines();
+    }
+
+    /** {@code saga_forge.deadlines} with {@code started} and {@code cancelled} for a committed write (017). */
+    private void countDeadlines() {
+        if (instrumentation == null || saga == null) {
+            return;
+        }
+        scheduled.stream()
+                .filter(message -> message.payload() instanceof DeadlineReached)
+                .forEach(message -> countDeadline(((DeadlineReached) message.payload()).deadlineName(), "started"));
+        cancelledDeadlines.forEach(name -> countDeadline(name, "cancelled"));
+    }
+
+    private void countDeadline(String name, String event) {
+        instrumentation.count(SagaInstrumentation.DEADLINES_COUNTER, Attributes.builder()
+                .put(SagaInstrumentation.SAGA_TYPE, saga.typeName())
+                .put(SagaInstrumentation.DEADLINE_NAME, name)
+                .put(SagaInstrumentation.DEADLINE_EVENT, event).build());
     }
 
     private <T, R> Result<T, R> failed(LocalTransaction transaction, Throwable thrown) {
@@ -394,6 +450,8 @@ final class UnitOfWork implements BoundUnitOfWork {
     private void discard(LocalTransaction transaction, Throwable cause) {
         recorded.clear();
         outboxCommands.clear();
+        scheduled.clear();
+        toCancel.clear();
         batch = Optional.empty();
         outcome = Optional.empty();
         LocalTransactions.rollBackAfter(settings.transactions(), transaction, cause);
@@ -447,11 +505,11 @@ final class UnitOfWork implements BoundUnitOfWork {
         });
         outcome.ifPresent(events::add);
         outcome.ifPresent(recordedEvents::add);
-        boolean nothingToHandOn = events.isEmpty() && outboxCommands.isEmpty();
+        boolean nothingToHandOn = events.isEmpty() && outboxCommands.isEmpty() && scheduled.isEmpty();
         if (nothingToHandOn && (recordedEvents.isEmpty() || !settings.outbox().observesRecordedEvents())) {
             return Optional.empty();
         }
         return Optional.of(new OutgoingMessages(unitOfWorkId, saga == null ? null : saga.typeName(), sagaId, events,
-                List.copyOf(outboxCommands), recordedEvents));
+                List.copyOf(outboxCommands), recordedEvents, List.copyOf(scheduled)));
     }
 }

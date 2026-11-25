@@ -345,4 +345,124 @@ public abstract class MessageStoreContract {
         return log().query(MessageQuery.builder().build()).stream().filter(m -> m.messageId().equals(id))
                 .findFirst().orElseThrow().status();
     }
+
+    // ---- specs/017-saga-deadlines: scheduling (contracts/message-store-scheduling.md) ----
+
+    protected static NewMessage scheduled(String id, Instant notBefore) {
+        return new NewMessage(id, MessageKind.EVENT, Paid.class.getName(), new Paid("o-" + id, 1), null, null, "Saga",
+                "s-1", T0, Map.of(), notBefore);
+    }
+
+    protected static NewMessage scheduledCommand(String sagaId, Instant notBefore) {
+        CommandId commandId = CommandId.of(sagaId, "step", Paid.class.getName(), 7);
+        return new NewMessage(commandId.value(), MessageKind.COMMAND, Paid.class.getName(), new Paid("o-sc", 2),
+                commandId, null, "Saga", sagaId, T0, Map.of(), notBefore);
+    }
+
+    private java.util.Set<String> cancelCommitted(Instant at, String... ids) {
+        java.util.concurrent.atomic.AtomicReference<java.util.Set<String>> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        inTransaction(tx -> result.set(log().cancel(tx, List.of(ids), at)));
+        return result.get();
+    }
+
+    @Test
+    @DisplayName("017: the store supports scheduling")
+    void schedulingSupported() {
+        assertThat(log().supportsScheduling()).isTrue();
+    }
+
+    @Test
+    @DisplayName("017: a scheduled message is not leasable before its notBefore, and leasable from then on")
+    void notLeasedBeforeDue() {
+        Instant due = T0.plus(Duration.ofMinutes(15));
+        appendCommitted(scheduled("s1", due), scheduledCommand("saga-1", due));
+
+        assertThat(leaseIds("c", T0)).isEmpty();
+        assertThat(leaseIds("c", due.minusMillis(1))).isEmpty();
+        assertThat(leaseIds("c", due)).containsExactlyInAnyOrder("s1",
+                CommandId.of("saga-1", "step", Paid.class.getName(), 7).value());
+    }
+
+    @Test
+    @DisplayName("017: a scheduled message appended in a rolled-back transaction is never stored")
+    void scheduledRollback() {
+        LocalTransaction tx = transactions().begin();
+        log().append(tx, List.of(scheduled("s1", T0)));
+        tx.rollback();
+        assertThat(leaseIds("c", T0.plus(Duration.ofDays(1)))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("017: a message not yet due never holds back a later message")
+    void scheduledDoesNotBlock() {
+        appendCommitted(scheduled("s1", T0.plus(Duration.ofHours(2))), event("a", "k1"), event("b", null));
+        assertThat(leaseIds("c", T0)).containsExactly("a", "b");
+    }
+
+    @Test
+    @DisplayName("017: overdue messages are all leasable at once, in position order")
+    void overdueInPositionOrder() {
+        appendCommitted(scheduled("late", T0.plusSeconds(60)), scheduled("early", T0.plusSeconds(10)));
+        assertThat(leaseIds("c", T0.plus(Duration.ofDays(3)))).containsExactly("late", "early");
+    }
+
+    @Test
+    @DisplayName("017: cancel withdraws pending messages, due or not, and reports what it cancelled")
+    void cancelPending() {
+        appendCommitted(scheduled("future", T0.plus(Duration.ofHours(1))), scheduled("due", T0));
+
+        assertThat(cancelCommitted(T0, "future", "due", "unknown")).containsExactlyInAnyOrder("future", "due");
+
+        assertThat(leaseIds("c", T0.plus(Duration.ofDays(1)))).isEmpty();
+        List<StoredMessage> cancelled = log().query(MessageQuery.builder()
+                .statuses(MessageStatus.CANCELLED).build());
+        assertThat(cancelled).extracting(StoredMessage::messageId).containsExactlyInAnyOrder("future", "due");
+        assertThat(cancelled).allSatisfy(message -> assertThat(message.consumedAt()).isEqualTo(T0));
+    }
+
+    @Test
+    @DisplayName("017: cancel leaves leased, consumed, set-aside and cancelled messages unchanged")
+    void cancelLeavesOthers() {
+        appendCommitted(scheduled("leased", T0), scheduled("consumed", T0), scheduled("aside", T0),
+                scheduled("twice", T0.plusSeconds(60)));
+        log().lease("c", T0, LEASE, 100);
+        log().markConsumed("c", "consumed", T0);
+        log().setAside("c", "aside", new DeliveryFailure("x.Y", "boom", T0), "MAX_ATTEMPTS");
+        cancelCommitted(T0, "twice");
+
+        assertThat(cancelCommitted(T0, "leased", "consumed", "aside", "twice")).isEmpty();
+        assertThat(log().query(MessageQuery.builder().statuses(MessageStatus.UNCONSUMED).build()))
+                .extracting(StoredMessage::messageId).containsExactly("leased");
+    }
+
+    @Test
+    @DisplayName("017: a message whose lease expired can be cancelled")
+    void cancelAfterLeaseExpiry() {
+        appendCommitted(scheduled("s1", T0));
+        log().lease("c", T0, LEASE, 100);
+        assertThat(cancelCommitted(T0.plus(LEASE).plusSeconds(1), "s1")).containsExactly("s1");
+    }
+
+    @Test
+    @DisplayName("017: a cancel in a rolled-back transaction cancels nothing")
+    void cancelRollback() {
+        appendCommitted(scheduled("s1", T0));
+        LocalTransaction tx = transactions().begin();
+        log().cancel(tx, List.of("s1"), T0);
+        tx.rollback();
+        assertThat(leaseIds("c", T0)).containsExactly("s1");
+    }
+
+    @Test
+    @DisplayName("017: leaseholder writes on a cancelled message lose the lease, and retention removes it")
+    void cancelledIsTerminal() {
+        appendCommitted(scheduled("s1", T0));
+        log().lease("c", T0, LEASE, 100);
+        cancelCommitted(T0.plus(LEASE).plusSeconds(1), "s1");
+
+        assertThatThrownBy(() -> log().markConsumed("c", "s1", T0)).isInstanceOf(LeaseLostException.class);
+        assertThat(log().purgeConsumed(T0.plus(Duration.ofDays(1)), 100)).isEqualTo(1);
+        assertThat(log().query(MessageQuery.builder().build())).isEmpty();
+    }
 }
