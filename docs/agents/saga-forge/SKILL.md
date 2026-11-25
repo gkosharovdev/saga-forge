@@ -98,7 +98,10 @@ public class OrderProcessingSaga {
   (`phase()` `STEP` or `COMPENSATION`) or `SagaCompensated`, with `@TransactionalEventListener` or
   `@ApplicationModuleListener`. Deduplicate on `eventId()` (`sagaId:STATUS`); delivery is at least once.
 - Use `@Command(delivery = CommandDelivery.OUTBOX)` when the handler must run after the sending step commits and its
-  failure must not roll the step back.
+  failure must not roll the step back. If it fails for good (a `FinalFailure` at once, anything else after the
+  transport's `max-attempts`), the saga that sent it compensates every completed step, the sender included; the
+  trigger's kind is `COMMAND_FAILED` and it names the command type. The transport retries it with its own backoff,
+  never the step's `@RetryPolicy`. In `SagaFixture`, `outboxCommandAttempts(n)` (default 1) plays `max-attempts`.
 - With the starter, a saga that needs collaborators is a `@Scope("prototype")` bean; handler hosts are beans.
 - Test with `SagaFixture.of(Saga.class).build().given(...).when(...).expectCommands(...)`; use `.handlers(...)` to run
   real handlers and `givenAggregates(...)` to seed aggregates.

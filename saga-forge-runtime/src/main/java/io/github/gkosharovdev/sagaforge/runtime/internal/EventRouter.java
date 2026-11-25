@@ -82,16 +82,18 @@ final class EventRouter {
     private final Collaborators with;
     private final EngineSettings settings;
     private final InstanceLocks startLocks = new InstanceLocks();
-    private final InstanceLocks instanceLocks = new InstanceLocks();
+    private final InstanceLocks instanceLocks;
 
     /**
-     * @param sagas the registered saga types, in registration order
-     * @param with  the collaborators every unit of work shares
+     * @param sagas         the registered saga types, in registration order
+     * @param with          the collaborators every unit of work shares
+     * @param instanceLocks the instance locks, shared with {@link CommandFailureHandler} (012)
      */
-    EventRouter(List<SagaModel> sagas, Collaborators with) {
+    EventRouter(List<SagaModel> sagas, Collaborators with, InstanceLocks instanceLocks) {
         this.sagas = List.copyOf(sagas);
         this.with = with;
         this.settings = with.settings();
+        this.instanceLocks = instanceLocks;
     }
 
     HandlingReport receive(Object event) {

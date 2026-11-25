@@ -102,7 +102,7 @@ class HandlerModeTest {
     }
 
     @Test
-    @DisplayName("scenario 4: an outbox command is handled after the commit; its failure does not roll the step back")
+    @DisplayName("scenario 4: an outbox command is handled after the commit; its failure compensates, never rolls back")
     void outboxCommands() {
         ParcelStore parcels = new ParcelStore().with(new Parcel("p-1"));
         Notifier notifier = new Notifier();
@@ -123,7 +123,8 @@ class HandlerModeTest {
         Then failed = failing.when(new ParcelPacked("p-2"))
                 .expectCompletedStep("packed")
                 .expectOutcome(HandlingOutcome.WAITING)
-                .expectStatus(SagaStatus.RUNNING)
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectCompensatedAfter("packed")
                 .expectCommands(new LabelParcel("p-2"));
         assertThat(failed.result().outboxFailures()).singleElement()
                 .satisfies(failure -> assertThat(failure).hasMessage("mail down"));

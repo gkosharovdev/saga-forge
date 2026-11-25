@@ -140,6 +140,39 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
   `retryOn`).
 - `result().commands()` holds the commands of the attempts that committed; `result().allAttempts()` every attempt.
 
+### A failing outbox command
+
+An outbox command that fails is treated as the in-memory transport treats it: a `FinalFailure` is given up on after one
+attempt, any other failure after `outboxCommandAttempts(n)` attempts (default 1, the transport's `max-attempts` in
+production). The saga that sent it then compensates in the same `when` step, and the outcome event's trigger has kind
+`COMMAND_FAILED`.
+
+```java
+@Test
+@DisplayName("a capture refused for good gives the stock back and cancels the order, as an impossible delivery does")
+void refusedCaptureCancelsOrder() {
+    SagaFixture refusing = SagaFixture.of(FulfilmentSaga.class)
+            .register(LogisticsService.class, PaymentService.class, InventoryService.class)
+            .failCommand(CapturePaymentCommand.class, AuthorizationExpired::new)
+            .build();
+
+    refusing.given(CONFIRMED)
+            .when(new ShipmentDispatchedEvent("shipment-1", "o-1"))
+            .expectCompensations("cancelOrder")
+            .expectCommand(ReleasePaymentCommand.class, release -> release.paymentId().equals("payment-1"))
+            .expectCommand(CancelOrderCommand.class, cancel -> cancel.orderId().equals("o-1"))
+            .expectCompensatedAfter("onShipmentDispatched")
+            .expectFailure(AuthorizationExpired.class, FailureClassification.FINAL)
+            .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                    compensated.trigger().kind() == CompensationTriggerKind.COMMAND_FAILED
+                            && CapturePaymentCommand.class.getName().equals(compensated.trigger().commandType()));
+}
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/FulfilmentSagaFixtureTest.java`.
+
+`result().outboxFailures()` still lists every failed attempt; `result().commands()` leaves out the failed command.
+
 ## Expectations
 
 | Method | Checks |
@@ -203,7 +236,8 @@ your own assertions. Build the fixture with `outcomeEvents(false)` to match an a
 
 ## Gotchas
 
-- One event at a time on the test thread: no concurrency, redelivery, leases or cross-aggregate ordering.
+- One event at a time on the test thread: no concurrency, leases or cross-aggregate ordering, and a failing outbox
+  command is delivered again at once, without the transport's backoff.
 - In record mode, a saga that sends an `@Command(delivery = OUTBOX)` command needs the handler's class registered
   (`register(HandlerClass.class)`), or `build()` fails rule R23.
 - A `Long` stays a `Long` in the fixture, while Postgres reads a small one back as `Integer`.

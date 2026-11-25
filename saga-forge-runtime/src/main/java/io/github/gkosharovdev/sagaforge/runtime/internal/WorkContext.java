@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
+import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.SagaModel.Injection;
 
@@ -56,6 +57,16 @@ final class WorkContext {
     /** This unit of work's correlation. */
     Correlation correlation() {
         return correlation;
+    }
+
+    /**
+     * The transaction this unit of work runs in, for a work that hands it on (012: a transport's set-aside).
+     *
+     * @throws IllegalStateException if no transaction is active, which a running unit of work never allows
+     */
+    LocalTransaction transaction() {
+        return settings.transactions().current().orElseThrow(() -> new IllegalStateException(
+                "no transaction is active in unit of work " + unitOfWorkId));
     }
 
     /** The engine's settings. */

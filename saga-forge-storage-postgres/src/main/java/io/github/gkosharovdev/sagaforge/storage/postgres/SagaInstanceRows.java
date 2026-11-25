@@ -447,6 +447,9 @@ final class SagaInstanceRows {
         if (trigger.eventType() != null) {
             plain.put(EVENT_TYPE, trigger.eventType());
         }
+        if (trigger.commandType() != null) {
+            plain.put(COMMAND_TYPE, trigger.commandType());
+        }
         if (trigger.failure() != null) {
             plain.put(FAILURE, failureToPlain(trigger.failure()));
         }
@@ -467,6 +470,8 @@ final class SagaInstanceRows {
                     requireType(String.class, field + "." + STEP_NAME, plain.get(STEP_NAME)),
                     plain.get(EVENT_TYPE) == null ? null
                             : requireType(String.class, field + "." + EVENT_TYPE, plain.get(EVENT_TYPE)),
+                    plain.get(COMMAND_TYPE) == null ? null
+                            : requireType(String.class, field + "." + COMMAND_TYPE, plain.get(COMMAND_TYPE)),
                     plain.get(FAILURE) == null ? null : failureFromPlain(field + "." + FAILURE, plain.get(FAILURE)),
                     Instant.parse(requireType(String.class, field + "." + AT, plain.get(AT))));
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {

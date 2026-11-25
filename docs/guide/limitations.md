@@ -15,6 +15,7 @@ status in later releases.
 | 7 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
 | 8 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
 | 9 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
+| 10 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |
 
 Further constraints of the model:
 
@@ -30,6 +31,8 @@ Further constraints of the model:
   their commands must be idempotent.
 - **An unmarked exception ends the saga `FAILED` without compensation**; mark exceptions `TransientFailure` or
   `FinalFailure` (or list them in `retryOn`) when the difference matters.
+- **An outbox command's failure is retried with the transport's backoff**, not the sending step's `@RetryPolicy`; an
+  unmarked exception there is retried up to `saga-forge.transport.max-attempts` and then compensates the saga.
 - **Delivery order is per aggregate, not per saga instance** (G-007-04); the transport is at least once.
 - **Not available**: Kafka transport, MySQL and MongoDB storage, a Quarkus extension, programmatic abort, Spring test
   slices for the fixture (G-009-01).

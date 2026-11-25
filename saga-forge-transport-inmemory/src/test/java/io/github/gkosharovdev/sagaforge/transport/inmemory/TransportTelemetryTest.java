@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
@@ -20,6 +22,7 @@ import io.github.gkosharovdev.sagaforge.runtime.support.TelemetryAssertions;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssued;
@@ -31,6 +34,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessa
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportAcceptanceSuite;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
@@ -47,6 +51,9 @@ class TransportTelemetryTest {
     private static final AttributeKey<String> SAGA_TYPE = AttributeKey.stringKey("saga_forge.saga.type");
     private static final AttributeKey<String> MESSAGE_KIND = AttributeKey.stringKey("saga_forge.message.kind");
     private static final AttributeKey<String> COMMAND_DELIVERY = AttributeKey.stringKey("saga_forge.command.delivery");
+    private static final AttributeKey<String> COMMAND_CLASSIFICATION =
+            AttributeKey.stringKey("saga_forge.command.classification");
+    private static final AttributeKey<Boolean> COMMAND_REPORTED = AttributeKey.booleanKey("saga_forge.command.reported");
     private static final AttributeKey<String> MESSAGING_SYSTEM = AttributeKey.stringKey("messaging.system");
 
     private final TelemetryAssertions telemetry = new TelemetryAssertions();
@@ -180,5 +187,32 @@ class TransportTelemetryTest {
         assertThat(telemetry.metric("saga_forge.handle.duration")).isPresent();
         assertThat(telemetry.counter("saga_forge.saga.ended", io.opentelemetry.api.common.Attributes.of(SAGA_TYPE,
                 BillingSaga.class.getName()))).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("012 FR-001/FR-016: a declined charge is reported once, compensates the saga and is counted")
+    void finalCommandFailureReported() {
+        cards.decline();
+        runtime.eventPublisher().publish(new InvoiceIssued("i-4"));
+
+        await(() -> storage.committed().all().stream().anyMatch(i -> i.status() == SagaStatus.COMPENSATED), WAIT,
+                "the billing saga to compensate");
+        await(() -> log.all().stream().anyMatch(m -> m.payload() instanceof SagaCompensated), WAIT,
+                "the outcome event");
+
+        assertThat(cards.charges()).hasSize(1);
+        SagaCompensated outcome = log.all().stream().map(m -> m.payload()).filter(SagaCompensated.class::isInstance)
+                .map(SagaCompensated.class::cast).findFirst().orElseThrow();
+        assertThat(outcome.trigger().kind()).isEqualTo(CompensationTriggerKind.COMMAND_FAILED);
+        assertThat(outcome.trigger().commandType()).isEqualTo(ChargeCard.class.getName());
+        assertThat(outcome.trigger().stepName()).isEqualTo(BillingSaga.START_STEP);
+        await(() -> telemetry.named("saga_forge.delivery").stream()
+                .anyMatch(span -> "final".equals(attribute(span, COMMAND_CLASSIFICATION))), WAIT, "the delivery span");
+        SpanData delivery = telemetry.named("saga_forge.delivery").stream()
+                .filter(span -> "final".equals(attribute(span, COMMAND_CLASSIFICATION))).findFirst().orElseThrow();
+        assertThat(attribute(delivery, COMMAND_REPORTED)).isTrue();
+        telemetry.collectMetrics();
+        assertThat(telemetry.counter("saga_forge.command.failures", Attributes.of(
+                AttributeKey.stringKey("classification"), "final"))).isEqualTo(1);
     }
 }

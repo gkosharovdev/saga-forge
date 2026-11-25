@@ -31,7 +31,10 @@ final class ForwardTransition {
      * unchanged. Since 006: a completed step keeps its {@code completionSequence}; its compensation only moves
      * {@code null -> NOT_ATTEMPTED | NOTHING_TO_COMPENSATE} and {@code NOT_ATTEMPTED -> COMPENSATED | FAILED}; a
      * recorded compensation trigger never changes; {@code COMPENSATING} only moves to {@code COMPENSATED} or
-     * {@code COMPENSATION_FAILED} (specs/006-saga-compensation contracts/storage-delta.md). A previously completed step missing
+     * {@code COMPENSATION_FAILED} (specs/006-saga-compensation contracts/storage-delta.md). Since 012: a compensation also moves
+ * {@code COMPENSATED -> FAILED}, but only when the same save moves the instance {@code COMPENSATING ->
+ * COMPENSATION_FAILED}: a command that compensation sent failed for good
+ * ({@code specs/012-outbox-command-failure-feedback} data-model.md). A previously completed step missing
      * from {@code incoming} is a violation; a previously {@code NOT_RUN} step may be missing, and anything else
      * may differ ({@code .specify/memory/memory.md} G-003-15).
      *
@@ -45,6 +48,8 @@ final class ForwardTransition {
      */
     static void requireForwardTransition(SagaInstance previous, SagaInstance incoming) {
         String sagaId = incoming.sagaId();
+        boolean compensationFailing = previous.status() == SagaStatus.COMPENSATING
+                && incoming.status() == SagaStatus.COMPENSATION_FAILED;
         for (Map.Entry<String, StepRecord> step : new TreeMap<>(previous.steps()).entrySet()) {
             StepRecord before = step.getValue();
             if (before.status() != StepStatus.COMPLETED) {
@@ -76,7 +81,7 @@ final class ForwardTransition {
                         + " recorded completionSequence " + before.completionSequence()
                         + " but the incoming snapshot has " + now.completionSequence());
             }
-            if (!compensationMovesForward(before.compensation(), now.compensation())) {
+            if (!compensationMovesForward(before.compensation(), now.compensation(), compensationFailing)) {
                 throw new ConcurrentSagaUpdateException(sagaId, "completed step " + step.getKey()
                         + " recorded compensation " + describe(before.compensation())
                         + " but the incoming snapshot has " + describe(now.compensation()));
@@ -100,7 +105,8 @@ final class ForwardTransition {
         }
     }
 
-    private static boolean compensationMovesForward(StepCompensation before, StepCompensation now) {
+    private static boolean compensationMovesForward(StepCompensation before, StepCompensation now,
+            boolean compensationFailing) {
         if (before == null) {
             return now == null || now.status() == CompensationStatus.NOT_ATTEMPTED
                     || now.status() == CompensationStatus.NOTHING_TO_COMPENSATE;
@@ -108,6 +114,10 @@ final class ForwardTransition {
         if (before.status() == CompensationStatus.NOT_ATTEMPTED) {
             return now != null && (now.status() == CompensationStatus.NOT_ATTEMPTED
                     || now.status() == CompensationStatus.COMPENSATED || now.status() == CompensationStatus.FAILED);
+        }
+        if (compensationFailing && before.status() == CompensationStatus.COMPENSATED && now != null
+                && now.status() == CompensationStatus.FAILED) {
+            return true;
         }
         return before.equals(now);
     }

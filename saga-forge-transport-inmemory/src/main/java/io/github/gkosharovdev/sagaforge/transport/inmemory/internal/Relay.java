@@ -18,6 +18,8 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
@@ -50,6 +52,13 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
  *       handler's transaction.</li>
  *   <li>A failure records the attempt and makes the message due again after a growing backoff; at
  *       {@code maxAttempts} it is set aside. An unreadable payload is set aside at once.</li>
+ *   <li>A failed command is classified by its markers ({@code FailureClassification.of}): a {@code FINAL} one is not
+ *       retried. A saga-scoped command that failed for good ({@code FINAL}, or at {@code maxAttempts}, or unreadable)
+ *       is reported to {@link CommandReceiver#receiveFailure} and set aside inside the reaction's transaction; if the
+ *       report throws, the attempt counts as failed and the message is redelivered
+ *       ({@code specs/012-outbox-command-failure-feedback} contracts/relay-classification.md). Like Spring Kafka's
+ *       {@code DefaultErrorHandler}, the relay retries with its own back-off and hands what it gives up on to a
+ *       recoverer: here, the saga runtime.</li>
  *   <li>The same thread renews the leases of deliveries still running, refreshes the heartbeat and removes consumed
  *       messages older than the retention.</li>
  * </ul>
@@ -57,6 +66,10 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 public final class Relay {
 
     private static final long NANOS_PER_MILLI = 1_000_000L;
+
+    /** The set-aside reason of a command whose handler failed with a {@code FinalFailure} (012). */
+    static final String FINAL_FAILURE = "FINAL_FAILURE";
+    static final String MAX_ATTEMPTS = "MAX_ATTEMPTS";
 
     private final MessageStore messageStore;
     private final TransactionBoundary transactions;
@@ -252,7 +265,13 @@ public final class Relay {
         }
         LeasedMessages leased = messageStore.lease(consumerId, clock.instant(), settings.leaseDuration(), room);
         for (UnreadableMessageException unreadable : leased.unreadable()) {
-            setAside(unreadable.leased(), unreadable, "UNREADABLE: " + unreadable.getMessage());
+            String reason = "UNREADABLE: " + unreadable.getMessage();
+            StoredMessage message = unreadable.leased();
+            if (reportable(message)) {
+                report(message, unreadable, FailureClassification.FINAL, reason, null);
+            } else {
+                setAside(message, unreadable, reason);
+            }
         }
         for (StoredMessage message : leased.readable()) {
             inFlight.put(message.messageId(), message);
@@ -349,7 +368,11 @@ public final class Relay {
             logger.log(Level.WARNING, () -> "saga.transport.leaseLost message=" + message.messageId());
         } catch (RuntimeException | Error failure) {
             span.fail(failure);
-            failed(message, failure);
+            if (message.kind() == MessageKind.COMMAND) {
+                commandFailed(message, failure, span);
+            } else {
+                failed(message, failure);
+            }
         } finally {
             span.close();
             inFlight.remove(message.messageId());
@@ -358,12 +381,78 @@ public final class Relay {
     }
 
     private void failed(StoredMessage message, Throwable failure) {
-        Instant now = clock.instant();
-        DeliveryFailure recorded = DeliveryFailure.of(failure, now);
         if (message.attempts() >= settings.maxAttempts()) {
-            setAside(message, failure, "MAX_ATTEMPTS");
+            setAside(message, failure, MAX_ATTEMPTS);
             return;
         }
+        retryLater(message, failure);
+    }
+
+    /**
+     * A failed command (contracts/relay-classification.md): a {@code FINAL} failure, or any failure at
+     * {@code maxAttempts}, is given up on, reported if the command is saga-scoped and set aside; any other failure is
+     * retried after the back-off.
+     */
+    private void commandFailed(StoredMessage message, Throwable failure, TransportInstrumentation.Delivery span) {
+        FailureClassification classification = FailureClassification.of(failure);
+        span.classified(classification);
+        boolean isFinal = classification == FailureClassification.FINAL;
+        if (!isFinal && message.attempts() < settings.maxAttempts()) {
+            retryLater(message, failure);
+            return;
+        }
+        String reason = isFinal ? FINAL_FAILURE : MAX_ATTEMPTS;
+        if (reportable(message)) {
+            report(message, failure, isFinal ? FailureClassification.FINAL : FailureClassification.EXHAUSTED, reason,
+                    span);
+        } else {
+            setAside(message, failure, reason);
+        }
+    }
+
+    /** A command a saga sent, with a receiver to report it to. */
+    private boolean reportable(StoredMessage message) {
+        return message.kind() == MessageKind.COMMAND && commands != null && message.commandId() != null
+                && message.commandId().sagaScoped();
+    }
+
+    /**
+     * Reports a saga-scoped command that failed for good and sets it aside inside the reaction's transaction (C3).
+     * If the report throws, the attempt counts as failed and the message is redelivered (C4).
+     *
+     * @param span the delivery span, {@code null} for an unreadable message, which has none
+     */
+    private void report(StoredMessage message, Throwable failure, FailureClassification classification,
+            String reason, TransportInstrumentation.Delivery span) {
+        DeliveryFailure recorded = DeliveryFailure.of(failure, clock.instant());
+        CommandFailure report = new CommandFailure(message.commandId(), classification, failure.getClass().getName(),
+                message.attempts());
+        try {
+            commands.receiveFailure(report, tx -> messageStore.setAside(tx, consumerId, message.messageId(),
+                    recorded, reason));
+        } catch (LeaseLostException lost) {
+            logger.log(Level.WARNING, () -> "saga.transport.leaseLost message=" + message.messageId());
+            return;
+        } catch (RuntimeException | Error reportFailure) {
+            logger.log(Level.WARNING, "saga.transport.reportFailed message=" + message.messageId() + " type="
+                    + message.payloadType() + " attempts=" + message.attempts(), reportFailure);
+            retryLater(message, failure);
+            return;
+        }
+        if (span != null) {
+            span.reported(classification);
+        } else {
+            instrumentation.commandReported(classification);
+        }
+        logger.log(Level.WARNING, () -> "saga.transport.setAside message=" + message.messageId() + " type="
+                + message.payloadType() + " attempts=" + message.attempts() + " reason=" + reason
+                + " reported=" + classification, failure);
+    }
+
+    /** Records the failed attempt and makes the message due again after the back-off. */
+    private void retryLater(StoredMessage message, Throwable failure) {
+        Instant now = clock.instant();
+        DeliveryFailure recorded = DeliveryFailure.of(failure, now);
         Duration wait = Backoff.after(message.attempts(), settings.initialBackoff(), settings.maxBackoff());
         try {
             messageStore.recordFailure(consumerId, message.messageId(), recorded, now.plus(wait));

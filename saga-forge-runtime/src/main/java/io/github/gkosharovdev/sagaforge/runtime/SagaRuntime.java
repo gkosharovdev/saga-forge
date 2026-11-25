@@ -8,6 +8,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.opentelemetry.api.OpenTelemetry;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
@@ -15,6 +16,9 @@ import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
+import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import java.util.function.Consumer;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
@@ -72,7 +76,18 @@ public final class SagaRuntime implements EventReceiver {
     private final Diagnostics diagnostics;
     private final CommandGateway commandGateway = command -> started().commandGateway().send(command);
     private final EventPublisher eventPublisher = event -> started().eventPublisher().publish(event);
-    private final CommandReceiver commandReceiver = delivery -> started().receiveCommand(delivery);
+    private final CommandReceiver commandReceiver = new CommandReceiver() {
+
+        @Override
+        public void receive(OutboxCommand delivery) {
+            started().receiveCommand(delivery);
+        }
+
+        @Override
+        public void receiveFailure(CommandFailure failure, Consumer<LocalTransaction> inTransaction) {
+            started().receiveCommandFailure(failure, inTransaction);
+        }
+    };
     private final Object startLock = new Object();
     private volatile State state = State.BUILT;
     private volatile EngineRuntime runtime;

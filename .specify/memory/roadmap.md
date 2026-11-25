@@ -1,6 +1,6 @@
 # Saga Forge Roadmap: next features
 
-**Date**: 2026-11-19 | **Input**: booking-service feedback on 0.1.0
+**Date**: 2026-11-19, updated 2026-11-24 after 011 | **Input**: booking-service feedback on 0.1.0
 (`booking-service/specs/060-saga-forge-migration/saga-forge-feedback.md`) | **Register**: gap IDs refer to
 `.specify/memory/memory.md`
 
@@ -62,8 +62,8 @@ building on unfinished work.
 
 | # | Feature | From | Closes | Removes (adopter) | Priority |
 |---|---|---|---|---|---|
-| 011 | Saga outcome events, `COMPENSATION_FAILED` rename, one unit of work | SF-1 | G-ADOPT-01, G-011-02 | W1, W2 | P1 |
-| 012 | Outbox command failure feedback | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
+| 011 | Saga outcome events, `COMPENSATION_FAILED` rename, one unit of work (**done**, PR #18) | SF-1 | G-ADOPT-01, G-011-02 | W1, W2 | P1 |
+| 012 | Outbox command failure feedback (**done**, `specs/012-outbox-command-failure-feedback`) | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
 | 013 | Active/standby relay | SF-6 | G-007-09 | W9 | P1 |
 | 014 | One event bus with Spring Modulith | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05 | W10 | P1 |
@@ -74,7 +74,8 @@ building on unfinished work.
 | 020 | Spring context tests without a database | SF-12 | G-009-01 | W12 | P2 |
 | later | Derived command ids; extra associations | SF-9, SF-13 | new G-ADOPT-06, G-ADOPT-07 | W14 | P3 |
 
-Dependencies: 012 uses 011's event delivery to tell the instance. 015 reads the history that 011 writes. 017 reuses
+Dependencies: 012 runs its reaction through 011's one `UnitOfWork` and reuses its compensation-start work. 015's
+operator actions are new works on that unit of work and read the lifecycle history it writes. 017 reuses
 the message store's leasing that 013 changes, so it comes after 013. 014 and 016 are independent of the rest.
 
 ---
@@ -86,8 +87,10 @@ questions the spec must settle, and acceptance.
 
 ### 011: Saga outcome events
 
-**Specified and planned**: `specs/011-saga-outcome-events/` (spec, plan, research, contracts). In short:
-- one `UnitOfWork` replaces the runtime's phase-specific unit-of-work and write classes (behaviour-preserving, first);
+**Implemented and tested** (2026-11-20, container suites included; PR #18): `specs/011-saga-outcome-events/`. In short:
+- one `UnitOfWork` replaces the runtime's phase-specific unit-of-work and write classes (behaviour-preserving, first).
+  Every runtime write goes through it (ArchUnit, `UnitOfWorkBoundaryTest`). A work's admission is a typed sealed
+  `Admission<R>` (`Proceed`, or `Skip` with a typed reason), checked against the locked instance before anything runs;
 - `REQUIRES_INTERVENTION` is renamed to `COMPENSATION_FAILED`;
 - `SagaCompleted`, `SagaFailed` (a step or a compensation failed) and `SagaCompensated` are committed with the terminal
   write and delivered through the outbox.
@@ -97,6 +100,12 @@ intervention" signal, since that is an observer's judgement.
 
 ### 012: Outbox command failure feedback
 
+**Done** (2026-11-24, `specs/012-outbox-command-failure-feedback`). The spec settled the open questions: the relay's
+backoff (not `@RetryPolicy`) retries; the relay hands a value (`CommandFailure`) to the runtime's
+`CommandReceiver.receiveFailure` rather than writing a `CommandFailed` event; the outcome event's trigger kind is
+`COMMAND_FAILED`; a `@StartCompensation` step on the failure stays out of scope (G-012-03). The brief below is the
+original proposal.
+
 **Problem.** In-process chaining keeps a multi-step saga in one unit of work, so a rejection rolls everything back and
 compensation never runs. `@Command(delivery = OUTBOX)` gives a separate transaction, but a failing handler goes to the
 relay's retry and set-aside path (`Relay`: retried up to `maxAttempts`, `FinalFailure` not recognised) and the saga
@@ -105,12 +114,17 @@ never learns it. A saga cannot both commit a step on its own and learn that the 
 **Scope.**
 - The relay recognises `FailureClassification` for outbox commands: `FinalFailure` is not retried. Exhausting
   `maxAttempts` counts as `EXHAUSTED`.
-- When an outbox command sent from a saga step fails `FINAL` or `EXHAUSTED`, the engine records a framework event
-  `CommandFailed(commandId, commandType, classification, causeType, attempts)` in the transaction that sets the message
-  aside. It is routed to the sending instance through `CommandId.sagaId`.
+- When an outbox command sent from a saga step fails `FINAL` or `EXHAUSTED`, a framework event
+  `CommandFailed(commandId, commandType, classification, causeType, attempts)` reaches the sending instance, routed
+  through `CommandId.sagaId` (one instance, not by association; the in-memory transport can key it `saga:<sagaId>` like
+  outcome events, so it stays in per-instance order).
+- The reaction runs in the runtime's one `UnitOfWork` (011), not in the relay's set-aside transaction: the relay hands
+  the failure to the runtime, which handles it in `UnitOfWork.forInstance(sagaId)`, reusing the compensation-start work.
+  That keeps one write path, and the Kafka transport later needs only to deliver the failure, not to write saga state.
 - Default reaction: the instance compensates every committed step (006 order), with the failure as the
-  `CompensationTrigger`. Optional: a `@StartCompensation @SagaStep` that takes `CommandFailed` handles it instead, to
-  record a named business outcome.
+  `CompensationTrigger`, and ends with one outcome event (`SagaCompensated`, or `SagaFailed` in the compensation
+  phase). Optional: a `@StartCompensation @SagaStep` that takes `CommandFailed` handles it instead, to record a named
+  business outcome (see the G-011-01 question).
 - A failure of an outbox command sent outside a saga keeps today's set-aside behaviour.
 
 **Out of scope.** A step-level commit boundary (SF-2a). A success notification: success already arrives as the events
@@ -122,12 +136,22 @@ outbox-command failure of a saga's command leads to compensation or a `@StartCom
 **Spec questions.**
 - Does a `TransientFailure` keep using the relay's backoff (bounded by `maxAttempts`) or the step's `@RetryPolicy`? The
   sender's policy is the cleaner rule.
-- What happens when `CommandFailed` reaches an instance that already ended: ignored with a diagnostic, or
-  `REQUIRES_INTERVENTION`?
-- Ties to 011: does `CommandFailed` go through the same event path as outcome events?
+- What happens when `CommandFailed` reaches an instance that already ended? 011's compensation-start work already
+  skips a missing or terminal instance with a diagnostic (`Skip(MISSING_OR_TERMINAL)`), which is the likely answer.
+  `COMPENSATION_FAILED` (formerly `REQUIRES_INTERVENTION`) does not fit: no compensation failed.
+- Ties to 011: does the relay write `CommandFailed` itself (transport-level, the Kafka transport repeats it), or hand
+  the failure to the runtime's `UnitOfWork` (one write path; the brief's default)? Outcome events go through the
+  terminal write's batch and are routed to no saga; `CommandFailed` is routed to exactly one instance.
+- Which `OutcomeTrigger` does the ending outcome event carry: a new trigger kind for a failed command, or
+  `FINAL_FAILURE` with the sending step's name?
+- The optional `@StartCompensation` step on `CommandFailed` meets G-011-01: the scanner accepts only `@DomainEvent`
+  step parameters. Either 012 introduces steps on framework events (and so answers G-011-01 once for both), or it
+  drops the optional step and ships the default compensation only.
 
 **Acceptance.**
-- A three-step saga whose step-3 command (outbox) throws `FinalFailure` compensates steps 2 and 1, newest first.
+- A three-step saga whose step-3 command (outbox) throws `FinalFailure` compensates steps 2 and 1, newest first, and
+  emits exactly one `SagaCompensated`.
+- A `CommandFailed` for an instance that already ended changes nothing and logs a diagnostic.
 - A latency-stubbed remote call inside an outbox handler never runs in the unit of work that holds the instance's
   earlier writes.
 
@@ -187,16 +211,18 @@ exactly once each, durably, after commit.
 ### 015: Saga operations: query, repair, recovery
 
 **Problem.** The engine keeps rich instance state but exposes it only through the `StorageProvider` SPI. There is no
-supported way to find instances, or to get a `FAILED`, `REQUIRES_INTERVENTION`, stranded `CREATED` or stalled
+supported way to find instances, or to get a `FAILED`, `COMPENSATION_FAILED`, stranded `CREATED` or stalled
 `COMPENSATING` instance moving again.
 
 **Scope.**
 - Runtime API `SagaOperations`: `find(sagaId)`, `findByAssociation(property, value)`, `list(filter, page)` (status,
   saga type, updated before/after).
-- Repair: `resumeCompensation(sagaId)` (out of `REQUIRES_INTERVENTION` or a stalled `COMPENSATING`),
+- Repair: `resumeCompensation(sagaId)` (out of `COMPENSATION_FAILED` or a stalled `COMPENSATING`),
   `compensate(sagaId, reason)` (force compensation of committed steps), `markResolved(sagaId, reason)` (operator closes
   it with no further effect), `retry(sagaId)` (see questions).
 - Every action writes lifecycle history with operator, reason and time. Operator identity comes from a host SPI.
+- Each action is a work on 011's one `UnitOfWork`, with an admission that skips instances in the wrong status;
+  `resumeCompensation` reuses the compensation work. A repair that ends an instance emits its outcome event.
 - A view record: steps with attempts, timing, classification, compensation status. Context values excluded by default.
 - Recovery: an optional sweeper that resumes `COMPENSATING` instances with no new event (G-006-05) and stranded
   `CREATED` instances (G-ENG-05).
@@ -217,7 +243,7 @@ terminal status. Principle III: transitions allowed for operator actions.
 - Who may call write operations over HTTP (security decision, G-008-02).
 
 **Acceptance.** A `FAILED` instance whose cause was fixed is retried through the API and completes. A
-`REQUIRES_INTERVENTION` instance is resumed and ends `COMPENSATED`. Each action shows in the history.
+`COMPENSATION_FAILED` instance is resumed and ends `COMPENSATED`. Each action shows in the history.
 
 ### 016: Marker SPI and jMolecules adapter
 
@@ -311,7 +337,8 @@ that triggered them. Only OpenTelemetry trace context travels (010).
   instance and in history, and carried on messages next to `traceContext`.
 - Handlers, steps and compensations can read it (an injected `SagaMetadata`, or a parameter).
 - Starter: capture from and restore to SLF4J's MDC for configured keys (`saga-forge.metadata.mdc-keys`).
-- Included in 015's view and in 011's outcome events.
+- Included in 015's view. Adding it to outcome events changes 011's contract, which carries no context value or saga
+  field on them, so the spec must decide it explicitly.
 
 **Out of scope.** Typed metadata, fixed fields such as "initiator".
 

@@ -183,6 +183,22 @@ public final class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public void setAside(LocalTransaction tx, String consumerId, String messageId, DeliveryFailure failure,
+            String reason) {
+        injected(Operation.SET_ASIDE);
+        synchronized (this) {
+            holder(consumerId, messageId);
+        }
+        scope(tx).onCommit(() -> {
+            synchronized (this) {
+                StoredMessage message = holder(consumerId, messageId);
+                messages.put(messageId, with(message, MessageStatus.SET_ASIDE, message.attempts(),
+                        message.nextAttemptAt(), failure, null, null, null, reason));
+            }
+        });
+    }
+
+    @Override
     public synchronized void release(String consumerId) {
         for (StoredMessage message : List.copyOf(messages.values())) {
             if (consumerId.equals(message.leasedBy())) {

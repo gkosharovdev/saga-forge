@@ -1121,7 +1121,7 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 
 1. ~~011 outcome events, the `COMPENSATION_FAILED` rename, one unit of work (G-ADOPT-01, G-011-02)~~ done
    2026-11-20
-2. 012 outbox command failure feedback (G-ADOPT-02)
+2. 012 outbox command failure feedback (G-ADOPT-02) - done 2026-11-24
 3. 013 active/standby relay (G-007-09)
 4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05)
@@ -1243,7 +1243,10 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   instance never learns it, so a saga cannot both commit a step on its own and compensate when the step's follow-up
   fails; with in-process chaining a multi-step saga is one unit of work and compensation is unreachable.
 - **Origin**: booking-service feedback SF-2 (W3, W4).
-- **Status**: open (roadmap feature 012, option (b); a step-level commit boundary is deferred).
+- **Status**: closed by `specs/012-outbox-command-failure-feedback` (2026-11-24): the relay classifies a failed
+  outbox command, reports a saga-scoped one it gives up on through `CommandReceiver.receiveFailure`, and the runtime
+  compensates the sending instance (trigger kind `COMMAND_FAILED`) with the set-aside in the same transaction. A
+  step-level commit boundary (SF-2a) stays deferred.
 
 ### G-ADOPT-03: Persisted failure messages are not redacted
 - **Description**: `SagaFailure.message` and lifecycle history store raw exception messages, which can contain
@@ -1373,3 +1376,18 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   (research §1 and §2). The user chose the callback on 2026-11-24. If steps may take the report, reconsider a routed
   failure message, which such a step would need.
 - **Status**: open (deferred with G-011-01).
+
+### G-012-04: A crash after the reaction's first commit leaves no report to redeliver
+- **Description**: the reaction to a failed step-sent command commits the compensation start and the set-aside
+  together, then runs each compensation in a unit of work of its own. A crash between those commits leaves the
+  instance `COMPENSATING` and the message set aside, so no redelivered report resumes it; the next event for the
+  instance does (`CompensationFaultInjectionTest.commandFailureCrashThenResume`). Same limit as G-006-05.
+- **Origin**: `specs/012-outbox-command-failure-feedback` T032.
+- **Status**: accepted (revisit with G-006-05, roadmap 015).
+
+### G-012-05: The fixture redelivers a failing outbox command at once
+- **Description**: `SagaFixture`'s loop-back transport delivers a failing outbox command again straight away, up to
+  `outboxCommandAttempts`, with no backoff and without advancing `FixtureClock`; the in-memory transport waits its
+  backoff between attempts. Instances, commands and outcome events still match (`OutboxCommandFailureParityTest`).
+- **Origin**: `specs/012-outbox-command-failure-feedback` T038.
+- **Status**: accepted.

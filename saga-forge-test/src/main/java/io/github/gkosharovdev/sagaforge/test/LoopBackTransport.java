@@ -6,6 +6,8 @@ import java.util.Deque;
 import java.util.List;
 import java.util.function.Consumer;
 
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
@@ -19,7 +21,13 @@ import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
  * The fixture's transport (research §4): an {@code IN_TRANSACTION} outbox that releases a batch only once its unit of
  * work committed, and a dispatcher; what they hand off waits in one queue that {@link #drain} delivers on the test
  * thread, in order, events to the runtime and outbox commands to its {@code CommandReceiver}, until nothing is left.
- * Delivery is exactly once and synchronous; no lease, redelivery or ordering across aggregates is simulated.
+ * Delivery is synchronous; no lease or ordering across aggregates is simulated.
+ *
+ * <p>A failing outbox command is classified as the in-memory transport's relay classifies it
+ * ({@code specs/012-outbox-command-failure-feedback} contracts/fixture.md): a {@code FinalFailure} is given up on after
+ * one attempt, any other failure is delivered again, at once, up to {@code outboxCommandAttempts} attempts. A command a
+ * saga sent that was given up on is reported to {@code CommandReceiver.receiveFailure} as {@code FINAL} or
+ * {@code EXHAUSTED}, so its saga reacts in the same drain. Every failed attempt is handed to {@code commandFailures}.</p>
  *
  * <p>Outcome events ({@code specs/011-saga-outcome-events}) of committed batches are collected for
  * {@link EventResult#outcomeEvents()} instead of being queued: the runtime hands them to no saga.</p>
@@ -29,9 +37,15 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     /** Most deliveries one drain makes before it assumes sagas are feeding each other forever. */
     static final int MAX_DELIVERIES = 10_000;
 
+    private final int outboxCommandAttempts;
     private final Deque<Object> queue = new ArrayDeque<>();
     private final List<OutgoingMessages> staged = new ArrayList<>();
     private final List<SagaOutcome> outcomes = new ArrayList<>();
+
+    /** @param outboxCommandAttempts attempts of a failing outbox command before it is reported; at least 1 */
+    LoopBackTransport(int outboxCommandAttempts) {
+        this.outboxCommandAttempts = outboxCommandAttempts;
+    }
 
     @Override
     public synchronized void dispatch(Object domainEvent) {
@@ -88,8 +102,7 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
      * Delivers everything queued, including what the deliveries queue in turn.
      *
      * @param reports         receives the report of every delivered event
-     * @param commandFailures receives the exception of every outbox command whose handling failed (the transport
-     *                        would redeliver it; the fixture does not)
+     * @param commandFailures receives the exception of every failed attempt of an outbox command
      */
     void drain(SagaRuntime runtime, FixtureCommandInterceptor interceptor, Consumer<HandlingReport> reports,
             Consumer<RuntimeException> commandFailures) {
@@ -101,21 +114,49 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
                         + " event; do two sagas keep triggering each other?");
             }
             if (next instanceof OutgoingCommand command) {
-                interceptor.deliveringOutbox(true);
-                try {
-                    runtime.commandReceiver().receive(new OutboxCommand(command.commandId(), command.command(),
-                            transaction -> { }));
-                } catch (RuntimeException failure) {
-                    commandFailures.accept(failure);
-                } finally {
-                    interceptor.deliveringOutbox(false);
-                }
+                deliverCommand(runtime, interceptor, command, commandFailures);
             } else {
                 reports.accept(runtime.receive(next));
             }
         }
         synchronized (this) {
             staged.clear();
+        }
+    }
+
+    /** Delivers {@code command} until it is handled or given up on; reports a given-up saga-scoped command. */
+    private void deliverCommand(SagaRuntime runtime, FixtureCommandInterceptor interceptor, OutgoingCommand command,
+            Consumer<RuntimeException> commandFailures) {
+        for (int attempt = 1; ; attempt++) {
+            RuntimeException failure = attempt(runtime, interceptor, command);
+            if (failure == null) {
+                return;
+            }
+            commandFailures.accept(failure);
+            boolean isFinal = FailureClassification.of(failure) == FailureClassification.FINAL;
+            if (isFinal || attempt >= outboxCommandAttempts) {
+                if (command.commandId().sagaScoped()) {
+                    runtime.commandReceiver().receiveFailure(new CommandFailure(command.commandId(),
+                            isFinal ? FailureClassification.FINAL : FailureClassification.EXHAUSTED,
+                            failure.getClass().getName(), attempt), transaction -> { });
+                }
+                return;
+            }
+        }
+    }
+
+    /** @return the failure of one delivery of {@code command}, or {@code null} if it was handled */
+    private static RuntimeException attempt(SagaRuntime runtime, FixtureCommandInterceptor interceptor,
+            OutgoingCommand command) {
+        interceptor.deliveringOutbox(true);
+        try {
+            runtime.commandReceiver().receive(new OutboxCommand(command.commandId(), command.command(),
+                    transaction -> { }));
+            return null;
+        } catch (RuntimeException failure) {
+            return failure;
+        } finally {
+            interceptor.deliveringOutbox(false);
         }
     }
 

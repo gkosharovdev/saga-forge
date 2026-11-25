@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
@@ -18,6 +19,7 @@ import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
@@ -52,6 +54,11 @@ public final class TransportInstrumentation {
     static final AttributeKey<String> MESSAGE_STATUS = AttributeKey.stringKey("saga_forge.message.status");
     static final AttributeKey<String> ERROR_TYPE = AttributeKey.stringKey("error.type");
     static final AttributeKey<String> FAILURE_MESSAGE = AttributeKey.stringKey("saga_forge.failure.message");
+    static final AttributeKey<String> COMMAND_CLASSIFICATION =
+            AttributeKey.stringKey("saga_forge.command.classification");
+    static final AttributeKey<Boolean> COMMAND_REPORTED = AttributeKey.booleanKey("saga_forge.command.reported");
+    static final AttributeKey<String> CLASSIFICATION = AttributeKey.stringKey("classification");
+    static final String COMMAND_FAILURES = "saga_forge.command.failures";
 
     private static final TextMapGetter<Map<String, String>> GETTER = new TextMapGetter<>() {
         @Override
@@ -72,6 +79,7 @@ public final class TransportInstrumentation {
     private final SagaTelemetrySettings settings;
     private final Logger logger;
     private final DoubleHistogram deliveryDuration;
+    private final LongCounter commandFailures;
     private final Set<String> failedKinds = ConcurrentHashMap.newKeySet();
 
     /**
@@ -90,6 +98,7 @@ public final class TransportInstrumentation {
                 .meterBuilder(SCOPE).setInstrumentationVersion(version).build();
         this.propagator = openTelemetry.getPropagators().getTextMapPropagator();
         this.deliveryDuration = meter.histogramBuilder(DELIVERY + ".duration").setUnit("s").build();
+        this.commandFailures = meter.counterBuilder(COMMAND_FAILURES).setUnit("{command}").build();
     }
 
     /** The current trace context as a carrier to store with a message; empty without a recording span. */
@@ -154,6 +163,24 @@ public final class TransportInstrumentation {
         }
     }
 
+    /**
+     * Counts one failed outbox command reported to its saga ({@code specs/012-outbox-command-failure-feedback}
+     * contracts/relay-classification.md "Telemetry").
+     *
+     * @param classification {@code FINAL} or {@code EXHAUSTED}
+     */
+    public void commandReported(FailureClassification classification) {
+        try {
+            commandFailures.add(1, Attributes.of(CLASSIFICATION, lowerCase(classification)));
+        } catch (RuntimeException failure) {
+            failed(COMMAND_FAILURES, failure);
+        }
+    }
+
+    private static String lowerCase(FailureClassification classification) {
+        return classification.name().toLowerCase(java.util.Locale.ROOT);
+    }
+
     private void failed(String kind, RuntimeException failure) {
         if (failedKinds.add(kind)) {
             logger.log(Level.WARNING, "saga.telemetry.failed kind=" + kind + " cause=" + failure, failure);
@@ -198,6 +225,25 @@ public final class TransportInstrumentation {
             } catch (RuntimeException broken) {
                 failed(DELIVERY, broken);
             }
+        }
+
+        /** Records how a failed command's failure was classified: {@code final}, {@code transient} or {@code unclassified}. */
+        public void classified(FailureClassification classification) {
+            try {
+                span.setAttribute(COMMAND_CLASSIFICATION, lowerCase(classification));
+            } catch (RuntimeException broken) {
+                failed(DELIVERY, broken);
+            }
+        }
+
+        /** Records that the failed command was reported to its saga as {@code classification}, and counts it. */
+        public void reported(FailureClassification classification) {
+            try {
+                span.setAttribute(COMMAND_REPORTED, true);
+            } catch (RuntimeException broken) {
+                failed(DELIVERY, broken);
+            }
+            commandReported(classification);
         }
 
         @Override

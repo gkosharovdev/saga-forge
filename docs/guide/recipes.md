@@ -326,6 +326,9 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
 @CommandHandler
 public void handle(ChargeCard command, CommandId commandId) {
     charges.add(new Charge(command.invoiceId(), commandId, Thread.currentThread().getName()));
+    if (declining) {
+        throw new CardDeclined(command.invoiceId());
+    }
     if (failures.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
         throw new IllegalStateException("card provider unavailable");
     }
@@ -343,6 +346,43 @@ Notes:
 - The handler must be among the registered classes (rule R23); with the starter, a bean in the scanned packages.
 - The default `IN_UNIT_OF_WORK` delivery is what you want when the handler's change must commit atomically with the
   step (recipe 1).
+
+### When an outbox command fails for good
+
+The sending step has committed, so a failing outbox command cannot roll it back. Instead the saga that sent it is told,
+and it compensates:
+
+- The transport retries a failed command with its own backoff (`saga-forge.transport.initial-backoff`,
+  `max-backoff`), never the sending step's `@RetryPolicy`. An exception marked `FinalFailure` (anywhere in its cause
+  chain) is not retried.
+- When the transport gives up, `FINAL` after one attempt or `EXHAUSTED` after `saga-forge.transport.max-attempts`, it
+  hands the failure to the saga runtime, and the message is set aside (`FINAL_FAILURE` or `MAX_ATTEMPTS`) in the same
+  transaction as the saga's reaction. In Spring Kafka's terms the transport is the error handler that retries with a
+  back-off, and the runtime is its recoverer.
+- The instance starts compensation as it does after a `FINAL` step failure: every completed step with a
+  `@SagaCompensation`, the sending step included, most recently completed first. The `CompensationTrigger` has kind
+  `COMMAND_FAILED`, the sending step as `stepName`, the command's type as `commandType`, and the classification,
+  cause type and attempts in `failure()` (never the exception's message). The outcome event (recipe 6) carries the
+  same kind and command type.
+- A command sent by a compensation that fails for good ends the instance `COMPENSATION_FAILED`, with that
+  compensation `FAILED`.
+- A report for an instance that has already ended, or that is already compensating, changes nothing: the message is
+  only set aside, with the warning `saga.command.failure.ignored`. Commands sent outside a saga are set aside as
+  before and reported to no one.
+
+```java
+public final class CardDeclined extends RuntimeException implements FinalFailure {
+
+    public CardDeclined(String invoiceId) {
+        super("card declined for invoice " + invoiceId);
+    }
+}
+```
+
+Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/sagaforge/transport/inmemory/fixtures/CardDeclined.java`.
+
+With `CardService` throwing `CardDeclined`, `ChargeCard` is handled once, `BillingSaga` ends `COMPENSATED` and its
+`SagaCompensated` names `ChargeCard` and `onInvoiceIssued`.
 
 ## 5. Bounded-context modules in one Spring Boot monolith
 

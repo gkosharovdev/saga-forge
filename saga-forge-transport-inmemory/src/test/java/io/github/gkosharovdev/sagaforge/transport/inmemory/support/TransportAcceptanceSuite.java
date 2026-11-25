@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
@@ -19,6 +20,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardDeclined;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
@@ -155,6 +157,26 @@ public abstract class TransportAcceptanceSuite {
 
         await(() -> setup.hasInstance(FulfilmentSaga.class, "RUNNING"), WAIT, "the saga to start");
         awaitQuiet();
+    }
+
+    @Test
+    @DisplayName("012: a command the saga sent that fails for good is reported once, compensates, and is listed set aside")
+    void failedCommandCompensates() {
+        setup.cards().decline();
+        setup.publish(new InvoiceIssued("i-1"));
+
+        await(() -> setup.hasInstance(BillingSaga.class, "COMPENSATED"), WAIT, "billing to compensate");
+        awaitQuiet();
+        assertThat(setup.cards().charges()).hasSize(1);
+        assertThat(messagesOf(SagaCompensated.class)).singleElement()
+                .satisfies(TransportAcceptanceSuite::consumedOutcome);
+        assertThat(setup.queries().find(MessageQuery.builder().statuses(MessageStatus.SET_ASIDE).build()))
+                .singleElement().satisfies(m -> {
+                    assertThat(m.payloadType()).isEqualTo(ChargeCard.class.getName());
+                    assertThat(m.setAsideReason()).isEqualTo("FINAL_FAILURE");
+                    assertThat(m.attempts()).isEqualTo(1);
+                    assertThat(m.lastFailure().exceptionType()).isEqualTo(CardDeclined.class.getName());
+                });
     }
 
     @Test

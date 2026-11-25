@@ -12,5 +12,11 @@ public enum CompensationTriggerKind {
     FINAL_FAILURE,
 
     /** A step's transient failure persisted through every attempt its retry policy allows ({@code EXHAUSTED}). */
-    RETRIES_EXHAUSTED
+    RETRIES_EXHAUSTED,
+
+    /**
+     * An outbox command a step sent failed for good, {@code FINAL} or {@code EXHAUSTED} once the transport's attempts
+     * were used up ({@code specs/012-outbox-command-failure-feedback} FR-008).
+     */
+    COMMAND_FAILED
 }

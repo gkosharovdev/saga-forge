@@ -308,6 +308,36 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     SagaInstance recordCompensationFailed(String sagaId, String stepName, SagaFailure failure) {
         requireNonNull(failure, "failure");
         StepRecord step = requireNotAttempted(sagaId, stepName, "recordCompensationFailed");
+        return endCompensationFailed(stepName, step, failure);
+    }
+
+    /**
+     * Marks {@code stepName}'s compensation, which committed as {@code COMPENSATED}, {@code FAILED} with
+     * {@code failure}, because an outbox command it sent failed for good, and ends the still compensating instance
+     * {@code COMPENSATION_FAILED}, with the entry and outcome of {@link #recordCompensationFailed}
+     * (specs/012-outbox-command-failure-feedback FR-012a). Compensations not yet run stay {@code NOT_ATTEMPTED}.
+     *
+     * @throws InvalidSagaTransitionException if the working copy is not this compensating instance
+     * @throws IllegalArgumentException       if the step's compensation is not {@code COMPENSATED}
+     */
+    SagaInstance recordCompensationCommandFailed(String sagaId, String stepName, SagaFailure failure) {
+        requireNonNull(failure, "failure");
+        requireNonNull(stepName, "stepName");
+        SagaInstance current = requireActive(sagaId, "recordCompensationCommandFailed");
+        if (current.status() != SagaStatus.COMPENSATING) {
+            throw InvalidSagaTransitionException.terminal(sagaId, "recordCompensationCommandFailed",
+                    current.status());
+        }
+        StepRecord step = current.steps().get(stepName);
+        if (step == null || step.compensation() == null
+                || step.compensation().status() != CompensationStatus.COMPENSATED) {
+            throw new IllegalArgumentException("Step '" + stepName + "' of saga instance '" + sagaId
+                    + "' has no committed compensation");
+        }
+        return endCompensationFailed(stepName, step, failure);
+    }
+
+    private SagaInstance endCompensationFailed(String stepName, StepRecord step, SagaFailure failure) {
         Instant now = sources.now();
         Map<String, StepRecord> steps = new HashMap<>(workingCopy.steps());
         steps.put(stepName, step.withCompensation(StepCompensation.failed(failure)));

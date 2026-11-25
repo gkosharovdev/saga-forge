@@ -189,7 +189,10 @@ flowchart LR
    A outbox command goes to the runtime's `CommandReceiver`, which runs its handler in a unit of work of its own and
    marks the message consumed inside that transaction.
 6. **Failures** are retried with growing backoff. After the tenth failure, or at once if the payload cannot be read,
-   the message is set aside; it no longer blocks its aggregate and an operator can deliver it again.
+   the message is set aside; it no longer blocks its aggregate and an operator can deliver it again. An outbox command
+   whose handler throws a `FinalFailure` is not retried. When the transport gives up on an outbox command a saga sent,
+   it reports it through `CommandReceiver.receiveFailure`, and the runtime starts that saga's compensation and sets the
+   message aside in one transaction ([012](../specs/012-outbox-command-failure-feedback/spec.md)).
 
 ### Surviving a restart
 
@@ -227,7 +230,7 @@ stateDiagram-v2
     [*] --> UNCONSUMED: appended, committed
     UNCONSUMED --> UNCONSUMED: leased / failed, retried after backoff / lease expired
     UNCONSUMED --> CONSUMED: delivered
-    UNCONSUMED --> SET_ASIDE: 10 failures or unreadable payload
+    UNCONSUMED --> SET_ASIDE: 10 failures, a final command failure or unreadable payload
     SET_ASIDE --> UNCONSUMED: operator redelivers
     CONSUMED --> [*]: removed after 7 days
 ```
@@ -426,11 +429,18 @@ compensation undoes only steps whose units of work **already committed**:
   and time.
 - **Resume.** After a crash, the next event routed to a `COMPENSATING` instance (the redelivered trigger, or any
   forward event, whose step does not run) resumes with the first compensation not yet committed.
+- **A failed outbox command** ([012](../specs/012-outbox-command-failure-feedback/spec.md), closing G-ADOPT-02). A
+  step's outbox command runs after the step committed, so its failure cannot roll the step back. The transport
+  retries it with its own backoff; once it gives up (`FINAL` at once, `EXHAUSTED` at `maxAttempts`) it hands the
+  failure to the runtime, like a recoverer after Spring Kafka's `DefaultErrorHandler`. The runtime starts compensation
+  with a `COMMAND_FAILED` trigger naming the sending step and the command type, compensating the sender too, and the
+  message is set aside in the same transaction. A compensation's failed command ends the saga `COMPENSATION_FAILED`.
 
 Known limitations: an instance left `COMPENSATING` with no further event never resumes (G-006-05); a compensation
 sees the trigger's event type, not the event (G-006-06); compensations run on the caller's thread holding the
 instance (G-006-08); a failed compensation is never retried and there is no operator path out of
-`COMPENSATION_FAILED` (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02).
+`COMPENSATION_FAILED` (G-006-09, G-006-03); a compensation does not wait for confirmation of the undo (G-006-02); a
+failed command reaches no saga that already ended (G-012-01, G-012-02), and no step can take the failure (G-012-03).
 
 ## jMolecules consideration
 

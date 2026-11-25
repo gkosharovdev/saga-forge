@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -36,8 +38,13 @@ class CompensationPersistenceTest {
     private static final CompensationTrigger REJECTED =
             CompensationTrigger.failureOutcome("reject", "com.example.DeliveryRejected", AT);
 
+    private static final CompensationTrigger COMMAND_FAILED = CompensationTrigger.commandFailed(new CommandFailure(
+            CommandId.of("s-1", "pay", "com.example.Charge", 1), FailureClassification.EXHAUSTED,
+            "com.example.Busy", 3), AT);
+
     static Stream<CompensationTrigger> triggers() {
-        return Stream.of(REJECTED, CompensationTrigger.failed(FINAL, AT), CompensationTrigger.failed(EXHAUSTED, AT));
+        return Stream.of(REJECTED, CompensationTrigger.failed(FINAL, AT), CompensationTrigger.failed(EXHAUSTED, AT),
+                COMMAND_FAILED);
     }
 
     static Stream<StepCompensation> compensations() {
@@ -63,6 +70,17 @@ class CompensationPersistenceTest {
         String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, trigger);
 
         assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, json)).isEqualTo(trigger);
+    }
+
+    @Test
+    @DisplayName("012: a command-failed trigger keeps its command type; a trigger stored before 012 reads without one")
+    void commandTypeRoundTrip() {
+        String json = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, COMMAND_FAILED);
+        String before012 = SagaInstanceRows.encodeTrigger(SagaInstanceRows.TRIGGER_FIELD, REJECTED);
+
+        assertThat(json).contains("\"commandType\":\"com.example.Charge\"");
+        assertThat(before012).doesNotContain("commandType");
+        assertThat(SagaInstanceRows.decodeTrigger(SagaInstanceRows.TRIGGER_FIELD, before012).commandType()).isNull();
     }
 
     @Test
@@ -121,6 +139,24 @@ class CompensationPersistenceTest {
             ForwardTransition.requireForwardTransition(compensating, compensationFailed);
             ForwardTransition.requireForwardTransition(compensated, compensated);
         }).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("012: COMPENSATED -> FAILED is accepted from COMPENSATING, never from a terminal status")
+    void compensatedToFailedOnlyWithTheInstance() {
+        SagaInstance compensating = instance(SagaStatus.COMPENSATING, Map.of(
+                "pay", completed(1, StepCompensation.compensated(AT)),
+                "ship", completed(2, StepCompensation.compensated(AT))), REJECTED);
+        Map<String, StepRecord> refundFailed = Map.of(
+                "pay", completed(1, StepCompensation.failed(EXHAUSTED)),
+                "ship", completed(2, StepCompensation.compensated(AT)));
+
+        assertThatCode(() -> ForwardTransition.requireForwardTransition(compensating,
+                instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED))).doesNotThrowAnyException();
+        SagaInstance compensated = instance(SagaStatus.COMPENSATED, compensating.steps(), REJECTED);
+        assertThatThrownBy(() -> ForwardTransition.requireForwardTransition(compensated,
+                instance(SagaStatus.COMPENSATION_FAILED, refundFailed, REJECTED)))
+                .isInstanceOf(ConcurrentSagaUpdateException.class);
     }
 
     @Test

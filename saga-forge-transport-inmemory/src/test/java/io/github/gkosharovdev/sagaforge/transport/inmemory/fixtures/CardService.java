@@ -11,7 +11,8 @@ import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 
 /**
  * Billing module handler of the logged {@link ChargeCard}: notes each charge with its {@link CommandId} and records
- * {@link CardCharged}. {@link #failNext(int)} makes the next calls throw after noting. Thread-safe.
+ * {@link CardCharged}. {@link #failNext(int)} makes the next calls throw after noting; {@link #decline()} makes every
+ * later call throw {@link CardDeclined}. Thread-safe.
  */
 public final class CardService {
 
@@ -21,10 +22,14 @@ public final class CardService {
 
     private final List<Charge> charges = new CopyOnWriteArrayList<>();
     private final AtomicInteger failures = new AtomicInteger();
+    private volatile boolean declining;
 
     @CommandHandler
     public void handle(ChargeCard command, CommandId commandId) {
         charges.add(new Charge(command.invoiceId(), commandId, Thread.currentThread().getName()));
+        if (declining) {
+            throw new CardDeclined(command.invoiceId());
+        }
         if (failures.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
             throw new IllegalStateException("card provider unavailable");
         }
@@ -33,6 +38,10 @@ public final class CardService {
 
     public void failNext(int times) {
         failures.set(times);
+    }
+
+    public void decline() {
+        declining = true;
     }
 
     public List<Charge> charges() {
