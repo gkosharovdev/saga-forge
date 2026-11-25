@@ -8,14 +8,14 @@ import java.util.List;
 /** Service handler that records the identities it receives. */
 public final class NotifyService {
 
-    private final List<CommandId> seen = new ArrayList<>();
+  private final List<CommandId> seen = new ArrayList<>();
 
-    @CommandHandler
-    public void handle(Notify command, CommandId commandId) {
-        seen.add(commandId);
-    }
+  @CommandHandler
+  public void handle(Notify command, CommandId commandId) {
+    seen.add(commandId);
+  }
 
-    public List<CommandId> seen() {
-        return List.copyOf(seen);
-    }
+  public List<CommandId> seen() {
+    return List.copyOf(seen);
+  }
 }

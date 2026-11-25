@@ -1,38 +1,53 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 /**
- * Kind of transition a {@link SagaLifecycleEntry} records. Storage-agnostic: the engine produces one entry per
- * transition and hands it to storage with the instance write it belongs to. There is no kind for a change to
- * {@link SagaStatus#RUNNING} (a wait point records no status entry); entering {@link SagaStatus#COMPENSATING} is
- * {@link #COMPENSATION_STARTED} ({@code specs/006-saga-compensation} FR-018).
+ * Kind of transition a {@link SagaLifecycleEntry} records. Storage-agnostic: the engine produces
+ * one entry per transition and hands it to storage with the instance write it belongs to. There is
+ * no kind for a change to {@link SagaStatus#RUNNING} (a wait point records no status entry);
+ * entering {@link SagaStatus#COMPENSATING} is {@link #COMPENSATION_STARTED} ({@code
+ * specs/006-saga-compensation} FR-018).
  */
 public enum SagaLifecycleEventKind {
-    /** The creation write: the instance was first persisted, {@link SagaStatus#CREATED} with no step run. */
-    CREATED,
-    /** One step completed within a committed unit of work; handed over with that unit of work's write. */
-    STEP_COMPLETED,
-    /** An {@code @EndSaga} step ended the instance, now {@link SagaStatus#COMPLETED}, with that step as outcome. */
-    COMPLETED,
-    /** The {@code FAILED} write after a rolled-back unit of work: the instance is now {@link SagaStatus#FAILED}. */
-    FAILED,
-    /**
-     * A unit of work failed transiently and the engine claimed another attempt, in its own write, before waiting
-     * for it ({@code specs/005-step-retry} FR-018). The instance's status is unchanged.
-     */
-    ATTEMPT_FAILED,
-    /**
-     * The instance entered {@link SagaStatus#COMPENSATING}, with the recorded {@code CompensationTrigger}
-     * ({@code specs/006-saga-compensation} FR-018).
-     */
-    COMPENSATION_STARTED,
-    /** One step's {@code @SagaCompensation} committed, in its own unit of work. */
-    STEP_COMPENSATED,
-    /**
-     * One step's compensation failed: the instance is now {@link SagaStatus#COMPENSATION_FAILED}. The terminal entry of
-     * that instance; before 0.2.0 a separate {@code COMPENSATION_FAILED} entry followed it
-     * ({@code specs/011-saga-outcome-events} FR-021).
-     */
-    COMPENSATION_FAILED,
-    /** Every applicable compensation committed: the instance is now {@link SagaStatus#COMPENSATED}. */
-    COMPENSATED
+  /**
+   * The creation write: the instance was first persisted, {@link SagaStatus#CREATED} with no step
+   * run.
+   */
+  CREATED,
+  /**
+   * One step completed within a committed unit of work; handed over with that unit of work's write.
+   */
+  STEP_COMPLETED,
+  /**
+   * An {@code @EndSaga} step ended the instance, now {@link SagaStatus#COMPLETED}, with that step
+   * as outcome.
+   */
+  COMPLETED,
+  /**
+   * The {@code FAILED} write after a rolled-back unit of work: the instance is now {@link
+   * SagaStatus#FAILED}.
+   */
+  FAILED,
+  /**
+   * A unit of work failed transiently and the engine claimed another attempt, in its own write,
+   * before waiting for it ({@code specs/005-step-retry} FR-018). The instance's status is
+   * unchanged.
+   */
+  ATTEMPT_FAILED,
+  /**
+   * The instance entered {@link SagaStatus#COMPENSATING}, with the recorded {@code
+   * CompensationTrigger} ({@code specs/006-saga-compensation} FR-018).
+   */
+  COMPENSATION_STARTED,
+  /** One step's {@code @SagaCompensation} committed, in its own unit of work. */
+  STEP_COMPENSATED,
+  /**
+   * One step's compensation failed: the instance is now {@link SagaStatus#COMPENSATION_FAILED}. The
+   * terminal entry of that instance; before 0.2.0 a separate {@code COMPENSATION_FAILED} entry
+   * followed it ({@code specs/011-saga-outcome-events} FR-021).
+   */
+  COMPENSATION_FAILED,
+  /**
+   * Every applicable compensation committed: the instance is now {@link SagaStatus#COMPENSATED}.
+   */
+  COMPENSATED
 }

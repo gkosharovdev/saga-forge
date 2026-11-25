@@ -5,7 +5,7 @@ import io.github.gkosharovdev.sagaforge.core.failure.TransientFailure;
 /** A failure marked transient, not listed in {@code retryOn}. */
 public final class FlakyNetwork extends RuntimeException implements TransientFailure {
 
-    public FlakyNetwork(String message) {
-        super(message);
-    }
+  public FlakyNetwork(String message) {
+    super(message);
+  }
 }

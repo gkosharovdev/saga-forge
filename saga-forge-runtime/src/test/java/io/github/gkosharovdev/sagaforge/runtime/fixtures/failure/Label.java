@@ -7,46 +7,45 @@ import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import java.util.Optional;
 
 /**
- * Aggregate with an instance-method handler, loaded and saved through {@link LabelResolver}. Prints itself, fails if
- * {@link FaultPoint#LABEL_HANDLER} is armed, then records {@link LabelPrinted}.
+ * Aggregate with an instance-method handler, loaded and saved through {@link LabelResolver}. Prints
+ * itself, fails if {@link FaultPoint#LABEL_HANDLER} is armed, then records {@link LabelPrinted}.
  */
 @Aggregate
 public final class Label {
 
-    @AggregateIdentifier
-    private final String labelId;
-    private final FaultPlan plan;
-    private String printedFor;
+  @AggregateIdentifier private final String labelId;
+  private final FaultPlan plan;
+  private String printedFor;
 
-    public Label(String labelId, FaultPlan plan) {
-        this.labelId = labelId;
-        this.plan = plan;
-    }
+  public Label(String labelId, FaultPlan plan) {
+    this.labelId = labelId;
+    this.plan = plan;
+  }
 
-    /** The label id the saga prints for a parcel. */
-    public static String labelIdFor(String parcelId) {
-        return "label-" + parcelId;
-    }
+  /** The label id the saga prints for a parcel. */
+  public static String labelIdFor(String parcelId) {
+    return "label-" + parcelId;
+  }
 
-    @CommandHandler
-    public void handle(PrintLabel command) {
-        printedFor = command.parcelId();
-        plan.throwIfArmed(FaultPoint.LABEL_HANDLER);
-        DomainEvents.record(new LabelPrinted(labelId, command.parcelId()));
-    }
+  @CommandHandler
+  public void handle(PrintLabel command) {
+    printedFor = command.parcelId();
+    plan.throwIfArmed(FaultPoint.LABEL_HANDLER);
+    DomainEvents.record(new LabelPrinted(labelId, command.parcelId()));
+  }
 
-    public String labelId() {
-        return labelId;
-    }
+  public String labelId() {
+    return labelId;
+  }
 
-    /** The parcel this label was printed for, if any. */
-    public Optional<String> printedFor() {
-        return Optional.ofNullable(printedFor);
-    }
+  /** The parcel this label was printed for, if any. */
+  public Optional<String> printedFor() {
+    return Optional.ofNullable(printedFor);
+  }
 
-    Label copy() {
-        Label copy = new Label(labelId, plan);
-        copy.printedFor = printedFor;
-        return copy;
-    }
+  Label copy() {
+    Label copy = new Label(labelId, plan);
+    copy.printedFor = printedFor;
+    return copy;
+  }
 }

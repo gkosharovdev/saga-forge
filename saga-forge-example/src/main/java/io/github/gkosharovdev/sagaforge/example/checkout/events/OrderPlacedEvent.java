@@ -1,12 +1,11 @@
 package io.github.gkosharovdev.sagaforge.example.checkout.events;
 
-import java.math.BigDecimal;
-import java.util.List;
-
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.example.checkout.Order;
 import io.github.gkosharovdev.sagaforge.example.checkout.OrderLine;
+import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * The customer placed an order at checkout. Starts {@code CheckoutSaga}.
@@ -14,6 +13,9 @@ import io.github.gkosharovdev.sagaforge.example.checkout.OrderLine;
  * @param express whether the customer chose express checkout, which shortens the payment window
  */
 @DomainEvent(aggregate = Order.class)
-public record OrderPlacedEvent(@AggregateIdentifier String orderId, List<OrderLine> lines, BigDecimal amount,
-                               String deliveryAddress, boolean express) {
-}
+public record OrderPlacedEvent(
+    @AggregateIdentifier String orderId,
+    List<OrderLine> lines,
+    BigDecimal amount,
+    String deliveryAddress,
+    boolean express) {}

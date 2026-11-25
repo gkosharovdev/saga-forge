@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /** Cancels a confirmed order that cannot be delivered. Handled by the {@code Order} aggregate. */
 @Command
-public record CancelOrderCommand(@AggregateIdentifier String orderId, String reason) {
-}
+public record CancelOrderCommand(@AggregateIdentifier String orderId, String reason) {}

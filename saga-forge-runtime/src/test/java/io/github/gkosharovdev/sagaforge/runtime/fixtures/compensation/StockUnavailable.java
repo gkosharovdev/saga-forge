@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** The warehouse cannot supply the order: a business failure of {@link DeliverySaga}. */
 @DomainEvent(aggregate = Order.class)
-public record StockUnavailable(@AggregateIdentifier String orderId) {
-}
+public record StockUnavailable(@AggregateIdentifier String orderId) {}

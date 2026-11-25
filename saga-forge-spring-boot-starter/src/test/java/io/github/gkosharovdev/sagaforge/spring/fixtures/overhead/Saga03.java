@@ -12,18 +12,17 @@ import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.OrderC
 @Saga
 public class Saga03 {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void start(OrderCreatedEvent event) {
-        // waits
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void start(OrderCreatedEvent event) {
+    // waits
+  }
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void end(OrderCompletedEvent event) {
-        // ends
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void end(OrderCompletedEvent event) {
+    // ends
+  }
 }

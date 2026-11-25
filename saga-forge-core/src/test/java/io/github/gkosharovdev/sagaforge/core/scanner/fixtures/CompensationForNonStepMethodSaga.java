@@ -8,32 +8,25 @@ import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 
 /**
- * Invalid fixture: @SagaCompensation with forStep referencing a method
- * that exists but is not annotated with @SagaStep.
+ * Invalid fixture: @SagaCompensation with forStep referencing a method that exists but is not
+ * annotated with @SagaStep.
  */
 @Saga
 public class CompensationForNonStepMethodSaga {
 
-    @SagaId
-    private String sagaId;
+  @SagaId private String sagaId;
 
-    @StartSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleStart(TestEvent event) {
-    }
+  @StartSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleStart(TestEvent event) {}
 
-    @EndSaga
-    @SagaStep(associationProperty = "orderId")
-    public void handleEnd(TestEvent2 event) {
-    }
+  @EndSaga
+  @SagaStep(associationProperty = "orderId")
+  public void handleEnd(TestEvent2 event) {}
 
-    /**
-     * A regular method — not annotated with @SagaStep.
-     */
-    public void regularMethod() {
-    }
+  /** A regular method — not annotated with @SagaStep. */
+  public void regularMethod() {}
 
-    @SagaCompensation(forStep = "regularMethod")
-    public void compensate() {
-    }
+  @SagaCompensation(forStep = "regularMethod")
+  public void compensate() {}
 }

@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Case {
 
-    @AggregateIdentifier
-    private String caseId;
+  @AggregateIdentifier private String caseId;
 }

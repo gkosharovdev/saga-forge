@@ -4,5 +4,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /** Asks the delivery partner, through {@link DeliveryService}, to accept the delivery. */
 @Command
-public record RequestDelivery(String orderId) {
-}
+public record RequestDelivery(String orderId) {}

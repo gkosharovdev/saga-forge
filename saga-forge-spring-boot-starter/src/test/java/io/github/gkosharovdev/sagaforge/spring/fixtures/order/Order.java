@@ -13,33 +13,32 @@ import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.StockU
 @Aggregate
 public class Order {
 
-    @AggregateIdentifier
-    private final String orderId;
-    private final boolean inStock;
-    private String status = "CREATED";
+  @AggregateIdentifier private final String orderId;
+  private final boolean inStock;
+  private String status = "CREATED";
 
-    public Order(String orderId, boolean inStock) {
-        this.orderId = orderId;
-        this.inStock = inStock;
-    }
+  public Order(String orderId, boolean inStock) {
+    this.orderId = orderId;
+    this.inStock = inStock;
+  }
 
-    @CommandHandler
-    public void handle(ReserveStockCommand command) {
-        if (!inStock) {
-            status = "OUT_OF_STOCK";
-            DomainEvents.record(new StockUnavailableEvent(orderId));
-            return;
-        }
-        status = "COMPLETED";
-        DomainEvents.record(new OrderCompletedEvent(orderId));
-        DomainEvents.record(new OrderReadyToShipEvent(orderId));
+  @CommandHandler
+  public void handle(ReserveStockCommand command) {
+    if (!inStock) {
+      status = "OUT_OF_STOCK";
+      DomainEvents.record(new StockUnavailableEvent(orderId));
+      return;
     }
+    status = "COMPLETED";
+    DomainEvents.record(new OrderCompletedEvent(orderId));
+    DomainEvents.record(new OrderReadyToShipEvent(orderId));
+  }
 
-    public String orderId() {
-        return orderId;
-    }
+  public String orderId() {
+    return orderId;
+  }
 
-    public String status() {
-        return status;
-    }
+  public String status() {
+    return status;
+  }
 }

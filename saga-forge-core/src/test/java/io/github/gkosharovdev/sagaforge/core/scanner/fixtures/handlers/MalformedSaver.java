@@ -8,11 +8,9 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
  */
 public class MalformedSaver {
 
-    @AggregateSaver
-    public void saveNonAggregate(String notAnAggregate) {
-    }
+  @AggregateSaver
+  public void saveNonAggregate(String notAnAggregate) {}
 
-    @AggregateSaver
-    public void saveWithTwoParameters(ValidAggregate aggregate, String tenant) {
-    }
+  @AggregateSaver
+  public void saveWithTwoParameters(ValidAggregate aggregate, String tenant) {}
 }

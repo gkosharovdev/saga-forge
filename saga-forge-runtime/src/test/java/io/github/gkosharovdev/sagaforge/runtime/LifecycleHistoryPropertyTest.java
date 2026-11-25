@@ -18,50 +18,56 @@ import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 
 /**
- * Property 27: the stored lifecycle history is the true order of what happened, and a rolled-back unit of work leaves
- * no entry of its own.
+ * Property 27: the stored lifecycle history is the true order of what happened, and a rolled-back
+ * unit of work leaves no entry of its own.
  *
- * <p>**Validates: Requirements FR-033, SC-010**</p>
+ * <p>**Validates: Requirements FR-033, SC-010**
  */
 class LifecycleHistoryPropertyTest {
 
-    /** A {@code STEP_COMPLETED} or {@code COMPLETED} entry as (kind, step or outcome). */
-    private record Shape(SagaLifecycleEventKind kind, String step) {
+  /** A {@code STEP_COMPLETED} or {@code COMPLETED} entry as (kind, step or outcome). */
+  private record Shape(SagaLifecycleEventKind kind, String step) {
 
-        static Shape of(SagaLifecycleEntry entry) {
-            return new Shape(entry.kind(),
-                    entry.kind() == SagaLifecycleEventKind.COMPLETED ? entry.outcomeStep() : entry.stepName());
-        }
+    static Shape of(SagaLifecycleEntry entry) {
+      return new Shape(
+          entry.kind(),
+          entry.kind() == SagaLifecycleEventKind.COMPLETED
+              ? entry.outcomeStep()
+              : entry.stepName());
     }
+  }
 
-    private static final List<Shape> COMPLETED_HISTORY = List.of(
-            new Shape(SagaLifecycleEventKind.CREATED, null),
-            new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.START_STEP),
-            new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.FEE_STEP),
-            new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.END_STEP),
-            new Shape(SagaLifecycleEventKind.COMPLETED, FailureSaga.END_STEP));
+  private static final List<Shape> COMPLETED_HISTORY =
+      List.of(
+          new Shape(SagaLifecycleEventKind.CREATED, null),
+          new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.START_STEP),
+          new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.FEE_STEP),
+          new Shape(SagaLifecycleEventKind.STEP_COMPLETED, FailureSaga.END_STEP),
+          new Shape(SagaLifecycleEventKind.COMPLETED, FailureSaga.END_STEP));
 
-    private static final List<Shape> FAILED_HISTORY = List.of(
-            new Shape(SagaLifecycleEventKind.CREATED, null),
-            new Shape(SagaLifecycleEventKind.FAILED, null));
+  private static final List<Shape> FAILED_HISTORY =
+      List.of(
+          new Shape(SagaLifecycleEventKind.CREATED, null),
+          new Shape(SagaLifecycleEventKind.FAILED, null));
 
-    @Provide
-    Arbitrary<Optional<FaultPoint>> faults() {
-        return Arbitraries.of(FaultPoint.class).optional();
-    }
+  @Provide
+  Arbitrary<Optional<FaultPoint>> faults() {
+    return Arbitraries.of(FaultPoint.class).optional();
+  }
 
-    @Property(tries = 200)
-    void historyIsCreatedThenCompletedStepsOrFailed(@ForAll("faults") Optional<FaultPoint> fault) {
-        FailureFixture fixture = new FailureFixture();
-        fault.ifPresent(fixture.plan()::arm);
+  @Property(tries = 200)
+  void historyIsCreatedThenCompletedStepsOrFailed(@ForAll("faults") Optional<FaultPoint> fault) {
+    FailureFixture fixture = new FailureFixture();
+    fault.ifPresent(fixture.plan()::arm);
 
-        String sagaId = fixture.requestParcel("parcel-1", 4).results().get(0).sagaId();
+    String sagaId = fixture.requestParcel("parcel-1", 4).results().get(0).sagaId();
 
-        List<StoredEntry> history = fixture.storage().history(sagaId);
-        List<Shape> shapes = history.stream().map(StoredEntry::entry).map(Shape::of).toList();
-        assertThat(shapes).isEqualTo(fault.isPresent() ? FAILED_HISTORY : COMPLETED_HISTORY);
-        assertThat(history).extracting(StoredEntry::sequenceNumber)
-                .containsExactlyElementsOf(LongStream.range(0, history.size()).boxed().toList());
-        assertThat(history).allSatisfy(stored -> assertThat(stored.entry().sagaId()).isEqualTo(sagaId));
-    }
+    List<StoredEntry> history = fixture.storage().history(sagaId);
+    List<Shape> shapes = history.stream().map(StoredEntry::entry).map(Shape::of).toList();
+    assertThat(shapes).isEqualTo(fault.isPresent() ? FAILED_HISTORY : COMPLETED_HISTORY);
+    assertThat(history)
+        .extracting(StoredEntry::sequenceNumber)
+        .containsExactlyElementsOf(LongStream.range(0, history.size()).boxed().toList());
+    assertThat(history).allSatisfy(stored -> assertThat(stored.entry().sagaId()).isEqualTo(sagaId));
+  }
 }

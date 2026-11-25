@@ -10,14 +10,13 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Invoice {
 
-    @AggregateIdentifier
-    private final String id;
+  @AggregateIdentifier private final String id;
 
-    public Invoice(String id) {
-        this.id = id;
-    }
+  public Invoice(String id) {
+    this.id = id;
+  }
 
-    public String id() {
-        return id;
-    }
+  public String id() {
+    return id;
+  }
 }

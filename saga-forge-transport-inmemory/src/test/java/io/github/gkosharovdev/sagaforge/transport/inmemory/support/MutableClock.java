@@ -9,28 +9,28 @@ import java.time.ZoneOffset;
 /** A clock tests move forward by hand. Thread-safe. */
 public final class MutableClock extends Clock {
 
-    private volatile Instant now;
+  private volatile Instant now;
 
-    public MutableClock(Instant start) {
-        this.now = start;
-    }
+  public MutableClock(Instant start) {
+    this.now = start;
+  }
 
-    public void advance(Duration duration) {
-        now = now.plus(duration);
-    }
+  public void advance(Duration duration) {
+    now = now.plus(duration);
+  }
 
-    @Override
-    public ZoneId getZone() {
-        return ZoneOffset.UTC;
-    }
+  @Override
+  public ZoneId getZone() {
+    return ZoneOffset.UTC;
+  }
 
-    @Override
-    public Clock withZone(ZoneId zone) {
-        return this;
-    }
+  @Override
+  public Clock withZone(ZoneId zone) {
+    return this;
+  }
 
-    @Override
-    public Instant instant() {
-        return now;
-    }
+  @Override
+  public Instant instant() {
+    return now;
+  }
 }

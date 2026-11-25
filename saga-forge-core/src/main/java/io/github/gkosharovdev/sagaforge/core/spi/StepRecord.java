@@ -1,170 +1,210 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import java.util.LinkedHashSet;
 import java.util.List;
-
-import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 
 /**
  * Persisted record of one {@code @SagaStep} method within a saga instance.
  *
- * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code status}, {@code touchedAggregates}, {@code handledCommands} or any of
- *                                  their elements is {@code null}, if aggregates, commands or attempts are given
- *                                  for a step that is not {@link StepStatus#COMPLETED}, if a completed step has
- *                                  fewer than 1 attempt, or if {@code handledCommands} holds an unscoped or
- *                                  duplicate identity, if {@code completionSequence} breaks its rule, or if a
- *                                  step that is not completed has a {@code compensation}.</p>
+ * <p>The canonical constructor throws {@link IllegalArgumentException} if {@code status}, {@code
+ * touchedAggregates}, {@code handledCommands} or any of their elements is {@code null}, if
+ * aggregates, commands or attempts are given for a step that is not {@link StepStatus#COMPLETED},
+ * if a completed step has fewer than 1 attempt, or if {@code handledCommands} holds an unscoped or
+ * duplicate identity, if {@code completionSequence} breaks its rule, or if a step that is not
+ * completed has a {@code compensation}.
  *
- * @param status            the step's status; non-null
- * @param touchedAggregates aggregates touched by the step, in recording order and without duplicates; an
- *                          unmodifiable defensive copy, empty unless {@code status == COMPLETED}
- * @param attempts          the attempt of the unit of work in which the step completed, counting the first as 1;
- *                          0 unless {@code status == COMPLETED}, then at least 1 ({@code specs/005-step-retry}
- *                          FR-017)
- * @param handledCommands   identities of the commands the step sent and whose handling committed with it, in
- *                          dispatch order; an unmodifiable defensive copy, saga-scoped and without duplicates,
- *                          empty unless {@code status == COMPLETED} ({@code specs/005-step-retry} FR-004)
- * @param completionSequence position of the step in the instance's completion order, counting the first completed
- *                          step as 1; 0 unless {@code status == COMPLETED}, then at least 1. The engine assigns
- *                          distinct values within an instance; the compatibility constructors default to 1, so
- *                          uniqueness is not checked here ({@code specs/006-saga-compensation} FR-005)
- * @param compensation      the step's compensation state once its instance entered compensation; {@code null}
- *                          unless {@code status == COMPLETED} ({@code specs/006-saga-compensation} FR-017)
+ * @param status the step's status; non-null
+ * @param touchedAggregates aggregates touched by the step, in recording order and without
+ *     duplicates; an unmodifiable defensive copy, empty unless {@code status == COMPLETED}
+ * @param attempts the attempt of the unit of work in which the step completed, counting the first
+ *     as 1; 0 unless {@code status == COMPLETED}, then at least 1 ({@code specs/005-step-retry}
+ *     FR-017)
+ * @param handledCommands identities of the commands the step sent and whose handling committed with
+ *     it, in dispatch order; an unmodifiable defensive copy, saga-scoped and without duplicates,
+ *     empty unless {@code status == COMPLETED} ({@code specs/005-step-retry} FR-004)
+ * @param completionSequence position of the step in the instance's completion order, counting the
+ *     first completed step as 1; 0 unless {@code status == COMPLETED}, then at least 1. The engine
+ *     assigns distinct values within an instance; the compatibility constructors default to 1, so
+ *     uniqueness is not checked here ({@code specs/006-saga-compensation} FR-005)
+ * @param compensation the step's compensation state once its instance entered compensation; {@code
+ *     null} unless {@code status == COMPLETED} ({@code specs/006-saga-compensation} FR-017)
  */
-public record StepRecord(StepStatus status, List<AggregateReference> touchedAggregates, int attempts,
-        List<CommandId> handledCommands, int completionSequence, StepCompensation compensation) {
+public record StepRecord(
+    StepStatus status,
+    List<AggregateReference> touchedAggregates,
+    int attempts,
+    List<CommandId> handledCommands,
+    int completionSequence,
+    StepCompensation compensation) {
 
-    private static final StepRecord NOT_RUN = new StepRecord(StepStatus.NOT_RUN, List.of());
+  private static final StepRecord NOT_RUN = new StepRecord(StepStatus.NOT_RUN, List.of());
 
-    public StepRecord {
-        if (status == null) {
-            throw new IllegalArgumentException("status must not be null");
-        }
-        touchedAggregates = copyWithoutNulls(touchedAggregates, "touchedAggregates");
-        handledCommands = copyWithoutNulls(handledCommands, "handledCommands");
-        boolean completed = status == StepStatus.COMPLETED;
-        if (!completed && !touchedAggregates.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "touchedAggregates must be empty unless status is COMPLETED, but status is " + status);
-        }
-        if (!completed && !handledCommands.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "handledCommands must be empty unless status is COMPLETED, but status is " + status);
-        }
-        if (completed ? attempts < 1 : attempts != 0) {
-            throw new IllegalArgumentException("attempts must be " + (completed ? "at least 1" : "0")
-                    + " when status is " + status + ", but is " + attempts);
-        }
-        for (CommandId id : handledCommands) {
-            if (!id.sagaScoped()) {
-                throw new IllegalArgumentException("handledCommands must hold saga-scoped identities only: " + id);
-            }
-        }
-        if (new LinkedHashSet<>(handledCommands).size() != handledCommands.size()) {
-            throw new IllegalArgumentException("handledCommands must not contain duplicates: " + handledCommands);
-        }
-        if (completed ? completionSequence < 1 : completionSequence != 0) {
-            throw new IllegalArgumentException("completionSequence must be " + (completed ? "at least 1" : "0")
-                    + " when status is " + status + ", but is " + completionSequence);
-        }
-        if (!completed && compensation != null) {
-            throw new IllegalArgumentException(
-                    "compensation must be null unless status is COMPLETED, but status is " + status);
-        }
-        touchedAggregates = List.copyOf(new LinkedHashSet<>(touchedAggregates));
+  public StepRecord {
+    if (status == null) {
+      throw new IllegalArgumentException("status must not be null");
     }
-
-    /**
-     * A record without compensation state: completion sequence 1 if {@code status == COMPLETED}, otherwise 0.
-     *
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public StepRecord(StepStatus status, List<AggregateReference> touchedAggregates, int attempts,
-            List<CommandId> handledCommands) {
-        this(status, touchedAggregates, attempts, handledCommands, status == StepStatus.COMPLETED ? 1 : 0, null);
+    touchedAggregates = copyWithoutNulls(touchedAggregates, "touchedAggregates");
+    handledCommands = copyWithoutNulls(handledCommands, "handledCommands");
+    boolean completed = status == StepStatus.COMPLETED;
+    if (!completed && !touchedAggregates.isEmpty()) {
+      throw new IllegalArgumentException(
+          "touchedAggregates must be empty unless status is COMPLETED, but status is " + status);
     }
-
-    /**
-     * A record without attempts or commands: attempt 1 if {@code status == COMPLETED}, otherwise 0.
-     *
-     * @param status            the step's status; non-null
-     * @param touchedAggregates aggregates touched by the step; empty unless {@code status == COMPLETED}
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public StepRecord(StepStatus status, List<AggregateReference> touchedAggregates) {
-        this(status, touchedAggregates, status == StepStatus.COMPLETED ? 1 : 0, List.of());
+    if (!completed && !handledCommands.isEmpty()) {
+      throw new IllegalArgumentException(
+          "handledCommands must be empty unless status is COMPLETED, but status is " + status);
     }
-
-    /**
-     * @return a record for a step that has not run (or whose unit of work rolled back)
-     */
-    public static StepRecord notRun() {
-        return NOT_RUN;
+    if (completed ? attempts < 1 : attempts != 0) {
+      throw new IllegalArgumentException(
+          "attempts must be "
+              + (completed ? "at least 1" : "0")
+              + " when status is "
+              + status
+              + ", but is "
+              + attempts);
     }
-
-    /**
-     * @param touchedAggregates aggregates touched by the step, in recording order; duplicates are dropped
-     * @return a record for a step completed on the first attempt without recorded commands
-     * @throws IllegalArgumentException if {@code touchedAggregates} or any of its elements is {@code null}
-     */
-    public static StepRecord completed(List<AggregateReference> touchedAggregates) {
-        return new StepRecord(StepStatus.COMPLETED, touchedAggregates);
+    for (CommandId id : handledCommands) {
+      if (!id.sagaScoped()) {
+        throw new IllegalArgumentException(
+            "handledCommands must hold saga-scoped identities only: " + id);
+      }
     }
-
-    /**
-     * @param touchedAggregates aggregates touched by the step, in recording order; duplicates are dropped
-     * @param attempts          the attempt in which the step completed; at least 1
-     * @param handledCommands   identities of the commands it sent, in dispatch order
-     * @return a record for a completed step
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public static StepRecord completed(List<AggregateReference> touchedAggregates, int attempts,
-            List<CommandId> handledCommands) {
-        return new StepRecord(StepStatus.COMPLETED, touchedAggregates, attempts, handledCommands);
+    if (new LinkedHashSet<>(handledCommands).size() != handledCommands.size()) {
+      throw new IllegalArgumentException(
+          "handledCommands must not contain duplicates: " + handledCommands);
     }
-
-    /**
-     * @param touchedAggregates  aggregates touched by the step, in recording order; duplicates are dropped
-     * @param attempts           the attempt in which the step completed; at least 1
-     * @param handledCommands    identities of the commands it sent, in dispatch order
-     * @param completionSequence the step's position in the instance's completion order; at least 1
-     * @return a record for a completed step
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public static StepRecord completed(List<AggregateReference> touchedAggregates, int attempts,
-            List<CommandId> handledCommands, int completionSequence) {
-        return new StepRecord(StepStatus.COMPLETED, touchedAggregates, attempts, handledCommands, completionSequence,
-                null);
+    if (completed ? completionSequence < 1 : completionSequence != 0) {
+      throw new IllegalArgumentException(
+          "completionSequence must be "
+              + (completed ? "at least 1" : "0")
+              + " when status is "
+              + status
+              + ", but is "
+              + completionSequence);
     }
-
-    /**
-     * @param sequence the completion sequence to record
-     * @return this record with {@code completionSequence} replaced
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public StepRecord withCompletionSequence(int sequence) {
-        return new StepRecord(status, touchedAggregates, attempts, handledCommands, sequence, compensation);
+    if (!completed && compensation != null) {
+      throw new IllegalArgumentException(
+          "compensation must be null unless status is COMPLETED, but status is " + status);
     }
+    touchedAggregates = List.copyOf(new LinkedHashSet<>(touchedAggregates));
+  }
 
-    /**
-     * @param newCompensation the compensation state to record; nullable
-     * @return this record with {@code compensation} replaced
-     * @throws IllegalArgumentException as for the canonical constructor
-     */
-    public StepRecord withCompensation(StepCompensation newCompensation) {
-        return new StepRecord(status, touchedAggregates, attempts, handledCommands, completionSequence,
-                newCompensation);
-    }
+  /**
+   * A record without compensation state: completion sequence 1 if {@code status == COMPLETED},
+   * otherwise 0.
+   *
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public StepRecord(
+      StepStatus status,
+      List<AggregateReference> touchedAggregates,
+      int attempts,
+      List<CommandId> handledCommands) {
+    this(
+        status,
+        touchedAggregates,
+        attempts,
+        handledCommands,
+        status == StepStatus.COMPLETED ? 1 : 0,
+        null);
+  }
 
-    private static <T> List<T> copyWithoutNulls(List<T> list, String name) {
-        if (list == null) {
-            throw new IllegalArgumentException(name + " must not be null");
-        }
-        for (T element : list) {
-            if (element == null) {
-                throw new IllegalArgumentException(name + " must not contain null elements");
-            }
-        }
-        return List.copyOf(list);
+  /**
+   * A record without attempts or commands: attempt 1 if {@code status == COMPLETED}, otherwise 0.
+   *
+   * @param status the step's status; non-null
+   * @param touchedAggregates aggregates touched by the step; empty unless {@code status ==
+   *     COMPLETED}
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public StepRecord(StepStatus status, List<AggregateReference> touchedAggregates) {
+    this(status, touchedAggregates, status == StepStatus.COMPLETED ? 1 : 0, List.of());
+  }
+
+  /**
+   * @return a record for a step that has not run (or whose unit of work rolled back)
+   */
+  public static StepRecord notRun() {
+    return NOT_RUN;
+  }
+
+  /**
+   * @param touchedAggregates aggregates touched by the step, in recording order; duplicates are
+   *     dropped
+   * @return a record for a step completed on the first attempt without recorded commands
+   * @throws IllegalArgumentException if {@code touchedAggregates} or any of its elements is {@code
+   *     null}
+   */
+  public static StepRecord completed(List<AggregateReference> touchedAggregates) {
+    return new StepRecord(StepStatus.COMPLETED, touchedAggregates);
+  }
+
+  /**
+   * @param touchedAggregates aggregates touched by the step, in recording order; duplicates are
+   *     dropped
+   * @param attempts the attempt in which the step completed; at least 1
+   * @param handledCommands identities of the commands it sent, in dispatch order
+   * @return a record for a completed step
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public static StepRecord completed(
+      List<AggregateReference> touchedAggregates, int attempts, List<CommandId> handledCommands) {
+    return new StepRecord(StepStatus.COMPLETED, touchedAggregates, attempts, handledCommands);
+  }
+
+  /**
+   * @param touchedAggregates aggregates touched by the step, in recording order; duplicates are
+   *     dropped
+   * @param attempts the attempt in which the step completed; at least 1
+   * @param handledCommands identities of the commands it sent, in dispatch order
+   * @param completionSequence the step's position in the instance's completion order; at least 1
+   * @return a record for a completed step
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public static StepRecord completed(
+      List<AggregateReference> touchedAggregates,
+      int attempts,
+      List<CommandId> handledCommands,
+      int completionSequence) {
+    return new StepRecord(
+        StepStatus.COMPLETED,
+        touchedAggregates,
+        attempts,
+        handledCommands,
+        completionSequence,
+        null);
+  }
+
+  /**
+   * @param sequence the completion sequence to record
+   * @return this record with {@code completionSequence} replaced
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public StepRecord withCompletionSequence(int sequence) {
+    return new StepRecord(
+        status, touchedAggregates, attempts, handledCommands, sequence, compensation);
+  }
+
+  /**
+   * @param newCompensation the compensation state to record; nullable
+   * @return this record with {@code compensation} replaced
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public StepRecord withCompensation(StepCompensation newCompensation) {
+    return new StepRecord(
+        status, touchedAggregates, attempts, handledCommands, completionSequence, newCompensation);
+  }
+
+  private static <T> List<T> copyWithoutNulls(List<T> list, String name) {
+    if (list == null) {
+      throw new IllegalArgumentException(name + " must not be null");
     }
+    for (T element : list) {
+      if (element == null) {
+        throw new IllegalArgumentException(name + " must not contain null elements");
+      }
+    }
+    return List.copyOf(list);
+  }
 }

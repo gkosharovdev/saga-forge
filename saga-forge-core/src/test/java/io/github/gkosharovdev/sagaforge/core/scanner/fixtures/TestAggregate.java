@@ -10,6 +10,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public class TestAggregate {
 
-    @AggregateIdentifier
-    private String orderId;
+  @AggregateIdentifier private String orderId;
 }

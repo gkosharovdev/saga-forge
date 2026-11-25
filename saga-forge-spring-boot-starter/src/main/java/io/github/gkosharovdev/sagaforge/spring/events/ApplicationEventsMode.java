@@ -6,15 +6,16 @@ package io.github.gkosharovdev.sagaforge.spring.events;
  */
 public enum ApplicationEventsMode {
 
-    /**
-     * Published inside the unit of work's transaction: {@code @TransactionalEventListener}s and Spring Modulith's
-     * {@code @ApplicationModuleListener}s run after commit, never on rollback. The default.
-     */
-    IN_TRANSACTION,
+  /**
+   * Published inside the unit of work's transaction: {@code @TransactionalEventListener}s and
+   * Spring Modulith's {@code @ApplicationModuleListener}s run after commit, never on rollback. The
+   * default.
+   */
+  IN_TRANSACTION,
 
-    /** Published after the transport delivered the event, outside any transaction (007's bridge). */
-    AFTER_DELIVERY,
+  /** Published after the transport delivered the event, outside any transaction (007's bridge). */
+  AFTER_DELIVERY,
 
-    /** Not published to Spring at all. */
-    NONE
+  /** Not published to Spring at all. */
+  NONE
 }

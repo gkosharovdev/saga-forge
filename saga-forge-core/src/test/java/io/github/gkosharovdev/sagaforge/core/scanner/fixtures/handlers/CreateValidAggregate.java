@@ -7,5 +7,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
  * {@code @AggregateIdentifier}.
  */
 @Command
-public record CreateValidAggregate(String name) {
-}
+public record CreateValidAggregate(String name) {}

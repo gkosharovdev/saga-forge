@@ -1,38 +1,42 @@
 package io.github.gkosharovdev.sagaforge.runtime;
 
 /**
- * Thrown by {@link SagaRuntime#start()} when the registered model or plug-ins are not runnable; the engine is then
- * refused for good and accepts no event (contracts/engine-startup.md, FR-034, FR-036).
+ * Thrown by {@link SagaRuntime#start()} when the registered model or plug-ins are not runnable; the
+ * engine is then refused for good and accepts no event (contracts/engine-startup.md, FR-034,
+ * FR-036).
  *
- * <p>The message is a header line followed by {@link StartupReport#allErrors()}, one error per line.</p>
+ * <p>The message is a header line followed by {@link StartupReport#allErrors()}, one error per
+ * line.
  */
 public class SagaRuntimeStartupException extends RuntimeException {
 
-    private static final long serialVersionUID = 1L;
+  private static final long serialVersionUID = 1L;
 
-    private final StartupReport report;
+  private final StartupReport report;
 
-    /**
-     * @param report every error found
-     * @throws IllegalArgumentException if {@code report} is {@code null}
-     */
-    public SagaRuntimeStartupException(StartupReport report) {
-        super(messageOf(report));
-        this.report = report;
+  /**
+   * @param report every error found
+   * @throws IllegalArgumentException if {@code report} is {@code null}
+   */
+  public SagaRuntimeStartupException(StartupReport report) {
+    super(messageOf(report));
+    this.report = report;
+  }
+
+  /** Every error found, in the order {@link StartupReport#allErrors()} lists them. */
+  public StartupReport report() {
+    return report;
+  }
+
+  private static String messageOf(StartupReport report) {
+    if (report == null) {
+      throw new IllegalArgumentException("report must not be null");
     }
-
-    /** Every error found, in the order {@link StartupReport#allErrors()} lists them. */
-    public StartupReport report() {
-        return report;
-    }
-
-    private static String messageOf(StartupReport report) {
-        if (report == null) {
-            throw new IllegalArgumentException("report must not be null");
-        }
-        StringBuilder message = new StringBuilder("Saga engine refused to start (")
-                .append(report.allErrors().size()).append(" errors):");
-        report.allErrors().forEach(error -> message.append(System.lineSeparator()).append(error));
-        return message.toString();
-    }
+    StringBuilder message =
+        new StringBuilder("Saga engine refused to start (")
+            .append(report.allErrors().size())
+            .append(" errors):");
+    report.allErrors().forEach(error -> message.append(System.lineSeparator()).append(error));
+    return message.toString();
+  }
 }

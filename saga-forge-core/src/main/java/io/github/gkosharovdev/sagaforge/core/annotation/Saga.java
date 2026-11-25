@@ -7,12 +7,10 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a class as a saga definition. Only concrete classes (not interfaces
- * or abstract classes) are valid targets. The {@code AnnotationScanner}
- * enforces this constraint at startup.
+ * Marks a class as a saga definition. Only concrete classes (not interfaces or abstract classes)
+ * are valid targets. The {@code AnnotationScanner} enforces this constraint at startup.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface Saga {
-}
+public @interface Saga {}

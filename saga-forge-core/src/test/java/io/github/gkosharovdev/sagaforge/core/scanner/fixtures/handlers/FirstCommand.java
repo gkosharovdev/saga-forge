@@ -3,8 +3,8 @@ package io.github.gkosharovdev.sagaforge.core.scanner.fixtures.handlers;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /**
- * A valid command, used as the first {@code @Command} parameter of {@link HandlerWithTwoCommandParams}.
+ * A valid command, used as the first {@code @Command} parameter of {@link
+ * HandlerWithTwoCommandParams}.
  */
 @Command
-public record FirstCommand(String reference) {
-}
+public record FirstCommand(String reference) {}

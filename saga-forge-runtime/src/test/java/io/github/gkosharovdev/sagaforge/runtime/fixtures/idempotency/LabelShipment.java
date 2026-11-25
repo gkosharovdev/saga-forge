@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 
 /** Labels an existing {@link Shipment} (aggregate instance handler). */
 @Command
-public record LabelShipment(@AggregateIdentifier String shipmentId) {
-}
+public record LabelShipment(@AggregateIdentifier String shipmentId) {}

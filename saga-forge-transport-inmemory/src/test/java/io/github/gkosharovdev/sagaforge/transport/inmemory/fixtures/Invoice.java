@@ -1,6 +1,5 @@
 package io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures;
 
-
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 
@@ -8,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Invoice {
 
-    @AggregateIdentifier
-    private String invoiceId;
+  @AggregateIdentifier private String invoiceId;
 }

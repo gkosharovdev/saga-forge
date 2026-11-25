@@ -5,5 +5,4 @@ import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 
 /** Event of {@link SagaWithoutNoArgConstructor}. */
 @DomainEvent(aggregate = StartupThing.class)
-public record ThingStarted(@AggregateIdentifier String thingId) {
-}
+public record ThingStarted(@AggregateIdentifier String thingId) {}

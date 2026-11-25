@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Ticket {
 
-    @AggregateIdentifier
-    private String ticketId;
+  @AggregateIdentifier private String ticketId;
 }

@@ -25,146 +25,174 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * User Story 4: a compensation that cannot complete needs a human (specs/006-saga-compensation spec.md US4 scenarios
- * 1 and 2, FR-016, FR-017, SC-004, SC-007; tasks.md T044).
+ * User Story 4: a compensation that cannot complete needs a human (specs/006-saga-compensation
+ * spec.md US4 scenarios 1 and 2, FR-016, FR-017, SC-004, SC-007; tasks.md T044).
  */
 class CompensationFailureTest {
 
-    /** A refusal the provider marks final. */
-    static final class RefundRefused extends RuntimeException implements FinalFailure {
+  /** A refusal the provider marks final. */
+  static final class RefundRefused extends RuntimeException implements FinalFailure {
 
-        RefundRefused() {
-            super("refund refused by the provider");
-        }
+    RefundRefused() {
+      super("refund refused by the provider");
     }
+  }
 
-    /** A blip that would be worth retrying for a step, but compensations are never retried. */
-    static final class ProviderBusy extends RuntimeException implements TransientFailure {
+  /** A blip that would be worth retrying for a step, but compensations are never retried. */
+  static final class ProviderBusy extends RuntimeException implements TransientFailure {
 
-        ProviderBusy() {
-            super("provider busy");
-        }
+    ProviderBusy() {
+      super("provider busy");
     }
+  }
 
-    private static List<String> compensations(UnwindFixture fixture) {
-        return fixture.journal().compensations().stream().filter(name -> name.startsWith("undo")).toList();
+  private static List<String> compensations(UnwindFixture fixture) {
+    return fixture.journal().compensations().stream()
+        .filter(name -> name.startsWith("undo"))
+        .toList();
+  }
+
+  private static UnwindFixture threeCommitted() {
+    UnwindFixture fixture = UnwindFixture.withEveryCompensation();
+    fixture.start("o-1");
+    fixture.receive(new BDone("o-1"));
+    fixture.receive(new CDone("o-1"));
+    return fixture;
+  }
+
+  @Test
+  @DisplayName(
+      "4.1 C compensated, B fails: A is not compensated and the saga ends COMPENSATION_FAILED")
+  void failedCompensationStopsUnwinding() {
+    UnwindFixture fixture = threeCommitted();
+    fixture.journal().failOn("undoB", new RefundRefused());
+
+    SagaHandlingResult result = fixture.receive(new Aborted("o-1"));
+
+    assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
+    assertThat(result.failure()).isNull();
+    assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
+    SagaInstance instance = fixture.committed(result.sagaId());
+    assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
+    assertThat(instance.steps().get(UnwindSaga.C).compensation().status())
+        .isEqualTo(CompensationStatus.COMPENSATED);
+    StepCompensation failed = instance.steps().get(UnwindSaga.B).compensation();
+    assertThat(failed.status()).isEqualTo(CompensationStatus.FAILED);
+    assertThat(failed.failure().causeType()).isEqualTo(RefundRefused.class.getName());
+    assertThat(failed.failure().classification()).isEqualTo(FailureClassification.FINAL);
+    assertThat(failed.failure().attempts()).isEqualTo(1);
+    assertThat(instance.steps().get(UnwindSaga.A).compensation().status())
+        .isEqualTo(CompensationStatus.NOT_ATTEMPTED);
+    assertThat(fixture.logger().byEvent("saga.compensation.failed")).hasSize(1);
+    assertThat(
+            fixture.storage().history(result.sagaId()).stream()
+                .map(stored -> stored.entry().kind())
+                .toList())
+        .endsWith(
+            SagaLifecycleEventKind.COMPENSATION_STARTED,
+            SagaLifecycleEventKind.STEP_COMPENSATED,
+            SagaLifecycleEventKind.COMPENSATION_FAILED);
+    // 011: COMPENSATION_FAILED is the one terminal entry.
+    assertThat(
+            fixture.storage().history(result.sagaId()).stream()
+                .filter(
+                    stored -> stored.entry().kind() == SagaLifecycleEventKind.COMPENSATION_FAILED))
+        .hasSize(1);
+  }
+
+  @Test
+  @DisplayName(
+      "4.2 the stored instance alone shows the trigger, every committed step and each status with its time")
+  void instanceShowsEverything() {
+    UnwindFixture fixture = threeCommitted();
+    fixture.journal().failOn("undoB", new RefundRefused());
+
+    String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
+
+    SagaInstance instance = fixture.committed(sagaId);
+    assertThat(instance.compensationTrigger().stepName()).isEqualTo(UnwindSaga.ABORT);
+    assertThat(instance.compensationTrigger().eventType()).isEqualTo(Aborted.class.getName());
+    for (String step : List.of(UnwindSaga.A, UnwindSaga.B, UnwindSaga.C)) {
+      StepCompensation compensation = instance.steps().get(step).compensation();
+      assertThat(compensation).as(step).isNotNull();
+      assertThat(compensation.at() != null)
+          .isEqualTo(compensation.status() != CompensationStatus.NOT_ATTEMPTED);
     }
+  }
 
-    private static UnwindFixture threeCommitted() {
-        UnwindFixture fixture = UnwindFixture.withEveryCompensation();
-        fixture.start("o-1");
-        fixture.receive(new BDone("o-1"));
-        fixture.receive(new CDone("o-1"));
-        return fixture;
-    }
+  @Test
+  @DisplayName("a handler failure the compensation caught still fails it: the gateway reported it")
+  void caughtHandlerFailureStillFails() {
+    DeliveryFixture fixture = new DeliveryFixture();
+    String sagaId = fixture.placedAndCharged("o-1");
+    fixture.payments().failRefundsWith(new RefundRefused());
+    fixture.journal().swallowFailures(true);
 
-    @Test
-    @DisplayName("4.1 C compensated, B fails: A is not compensated and the saga ends COMPENSATION_FAILED")
-    void failedCompensationStopsUnwinding() {
-        UnwindFixture fixture = threeCommitted();
-        fixture.journal().failOn("undoB", new RefundRefused());
+    SagaHandlingResult result = fixture.reject("o-1", "no capacity");
 
-        SagaHandlingResult result = fixture.receive(new Aborted("o-1"));
+    assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
+    assertThat(
+            fixture
+                .committed(sagaId)
+                .steps()
+                .get(DeliverySaga.CHARGED)
+                .compensation()
+                .failure()
+                .causeType())
+        .isEqualTo(RefundRefused.class.getName());
+  }
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
-        assertThat(result.failure()).isNull();
-        assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
-        SagaInstance instance = fixture.committed(result.sagaId());
-        assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
-        assertThat(instance.steps().get(UnwindSaga.C).compensation().status())
-                .isEqualTo(CompensationStatus.COMPENSATED);
-        StepCompensation failed = instance.steps().get(UnwindSaga.B).compensation();
-        assertThat(failed.status()).isEqualTo(CompensationStatus.FAILED);
-        assertThat(failed.failure().causeType()).isEqualTo(RefundRefused.class.getName());
-        assertThat(failed.failure().classification()).isEqualTo(FailureClassification.FINAL);
-        assertThat(failed.failure().attempts()).isEqualTo(1);
-        assertThat(instance.steps().get(UnwindSaga.A).compensation().status())
-                .isEqualTo(CompensationStatus.NOT_ATTEMPTED);
-        assertThat(fixture.logger().byEvent("saga.compensation.failed")).hasSize(1);
-        assertThat(fixture.storage().history(result.sagaId()).stream().map(stored -> stored.entry().kind())
-                .toList()).endsWith(SagaLifecycleEventKind.COMPENSATION_STARTED,
-                        SagaLifecycleEventKind.STEP_COMPENSATED, SagaLifecycleEventKind.COMPENSATION_FAILED);
-        // 011: COMPENSATION_FAILED is the one terminal entry.
-        assertThat(fixture.storage().history(result.sagaId()).stream()
-                .filter(stored -> stored.entry().kind() == SagaLifecycleEventKind.COMPENSATION_FAILED)).hasSize(1);
-    }
+  @Test
+  @DisplayName(
+      "a transient cause is not retried either: one call, no pause, recorded EXHAUSTED after one attempt")
+  void transientCauseIsNotRetried() {
+    DeliveryFixture fixture = new DeliveryFixture();
+    String sagaId = fixture.placedAndCharged("o-1");
+    fixture.payments().failRefundsWith(new ProviderBusy());
 
-    @Test
-    @DisplayName("4.2 the stored instance alone shows the trigger, every committed step and each status with its time")
-    void instanceShowsEverything() {
-        UnwindFixture fixture = threeCommitted();
-        fixture.journal().failOn("undoB", new RefundRefused());
+    SagaHandlingResult result = fixture.reject("o-1", "no capacity");
 
-        String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
+    assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
+    assertThat(fixture.payments().refundIds()).hasSize(1);
+    assertThat(fixture.pause().waits()).isEmpty();
+    StepCompensation failed =
+        fixture.committed(sagaId).steps().get(DeliverySaga.CHARGED).compensation();
+    assertThat(failed.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
+    assertThat(failed.failure().attempts()).isEqualTo(1);
+  }
 
-        SagaInstance instance = fixture.committed(sagaId);
-        assertThat(instance.compensationTrigger().stepName()).isEqualTo(UnwindSaga.ABORT);
-        assertThat(instance.compensationTrigger().eventType()).isEqualTo(Aborted.class.getName());
-        for (String step : List.of(UnwindSaga.A, UnwindSaga.B, UnwindSaga.C)) {
-            StepCompensation compensation = instance.steps().get(step).compensation();
-            assertThat(compensation).as(step).isNotNull();
-            assertThat(compensation.at() != null)
-                    .isEqualTo(compensation.status() != CompensationStatus.NOT_ATTEMPTED);
-        }
-    }
+  @Test
+  @DisplayName("an unmarked failure is recorded UNCLASSIFIED")
+  void unmarkedFailureIsUnclassified() {
+    UnwindFixture fixture = threeCommitted();
+    fixture.journal().failOn("undoC", new IllegalStateException("bug"));
 
-    @Test
-    @DisplayName("a handler failure the compensation caught still fails it: the gateway reported it")
-    void caughtHandlerFailureStillFails() {
-        DeliveryFixture fixture = new DeliveryFixture();
-        String sagaId = fixture.placedAndCharged("o-1");
-        fixture.payments().failRefundsWith(new RefundRefused());
-        fixture.journal().swallowFailures(true);
+    String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
 
-        SagaHandlingResult result = fixture.reject("o-1", "no capacity");
+    assertThat(
+            fixture
+                .committed(sagaId)
+                .steps()
+                .get(UnwindSaga.C)
+                .compensation()
+                .failure()
+                .classification())
+        .isEqualTo(FailureClassification.UNCLASSIFIED);
+    assertThat(compensations(fixture)).containsExactly("undoC");
+  }
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
-        assertThat(fixture.committed(sagaId).steps().get(DeliverySaga.CHARGED).compensation().failure().causeType())
-                .isEqualTo(RefundRefused.class.getName());
-    }
+  @Test
+  @DisplayName("a later event for a COMPENSATION_FAILED instance is UNEXPECTED and runs nothing")
+  void noLaterRetry() {
+    UnwindFixture fixture = threeCommitted();
+    fixture.journal().failOn("undoB", new RefundRefused());
+    String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
+    fixture.journal().clearFailures();
 
-    @Test
-    @DisplayName("a transient cause is not retried either: one call, no pause, recorded EXHAUSTED after one attempt")
-    void transientCauseIsNotRetried() {
-        DeliveryFixture fixture = new DeliveryFixture();
-        String sagaId = fixture.placedAndCharged("o-1");
-        fixture.payments().failRefundsWith(new ProviderBusy());
+    SagaHandlingResult later = fixture.receive(new Finished("o-1"));
 
-        SagaHandlingResult result = fixture.reject("o-1", "no capacity");
-
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPENSATION_FAILED);
-        assertThat(fixture.payments().refundIds()).hasSize(1);
-        assertThat(fixture.pause().waits()).isEmpty();
-        StepCompensation failed = fixture.committed(sagaId).steps().get(DeliverySaga.CHARGED).compensation();
-        assertThat(failed.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
-        assertThat(failed.failure().attempts()).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("an unmarked failure is recorded UNCLASSIFIED")
-    void unmarkedFailureIsUnclassified() {
-        UnwindFixture fixture = threeCommitted();
-        fixture.journal().failOn("undoC", new IllegalStateException("bug"));
-
-        String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
-
-        assertThat(fixture.committed(sagaId).steps().get(UnwindSaga.C).compensation().failure().classification())
-                .isEqualTo(FailureClassification.UNCLASSIFIED);
-        assertThat(compensations(fixture)).containsExactly("undoC");
-    }
-
-    @Test
-    @DisplayName("a later event for a COMPENSATION_FAILED instance is UNEXPECTED and runs nothing")
-    void noLaterRetry() {
-        UnwindFixture fixture = threeCommitted();
-        fixture.journal().failOn("undoB", new RefundRefused());
-        String sagaId = fixture.receive(new Aborted("o-1")).sagaId();
-        fixture.journal().clearFailures();
-
-        SagaHandlingResult later = fixture.receive(new Finished("o-1"));
-
-        assertThat(later.outcome()).isEqualTo(HandlingOutcome.UNEXPECTED);
-        assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
-    }
+    assertThat(later.outcome()).isEqualTo(HandlingOutcome.UNEXPECTED);
+    assertThat(compensations(fixture)).containsExactly("undoC", "undoB");
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATION_FAILED);
+  }
 }

@@ -7,11 +7,10 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a method that terminates a saga instance. Must co-occur with
- * {@code @SagaStep}. At least one per saga class.
+ * Marks a method that terminates a saga instance. Must co-occur with {@code @SagaStep}. At least
+ * one per saga class.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface EndSaga {
-}
+public @interface EndSaga {}

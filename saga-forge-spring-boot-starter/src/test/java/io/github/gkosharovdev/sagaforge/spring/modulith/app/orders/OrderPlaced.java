@@ -1,19 +1,17 @@
 package io.github.gkosharovdev.sagaforge.spring.modulith.app.orders;
 
-import java.math.BigDecimal;
-
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
+import java.math.BigDecimal;
 
 /** An order was placed; a negative amount makes the saga's payment step fail. */
 @DomainEvent(aggregate = OrderPlaced.Order.class)
 public record OrderPlaced(@AggregateIdentifier String orderId, BigDecimal amount) {
 
-    @Aggregate
-    public static class Order {
+  @Aggregate
+  public static class Order {
 
-        @AggregateIdentifier
-        private String orderId;
-    }
+    @AggregateIdentifier private String orderId;
+  }
 }

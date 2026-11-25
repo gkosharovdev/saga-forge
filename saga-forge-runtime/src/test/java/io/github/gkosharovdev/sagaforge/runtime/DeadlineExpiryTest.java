@@ -31,106 +31,125 @@ import org.junit.jupiter.api.Test;
  */
 class DeadlineExpiryTest {
 
-    private final DeadlineFixture fixture = new DeadlineFixture();
+  private final DeadlineFixture fixture = new DeadlineFixture();
 
-    @Test
-    @DisplayName("the step that starts a deadline schedules it, due at clock + duration, and records it open")
-    void startingStepOpensTheDeadline() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+  @Test
+  @DisplayName(
+      "the step that starts a deadline schedules it, due at clock + duration, and records it open")
+  void startingStepOpensTheDeadline() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
 
-        SagaInstance instance = fixture.committed(sagaId);
-        OpenDeadline window = instance.openDeadlines().get(PaymentWindowSaga.WINDOW);
-        assertThat(window.dueAt()).isEqualTo(DeadlineFixture.START.plus(Duration.ofMinutes(30)));
-        assertThat(window.startedByStep()).isEqualTo(PaymentWindowSaga.RESERVED);
-        assertThat(window.deadlineId()).startsWith(sagaId + ":deadline:paymentWindow:uow-");
-        ScheduledMessage message = fixture.outbox().scheduled().stream()
-                .filter(scheduled -> scheduled.messageId().equals(window.deadlineId())).findFirst().orElseThrow();
-        assertThat(message.notBefore()).isEqualTo(window.dueAt());
-        assertThat(((DeadlineReached) message.payload()).sagaType()).isEqualTo(PaymentWindowSaga.class.getName());
-    }
+    SagaInstance instance = fixture.committed(sagaId);
+    OpenDeadline window = instance.openDeadlines().get(PaymentWindowSaga.WINDOW);
+    assertThat(window.dueAt()).isEqualTo(DeadlineFixture.START.plus(Duration.ofMinutes(30)));
+    assertThat(window.startedByStep()).isEqualTo(PaymentWindowSaga.RESERVED);
+    assertThat(window.deadlineId()).startsWith(sagaId + ":deadline:paymentWindow:uow-");
+    ScheduledMessage message =
+        fixture.outbox().scheduled().stream()
+            .filter(scheduled -> scheduled.messageId().equals(window.deadlineId()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(message.notBefore()).isEqualTo(window.dueAt());
+    assertThat(((DeadlineReached) message.payload()).sagaType())
+        .isEqualTo(PaymentWindowSaga.class.getName());
+  }
 
-    @Test
-    @DisplayName("before it is due nothing runs; after it the timeout step runs once and compensates")
-    void timesOutAndCompensates() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
-        fixture.advance(Duration.ofMinutes(9));
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.RUNNING);
-        assertThat(PaymentWindowSaga.RECEIVED).isEmpty();
+  @Test
+  @DisplayName("before it is due nothing runs; after it the timeout step runs once and compensates")
+  void timesOutAndCompensates() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+    fixture.advance(Duration.ofMinutes(9));
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.RUNNING);
+    assertThat(PaymentWindowSaga.RECEIVED).isEmpty();
 
-        List<SagaHandlingResult> results = fixture.advance(Duration.ofMinutes(21));
+    List<SagaHandlingResult> results = fixture.advance(Duration.ofMinutes(21));
 
-        assertThat(PaymentWindowSaga.RECEIVED).singleElement()
-                .satisfies(reached -> assertThat(reached.deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW));
-        assertThat(results).extracting(SagaHandlingResult::outcome).contains(HandlingOutcome.COMPENSATED);
-        SagaInstance instance = fixture.committed(sagaId);
-        assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATED);
-        assertThat(instance.openDeadlines()).isEmpty();
-        CompensationTrigger trigger = instance.compensationTrigger();
-        assertThat(trigger.kind()).isEqualTo(CompensationTriggerKind.DEADLINE_EXPIRED);
-        assertThat(trigger.deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW);
-        assertThat(trigger.stepName()).isEqualTo(PaymentWindowSaga.EXPIRED);
-        assertThat(trigger.eventType()).isEqualTo(DeadlineReached.class.getName());
-        assertThat(fixture.stock().handled()).containsExactly(new ReserveStock("o-1"), new RemindCustomer("o-1"),
-                new ReleaseStock("o-1"));
-    }
+    assertThat(PaymentWindowSaga.RECEIVED)
+        .singleElement()
+        .satisfies(
+            reached -> assertThat(reached.deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW));
+    assertThat(results)
+        .extracting(SagaHandlingResult::outcome)
+        .contains(HandlingOutcome.COMPENSATED);
+    SagaInstance instance = fixture.committed(sagaId);
+    assertThat(instance.status()).isEqualTo(SagaStatus.COMPENSATED);
+    assertThat(instance.openDeadlines()).isEmpty();
+    CompensationTrigger trigger = instance.compensationTrigger();
+    assertThat(trigger.kind()).isEqualTo(CompensationTriggerKind.DEADLINE_EXPIRED);
+    assertThat(trigger.deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW);
+    assertThat(trigger.stepName()).isEqualTo(PaymentWindowSaga.EXPIRED);
+    assertThat(trigger.eventType()).isEqualTo(DeadlineReached.class.getName());
+    assertThat(fixture.stock().handled())
+        .containsExactly(
+            new ReserveStock("o-1"), new RemindCustomer("o-1"), new ReleaseStock("o-1"));
+  }
 
-    @Test
-    @DisplayName("the outcome event carries the deadline trigger")
-    void outcomeCarriesDeadline() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+  @Test
+  @DisplayName("the outcome event carries the deadline trigger")
+  void outcomeCarriesDeadline() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
 
-        fixture.advance(Duration.ofMinutes(30));
+    fixture.advance(Duration.ofMinutes(30));
 
-        SagaCompensated outcome = fixture.outbox().committed().stream()
-                .flatMap(batch -> batch.events().stream())
-                .filter(SagaCompensated.class::isInstance).map(SagaCompensated.class::cast)
-                .filter(compensated -> compensated.sagaId().equals(sagaId))
-                .findFirst().orElseThrow();
-        assertThat(outcome.trigger().deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW);
-        assertThat(outcome.trigger().kind()).isEqualTo(CompensationTriggerKind.DEADLINE_EXPIRED);
-    }
+    SagaCompensated outcome =
+        fixture.outbox().committed().stream()
+            .flatMap(batch -> batch.events().stream())
+            .filter(SagaCompensated.class::isInstance)
+            .map(SagaCompensated.class::cast)
+            .filter(compensated -> compensated.sagaId().equals(sagaId))
+            .findFirst()
+            .orElseThrow();
+    assertThat(outcome.trigger().deadlineName()).isEqualTo(PaymentWindowSaga.WINDOW);
+    assertThat(outcome.trigger().kind()).isEqualTo(CompensationTriggerKind.DEADLINE_EXPIRED);
+  }
 
-    @Test
-    @DisplayName("leaving RUNNING cancels every open deadline in the same transaction")
-    void endCancelsAll() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
-        List<String> open = fixture.committed(sagaId).openDeadlines().values().stream()
-                .map(OpenDeadline::deadlineId).toList();
+  @Test
+  @DisplayName("leaving RUNNING cancels every open deadline in the same transaction")
+  void endCancelsAll() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+    List<String> open =
+        fixture.committed(sagaId).openDeadlines().values().stream()
+            .map(OpenDeadline::deadlineId)
+            .toList();
 
-        SagaHandlingResult result = fixture.receive(new PaymentAuthorized("o-1"));
+    SagaHandlingResult result = fixture.receive(new PaymentAuthorized("o-1"));
 
-        assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
-        assertThat(fixture.committed(sagaId).openDeadlines()).isEmpty();
-        assertThat(open).hasSize(2).allSatisfy(id -> assertThat(fixture.outbox().state(id)).isEqualTo(State.CANCELLED));
-        assertThat(fixture.advance(Duration.ofHours(2))).isEmpty();
-    }
+    assertThat(result.outcome()).isEqualTo(HandlingOutcome.COMPLETED);
+    assertThat(fixture.committed(sagaId).openDeadlines()).isEmpty();
+    assertThat(open)
+        .hasSize(2)
+        .allSatisfy(id -> assertThat(fixture.outbox().state(id)).isEqualTo(State.CANCELLED));
+    assertThat(fixture.advance(Duration.ofHours(2))).isEmpty();
+  }
 
-    @Test
-    @DisplayName("a cancelledBy step before the due time cancels that deadline only; the saga keeps waiting")
-    void cancelledByStep() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
-        String window = fixture.committed(sagaId).openDeadlines().get(PaymentWindowSaga.WINDOW).deadlineId();
+  @Test
+  @DisplayName(
+      "a cancelledBy step before the due time cancels that deadline only; the saga keeps waiting")
+  void cancelledByStep() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+    String window =
+        fixture.committed(sagaId).openDeadlines().get(PaymentWindowSaga.WINDOW).deadlineId();
 
-        fixture.receive(new PaymentDeclined("o-1"));
+    fixture.receive(new PaymentDeclined("o-1"));
 
-        SagaInstance instance = fixture.committed(sagaId);
-        assertThat(instance.status()).isEqualTo(SagaStatus.RUNNING);
-        assertThat(instance.openDeadlines()).containsOnlyKeys(PaymentWindowSaga.REMINDER);
-        assertThat(fixture.outbox().state(window)).isEqualTo(State.CANCELLED);
-        fixture.advance(Duration.ofMinutes(31));
-        assertThat(PaymentWindowSaga.RECEIVED).isEmpty();
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.RUNNING);
-    }
+    SagaInstance instance = fixture.committed(sagaId);
+    assertThat(instance.status()).isEqualTo(SagaStatus.RUNNING);
+    assertThat(instance.openDeadlines()).containsOnlyKeys(PaymentWindowSaga.REMINDER);
+    assertThat(fixture.outbox().state(window)).isEqualTo(State.CANCELLED);
+    fixture.advance(Duration.ofMinutes(31));
+    assertThat(PaymentWindowSaga.RECEIVED).isEmpty();
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.RUNNING);
+  }
 
-    @Test
-    @DisplayName("open deadlines survive a restart and fire once after it")
-    void survivesRestart() {
-        String sagaId = fixture.placedAndReserved("o-1", "PT30M");
+  @Test
+  @DisplayName("open deadlines survive a restart and fire once after it")
+  void survivesRestart() {
+    String sagaId = fixture.placedAndReserved("o-1", "PT30M");
 
-        fixture.restart();
-        fixture.advance(Duration.ofHours(1));
+    fixture.restart();
+    fixture.advance(Duration.ofHours(1));
 
-        assertThat(PaymentWindowSaga.RECEIVED).hasSize(1);
-        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
-    }
+    assertThat(PaymentWindowSaga.RECEIVED).hasSize(1);
+    assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
+  }
 }

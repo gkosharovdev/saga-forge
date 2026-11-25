@@ -2,10 +2,6 @@ package io.github.gkosharovdev.sagaforge.core.scanner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.AbstractSagaClass;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.CompensationForNonStepMethodSaga;
@@ -25,332 +21,391 @@ import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.SagaWithCommandHan
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.SagaWithContextFieldSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StartSagaWithoutStepSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepReturningValueSaga;
+import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepTakingOutcomeEventSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithMultipleParamsSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNoParamSaga;
-import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepTakingOutcomeEventSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.StepWithNonDomainEventParamSaga;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.ValidSaga;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 class ReflectiveAnnotationScannerTest {
 
-    private ReflectiveAnnotationScanner scanner;
+  private ReflectiveAnnotationScanner scanner;
 
-    @BeforeEach
-    void setUp() {
-        scanner = new ReflectiveAnnotationScanner();
+  @BeforeEach
+  void setUp() {
+    scanner = new ReflectiveAnnotationScanner();
+  }
+
+  @Test
+  @DisplayName("null input throws IllegalArgumentException")
+  void nullInputThrowsException() {
+    assertThatThrownBy(() -> scanner.validate(null)).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  @DisplayName("valid saga passes validation with no errors")
+  void validSagaPassesValidation() {
+    SagaValidationResult result = scanner.validate(ValidSaga.class);
+
+    assertThat(result.isValid()).isTrue();
+    assertThat(result.errors()).isEmpty();
+    assertThat(result.sagaClass()).isEqualTo(ValidSaga.class);
+  }
+
+  @Nested
+  @DisplayName("Non-concrete class violations")
+  class NonConcreteClassTests {
+
+    @Test
+    @DisplayName("abstract class is rejected")
+    void abstractClassIsRejected() {
+      SagaValidationResult result = scanner.validate(AbstractSagaClass.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class AbstractSagaClass must be a concrete class, not an interface or abstract class"));
     }
 
     @Test
-    @DisplayName("null input throws IllegalArgumentException")
-    void nullInputThrowsException() {
-        assertThatThrownBy(() -> scanner.validate(null))
-                .isInstanceOf(IllegalArgumentException.class);
+    @DisplayName("interface is rejected")
+    void interfaceIsRejected() {
+      SagaValidationResult result = scanner.validate(InterfaceSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class InterfaceSaga must be a concrete class, not an interface or abstract class"));
+    }
+  }
+
+  @Nested
+  @DisplayName("@SagaId violations")
+  class SagaIdTests {
+
+    @Test
+    @DisplayName("missing @SagaId produces error")
+    void missingSagaId() {
+      SagaValidationResult result = scanner.validate(NoSagaIdSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class NoSagaIdSaga must declare exactly one @SagaId field, found 0"));
     }
 
     @Test
-    @DisplayName("valid saga passes validation with no errors")
-    void validSagaPassesValidation() {
-        SagaValidationResult result = scanner.validate(ValidSaga.class);
+    @DisplayName("multiple @SagaId fields produces error")
+    void multipleSagaId() {
+      SagaValidationResult result = scanner.validate(MultipleSagaIdSaga.class);
 
-        assertThat(result.isValid()).isTrue();
-        assertThat(result.errors()).isEmpty();
-        assertThat(result.sagaClass()).isEqualTo(ValidSaga.class);
-    }
-
-    @Nested
-    @DisplayName("Non-concrete class violations")
-    class NonConcreteClassTests {
-
-        @Test
-        @DisplayName("abstract class is rejected")
-        void abstractClassIsRejected() {
-            SagaValidationResult result = scanner.validate(AbstractSagaClass.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class AbstractSagaClass must be a concrete class, not an interface or abstract class"));
-        }
-
-        @Test
-        @DisplayName("interface is rejected")
-        void interfaceIsRejected() {
-            SagaValidationResult result = scanner.validate(InterfaceSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class InterfaceSaga must be a concrete class, not an interface or abstract class"));
-        }
-    }
-
-    @Nested
-    @DisplayName("@SagaId violations")
-    class SagaIdTests {
-
-        @Test
-        @DisplayName("missing @SagaId produces error")
-        void missingSagaId() {
-            SagaValidationResult result = scanner.validate(NoSagaIdSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class NoSagaIdSaga must declare exactly one @SagaId field, found 0"));
-        }
-
-        @Test
-        @DisplayName("multiple @SagaId fields produces error")
-        void multipleSagaId() {
-            SagaValidationResult result = scanner.validate(MultipleSagaIdSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class MultipleSagaIdSaga must declare exactly one @SagaId field, found 2"));
-        }
-
-        @Test
-        @DisplayName("non-String @SagaId field produces error")
-        void nonStringSagaId() {
-            SagaValidationResult result = scanner.validate(NonStringSagaIdSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaId field sagaId in NonStringSagaIdSaga must be of type String"));
-        }
-    }
-
-    @Nested
-    @DisplayName("SagaContext field cardinality")
-    class SagaContextFieldTests {
-
-        @Test
-        @DisplayName("exactly one SagaContext field passes validation")
-        void singleSagaContextField() {
-            SagaValidationResult result = scanner.validate(SagaWithContextFieldSaga.class);
-
-            assertThat(result.isValid()).isTrue();
-            assertThat(result.errors()).isEmpty();
-        }
-
-        @Test
-        @DisplayName("multiple SagaContext fields produces error")
-        void multipleSagaContextFields() {
-            SagaValidationResult result = scanner.validate(MultipleSagaContextFieldSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).containsExactly(
-                    "@Saga class MultipleSagaContextFieldSaga must declare at most one SagaContext field, found 2");
-        }
-
-        @Test
-        @DisplayName("zero SagaContext fields passes validation (field is optional)")
-        void zeroSagaContextFields() {
-            SagaValidationResult result = scanner.validate(ValidSaga.class);
-
-            assertThat(result.isValid()).isTrue();
-            assertThat(result.errors()).isEmpty();
-        }
-    }
-
-    @Nested
-    @DisplayName("Lifecycle cardinality violations")
-    class LifecycleCardinalityTests {
-
-        @Test
-        @DisplayName("missing @StartSaga produces error")
-        void missingStartSaga() {
-            SagaValidationResult result = scanner.validate(NoStartSagaSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class NoStartSagaSaga must declare exactly one @StartSaga method, found 0"));
-        }
-
-        @Test
-        @DisplayName("multiple @StartSaga produces error")
-        void multipleStartSaga() {
-            SagaValidationResult result = scanner.validate(MultipleStartSagaSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class MultipleStartSagaSaga must declare exactly one @StartSaga method, found 2"));
-        }
-
-        @Test
-        @DisplayName("missing @EndSaga produces error")
-        void missingEndSaga() {
-            SagaValidationResult result = scanner.validate(NoEndSagaSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@Saga class NoEndSagaSaga must declare at least one @EndSaga method, found 0"));
-        }
-    }
-
-    @Nested
-    @DisplayName("Lifecycle co-occurrence violations")
-    class LifecycleCoOccurrenceTests {
-
-        @Test
-        @DisplayName("@StartSaga without @SagaStep produces error")
-        void startSagaWithoutStep() {
-            SagaValidationResult result = scanner.validate(StartSagaWithoutStepSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("Method handleStart in StartSagaWithoutStepSaga is annotated with @StartSaga but missing @SagaStep"));
-        }
-
-        @Test
-        @DisplayName("@EndSaga without @SagaStep produces error")
-        void endSagaWithoutStep() {
-            SagaValidationResult result = scanner.validate(EndSagaWithoutStepSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("Method handleEnd in EndSagaWithoutStepSaga is annotated with @EndSaga but missing @SagaStep"));
-        }
-    }
-
-    @Nested
-    @DisplayName("@SagaStep parameter violations")
-    class SagaStepParameterTests {
-
-        @Test
-        @DisplayName("@SagaStep with no parameters produces error")
-        void stepWithNoParam() {
-            SagaValidationResult result = scanner.validate(StepWithNoParamSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaStep method handleStart in StepWithNoParamSaga must accept exactly one parameter, found 0"));
-        }
-
-        @Test
-        @DisplayName("@SagaStep with multiple parameters produces error")
-        void stepWithMultipleParams() {
-            SagaValidationResult result = scanner.validate(StepWithMultipleParamsSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaStep method handleStart in StepWithMultipleParamsSaga must accept exactly one parameter, found 2"));
-        }
-
-        @Test
-        @DisplayName("@SagaStep with non-@DomainEvent parameter produces error")
-        void stepWithNonDomainEventParam() {
-            SagaValidationResult result = scanner.validate(StepWithNonDomainEventParamSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaStep method handleStart parameter type NotADomainEvent must be annotated with @DomainEvent"));
-        }
-
-        @Test
-        @DisplayName("@SagaStep taking an outcome event produces error (011 FR-017)")
-        void stepTakingOutcomeEvent() {
-            SagaValidationResult result = scanner.validate(StepTakingOutcomeEventSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaStep method otherSagaFailed parameter type SagaFailed must be annotated with @DomainEvent"));
-        }
-    }
-
-    @Nested
-    @DisplayName("@SagaCompensation violations")
-    class CompensationTests {
-
-        @Test
-        @DisplayName("forStep referencing non-existent method produces error")
-        void compensationInvalidForStep() {
-            SagaValidationResult result = scanner.validate(CompensationInvalidForStepSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaCompensation on compensate: forStep 'nonExistentMethod' does not reference an existing method in CompensationInvalidForStepSaga"));
-        }
-
-        @Test
-        @DisplayName("forStep referencing non-@SagaStep method produces error")
-        void compensationForNonStepMethod() {
-            SagaValidationResult result = scanner.validate(CompensationForNonStepMethodSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).anyMatch(e ->
-                    e.equals("@SagaCompensation on compensate: forStep 'regularMethod' must reference a @SagaStep method"));
-        }
-    }
-
-    /**
-     * Saga-class rules from feature 002 (contracts/validation.md, research §7). Each invalid fixture is
-     * otherwise identical to {@link ValidSaga}, so it yields exactly one error.
-     */
-    @Nested
-    @DisplayName("Transactional step-sequence saga-class rules (002)")
-    class TransactionalStepSequenceRuleTests {
-
-        @Test
-        @DisplayName("step returning a value produces error")
-        void stepReturningValue() {
-            SagaValidationResult result = scanner.validate(StepReturningValueSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).containsExactly(
-                    "@SagaStep method handleStart in StepReturningValueSaga must return void; "
-                            + "dispatch commands through the CommandGateway instead");
-        }
-
-        @Test
-        @DisplayName("two steps reacting to the same event type produce one error listing both methods, sorted by name")
-        void duplicateEventType() {
-            SagaValidationResult result = scanner.validate(DuplicateEventTypeSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            // Method names are listed in ascending lexicographic order for a deterministic message.
-            assertThat(result.errors()).containsExactly(
-                    "@Saga class DuplicateEventTypeSaga has more than one @SagaStep reacting to TestEvent: "
-                            + "handleAgain, handleStart");
-        }
-
-        @Test
-        @DisplayName("@CommandHandler method on a saga produces error")
-        void commandHandlerOnSaga() {
-            SagaValidationResult result = scanner.validate(SagaWithCommandHandler.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).containsExactly(
-                    "@Saga class SagaWithCommandHandler must not declare @CommandHandler method handle");
-        }
-
-        @Test
-        @DisplayName("multiple CommandGateway fields produce error")
-        void multipleCommandGatewayFields() {
-            SagaValidationResult result = scanner.validate(MultipleCommandGatewayFieldSaga.class);
-
-            assertThat(result.isValid()).isFalse();
-            assertThat(result.errors()).containsExactly(
-                    "@Saga class MultipleCommandGatewayFieldSaga must declare at most one CommandGateway field, found 2");
-        }
-
-        @Test
-        @DisplayName("ValidSaga and SagaWithContextFieldSaga remain valid")
-        void existingValidSagasRemainValid() {
-            assertThat(scanner.validate(ValidSaga.class).errors()).isEmpty();
-            assertThat(scanner.validate(SagaWithContextFieldSaga.class).errors()).isEmpty();
-        }
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class MultipleSagaIdSaga must declare exactly one @SagaId field, found 2"));
     }
 
     @Test
-    @DisplayName("all errors are collected in a single pass for InterfaceSaga")
-    void allErrorsCollectedInSinglePass() {
-        // InterfaceSaga is an interface with no fields or methods — it should trigger
-        // multiple validation errors: non-concrete, missing @SagaId, missing @StartSaga, missing @EndSaga
-        SagaValidationResult result = scanner.validate(InterfaceSaga.class);
+    @DisplayName("non-String @SagaId field produces error")
+    void nonStringSagaId() {
+      SagaValidationResult result = scanner.validate(NonStringSagaIdSaga.class);
 
-        assertThat(result.isValid()).isFalse();
-        assertThat(result.errors()).hasSizeGreaterThanOrEqualTo(4);
-        assertThat(result.errors()).anyMatch(e -> e.contains("must be a concrete class"));
-        assertThat(result.errors()).anyMatch(e -> e.contains("must declare exactly one @SagaId field, found 0"));
-        assertThat(result.errors()).anyMatch(e -> e.contains("must declare exactly one @StartSaga method, found 0"));
-        assertThat(result.errors()).anyMatch(e -> e.contains("must declare at least one @EndSaga method, found 0"));
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e -> e.equals("@SagaId field sagaId in NonStringSagaIdSaga must be of type String"));
     }
+  }
+
+  @Nested
+  @DisplayName("SagaContext field cardinality")
+  class SagaContextFieldTests {
+
+    @Test
+    @DisplayName("exactly one SagaContext field passes validation")
+    void singleSagaContextField() {
+      SagaValidationResult result = scanner.validate(SagaWithContextFieldSaga.class);
+
+      assertThat(result.isValid()).isTrue();
+      assertThat(result.errors()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("multiple SagaContext fields produces error")
+    void multipleSagaContextFields() {
+      SagaValidationResult result = scanner.validate(MultipleSagaContextFieldSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .containsExactly(
+              "@Saga class MultipleSagaContextFieldSaga must declare at most one SagaContext field, found 2");
+    }
+
+    @Test
+    @DisplayName("zero SagaContext fields passes validation (field is optional)")
+    void zeroSagaContextFields() {
+      SagaValidationResult result = scanner.validate(ValidSaga.class);
+
+      assertThat(result.isValid()).isTrue();
+      assertThat(result.errors()).isEmpty();
+    }
+  }
+
+  @Nested
+  @DisplayName("Lifecycle cardinality violations")
+  class LifecycleCardinalityTests {
+
+    @Test
+    @DisplayName("missing @StartSaga produces error")
+    void missingStartSaga() {
+      SagaValidationResult result = scanner.validate(NoStartSagaSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class NoStartSagaSaga must declare exactly one @StartSaga method, found 0"));
+    }
+
+    @Test
+    @DisplayName("multiple @StartSaga produces error")
+    void multipleStartSaga() {
+      SagaValidationResult result = scanner.validate(MultipleStartSagaSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class MultipleStartSagaSaga must declare exactly one @StartSaga method, found 2"));
+    }
+
+    @Test
+    @DisplayName("missing @EndSaga produces error")
+    void missingEndSaga() {
+      SagaValidationResult result = scanner.validate(NoEndSagaSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@Saga class NoEndSagaSaga must declare at least one @EndSaga method, found 0"));
+    }
+  }
+
+  @Nested
+  @DisplayName("Lifecycle co-occurrence violations")
+  class LifecycleCoOccurrenceTests {
+
+    @Test
+    @DisplayName("@StartSaga without @SagaStep produces error")
+    void startSagaWithoutStep() {
+      SagaValidationResult result = scanner.validate(StartSagaWithoutStepSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "Method handleStart in StartSagaWithoutStepSaga is annotated with @StartSaga but missing @SagaStep"));
+    }
+
+    @Test
+    @DisplayName("@EndSaga without @SagaStep produces error")
+    void endSagaWithoutStep() {
+      SagaValidationResult result = scanner.validate(EndSagaWithoutStepSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "Method handleEnd in EndSagaWithoutStepSaga is annotated with @EndSaga but missing @SagaStep"));
+    }
+  }
+
+  @Nested
+  @DisplayName("@SagaStep parameter violations")
+  class SagaStepParameterTests {
+
+    @Test
+    @DisplayName("@SagaStep with no parameters produces error")
+    void stepWithNoParam() {
+      SagaValidationResult result = scanner.validate(StepWithNoParamSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaStep method handleStart in StepWithNoParamSaga must accept exactly one parameter, found 0"));
+    }
+
+    @Test
+    @DisplayName("@SagaStep with multiple parameters produces error")
+    void stepWithMultipleParams() {
+      SagaValidationResult result = scanner.validate(StepWithMultipleParamsSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaStep method handleStart in StepWithMultipleParamsSaga must accept exactly one parameter, found 2"));
+    }
+
+    @Test
+    @DisplayName("@SagaStep with non-@DomainEvent parameter produces error")
+    void stepWithNonDomainEventParam() {
+      SagaValidationResult result = scanner.validate(StepWithNonDomainEventParamSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaStep method handleStart parameter type NotADomainEvent must be annotated with @DomainEvent"));
+    }
+
+    @Test
+    @DisplayName("@SagaStep taking an outcome event produces error (011 FR-017)")
+    void stepTakingOutcomeEvent() {
+      SagaValidationResult result = scanner.validate(StepTakingOutcomeEventSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaStep method otherSagaFailed parameter type SagaFailed must be annotated with @DomainEvent"));
+    }
+  }
+
+  @Nested
+  @DisplayName("@SagaCompensation violations")
+  class CompensationTests {
+
+    @Test
+    @DisplayName("forStep referencing non-existent method produces error")
+    void compensationInvalidForStep() {
+      SagaValidationResult result = scanner.validate(CompensationInvalidForStepSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaCompensation on compensate: forStep 'nonExistentMethod' does not reference an existing method in CompensationInvalidForStepSaga"));
+    }
+
+    @Test
+    @DisplayName("forStep referencing non-@SagaStep method produces error")
+    void compensationForNonStepMethod() {
+      SagaValidationResult result = scanner.validate(CompensationForNonStepMethodSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .anyMatch(
+              e ->
+                  e.equals(
+                      "@SagaCompensation on compensate: forStep 'regularMethod' must reference a @SagaStep method"));
+    }
+  }
+
+  /**
+   * Saga-class rules from feature 002 (contracts/validation.md, research §7). Each invalid fixture
+   * is otherwise identical to {@link ValidSaga}, so it yields exactly one error.
+   */
+  @Nested
+  @DisplayName("Transactional step-sequence saga-class rules (002)")
+  class TransactionalStepSequenceRuleTests {
+
+    @Test
+    @DisplayName("step returning a value produces error")
+    void stepReturningValue() {
+      SagaValidationResult result = scanner.validate(StepReturningValueSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .containsExactly(
+              "@SagaStep method handleStart in StepReturningValueSaga must return void; "
+                  + "dispatch commands through the CommandGateway instead");
+    }
+
+    @Test
+    @DisplayName(
+        "two steps reacting to the same event type produce one error listing both methods, sorted by name")
+    void duplicateEventType() {
+      SagaValidationResult result = scanner.validate(DuplicateEventTypeSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      // Method names are listed in ascending lexicographic order for a deterministic message.
+      assertThat(result.errors())
+          .containsExactly(
+              "@Saga class DuplicateEventTypeSaga has more than one @SagaStep reacting to TestEvent: "
+                  + "handleAgain, handleStart");
+    }
+
+    @Test
+    @DisplayName("@CommandHandler method on a saga produces error")
+    void commandHandlerOnSaga() {
+      SagaValidationResult result = scanner.validate(SagaWithCommandHandler.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .containsExactly(
+              "@Saga class SagaWithCommandHandler must not declare @CommandHandler method handle");
+    }
+
+    @Test
+    @DisplayName("multiple CommandGateway fields produce error")
+    void multipleCommandGatewayFields() {
+      SagaValidationResult result = scanner.validate(MultipleCommandGatewayFieldSaga.class);
+
+      assertThat(result.isValid()).isFalse();
+      assertThat(result.errors())
+          .containsExactly(
+              "@Saga class MultipleCommandGatewayFieldSaga must declare at most one CommandGateway field, found 2");
+    }
+
+    @Test
+    @DisplayName("ValidSaga and SagaWithContextFieldSaga remain valid")
+    void existingValidSagasRemainValid() {
+      assertThat(scanner.validate(ValidSaga.class).errors()).isEmpty();
+      assertThat(scanner.validate(SagaWithContextFieldSaga.class).errors()).isEmpty();
+    }
+  }
+
+  @Test
+  @DisplayName("all errors are collected in a single pass for InterfaceSaga")
+  void allErrorsCollectedInSinglePass() {
+    // InterfaceSaga is an interface with no fields or methods — it should trigger
+    // multiple validation errors: non-concrete, missing @SagaId, missing @StartSaga, missing
+    // @EndSaga
+    SagaValidationResult result = scanner.validate(InterfaceSaga.class);
+
+    assertThat(result.isValid()).isFalse();
+    assertThat(result.errors()).hasSizeGreaterThanOrEqualTo(4);
+    assertThat(result.errors()).anyMatch(e -> e.contains("must be a concrete class"));
+    assertThat(result.errors())
+        .anyMatch(e -> e.contains("must declare exactly one @SagaId field, found 0"));
+    assertThat(result.errors())
+        .anyMatch(e -> e.contains("must declare exactly one @StartSaga method, found 0"));
+    assertThat(result.errors())
+        .anyMatch(e -> e.contains("must declare at least one @EndSaga method, found 0"));
+  }
 }

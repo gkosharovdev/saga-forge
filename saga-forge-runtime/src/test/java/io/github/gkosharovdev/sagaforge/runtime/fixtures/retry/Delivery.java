@@ -7,6 +7,5 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 @Aggregate
 public final class Delivery {
 
-    @AggregateIdentifier
-    private String bookingId;
+  @AggregateIdentifier private String bookingId;
 }

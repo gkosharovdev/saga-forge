@@ -6,5 +6,5 @@ import io.github.gkosharovdev.sagaforge.example.checkout.Payment;
 
 /** The payment provider refused to authorise the amount. A business failure of the checkout. */
 @DomainEvent(aggregate = Payment.class)
-public record PaymentDeclinedEvent(@AggregateIdentifier String paymentId, String orderId, String reason) {
-}
+public record PaymentDeclinedEvent(
+    @AggregateIdentifier String paymentId, String orderId, String reason) {}

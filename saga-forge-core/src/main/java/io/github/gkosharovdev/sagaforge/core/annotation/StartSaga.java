@@ -7,11 +7,10 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks the method that creates a new saga instance. Must co-occur with
- * {@code @SagaStep}. Exactly one per saga class.
+ * Marks the method that creates a new saga instance. Must co-occur with {@code @SagaStep}. Exactly
+ * one per saga class.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface StartSaga {
-}
+public @interface StartSaga {}
