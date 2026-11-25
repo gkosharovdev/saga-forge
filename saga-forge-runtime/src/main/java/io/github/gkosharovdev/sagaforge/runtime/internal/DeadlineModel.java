@@ -6,7 +6,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartDeadline;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * The deadlines one {@code @Saga} class declares (specs/017-saga-deadlines data-model.md "DeadlineModel"): which step
@@ -79,17 +80,15 @@ final class DeadlineModel {
      *                                     to a negative one
      */
     static DeadlineModel of(Class<?> sagaType, Function<String, Optional<String>> properties) {
-        List<Declaration> declarations = new ArrayList<>();
-        Map<String, String> expirySteps = new LinkedHashMap<>();
-        for (Method method : byName(Reflection.annotatedMethods(sagaType, SagaStep.class))) {
-            for (StartDeadline start : method.getAnnotationsByType(StartDeadline.class)) {
-                declarations.add(declarationOf(sagaType, method.getName(), start, properties));
-            }
-            DeadlineExpired expired = method.getAnnotation(DeadlineExpired.class);
-            if (expired != null) {
-                expirySteps.put(expired.value(), method.getName());
-            }
-        }
+        List<Method> steps = byName(Reflection.annotatedMethods(sagaType, SagaStep.class));
+        List<Declaration> declarations = steps.stream()
+                .flatMap(method -> Arrays.stream(method.getAnnotationsByType(StartDeadline.class))
+                        .map(start -> declarationOf(sagaType, method.getName(), start, properties)))
+                .toList();
+        Map<String, String> expirySteps = steps.stream()
+                .filter(method -> method.isAnnotationPresent(DeadlineExpired.class))
+                .collect(Collectors.toMap(method -> method.getAnnotation(DeadlineExpired.class).value(),
+                        Method::getName, (first, second) -> second, LinkedHashMap::new));
         return declarations.isEmpty() && expirySteps.isEmpty() ? NONE : new DeadlineModel(declarations, expirySteps);
     }
 
@@ -98,19 +97,23 @@ final class DeadlineModel {
      * that resolves to nothing, to no ISO-8601 duration or to a negative one. Fixed durations are the scanner's (R25).
      */
     static List<String> placeholderErrors(Class<?> sagaType, Function<String, Optional<String>> properties) {
-        List<String> errors = new ArrayList<>();
-        for (Method method : byName(Reflection.annotatedMethods(sagaType, SagaStep.class))) {
-            for (StartDeadline start : method.getAnnotationsByType(StartDeadline.class)) {
-                if (start.durationFrom().isBlank() && isPlaceholder(start.duration().strip())) {
-                    try {
-                        fixedDuration(sagaType, method.getName(), start, properties);
-                    } catch (UnresolvedDurationException unresolved) {
-                        errors.add(unresolved.getMessage());
-                    }
-                }
-            }
+        return byName(Reflection.annotatedMethods(sagaType, SagaStep.class)).stream()
+                .flatMap(method -> Arrays.stream(method.getAnnotationsByType(StartDeadline.class))
+                        .filter(start -> start.durationFrom().isBlank() && isPlaceholder(start.duration().strip()))
+                        .map(start -> placeholderError(sagaType, method.getName(), start, properties)))
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    /** The error of one placeholder duration, or empty if it resolves. */
+    private static Optional<String> placeholderError(Class<?> sagaType, String step, StartDeadline start,
+            Function<String, Optional<String>> properties) {
+        try {
+            fixedDuration(sagaType, step, start, properties);
+            return Optional.empty();
+        } catch (UnresolvedDurationException unresolved) {
+            return Optional.of(unresolved.getMessage());
         }
-        return errors;
     }
 
     /** {@code true} if the saga declares no deadline. */
