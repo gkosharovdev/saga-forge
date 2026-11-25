@@ -365,6 +365,8 @@
   Micrometer instrumentation, and it must never run beside the OpenTelemetry one (G-010-06).
 
 ## Agent Working Rules For This Repo
+- Sources are formatted with google-java-format through Spotless: run `mvn spotless:apply` before committing; `mvn verify` and
+  the CI `format` job fail on unformatted code. The code compiles with `maven.compiler.release` 21; CI also tests on JDK 25.
 - Prefer edits that preserve the annotation-driven declarative style over imperative orchestration code.
 - Keep compensation logic explicit and mapped to concrete step names via `forStep`.
 - Never show a step returning a command; steps dispatch through `CommandGateway`.

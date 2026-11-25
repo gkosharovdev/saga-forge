@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  unit-tests:
-    name: Unit tests
+  format:
+    name: Check formatting
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -28,6 +28,30 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: maven
+
+      # Fails fast, before compiling or testing. Fix locally with: mvn spotless:apply
+      - name: Check google-java-format
+        run: mvn -B -ntp spotless:check
+
+  unit-tests:
+    name: Unit tests (JDK ${{ matrix.java }})
+    needs: format
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 21 is the compile baseline (maven.compiler.release); 25 (LTS) guards forward compatibility.
+        java: ["21", "25"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
           cache: maven
 
       - name: Check llms-full.txt matches the guide
@@ -40,7 +64,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: unit-test-reports
+          name: unit-test-reports-jdk${{ matrix.java }}
           path: "**/target/surefire-reports/"
           retention-days: 7
 
