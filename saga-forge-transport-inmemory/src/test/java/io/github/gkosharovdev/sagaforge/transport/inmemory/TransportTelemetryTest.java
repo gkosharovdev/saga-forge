@@ -186,6 +186,9 @@ class TransportTelemetryTest {
                 && i.status() == SagaStatus.COMPENSATED), WAIT, "the hold to lapse");
 
         AttributeKey<String> notBefore = AttributeKey.stringKey("saga_forge.message.not_before");
+        // The delivery span ends after the handling commits the COMPENSATED status, so wait for it to be exported.
+        await(() -> telemetry.named("saga_forge.delivery").stream().anyMatch(span -> attribute(span, notBefore) != null),
+                WAIT, "the scheduled delivery's span");
         List<SpanData> deliveries = telemetry.named("saga_forge.delivery");
         assertThat(deliveries).filteredOn(span -> attribute(span, notBefore) != null).singleElement()
                 .satisfies(span -> assertThat(java.time.Instant.parse(attribute(span, notBefore))).isEqualTo(

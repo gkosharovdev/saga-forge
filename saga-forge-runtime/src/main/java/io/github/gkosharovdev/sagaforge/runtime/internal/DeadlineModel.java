@@ -81,7 +81,7 @@ final class DeadlineModel {
     static DeadlineModel of(Class<?> sagaType, Function<String, Optional<String>> properties) {
         List<Declaration> declarations = new ArrayList<>();
         Map<String, String> expirySteps = new LinkedHashMap<>();
-        for (Method method : Reflection.annotatedMethods(sagaType, SagaStep.class)) {
+        for (Method method : byName(Reflection.annotatedMethods(sagaType, SagaStep.class))) {
             for (StartDeadline start : method.getAnnotationsByType(StartDeadline.class)) {
                 declarations.add(declarationOf(sagaType, method.getName(), start, properties));
             }
@@ -99,7 +99,7 @@ final class DeadlineModel {
      */
     static List<String> placeholderErrors(Class<?> sagaType, Function<String, Optional<String>> properties) {
         List<String> errors = new ArrayList<>();
-        for (Method method : Reflection.annotatedMethods(sagaType, SagaStep.class)) {
+        for (Method method : byName(Reflection.annotatedMethods(sagaType, SagaStep.class))) {
             for (StartDeadline start : method.getAnnotationsByType(StartDeadline.class)) {
                 if (start.durationFrom().isBlank() && isPlaceholder(start.duration().strip())) {
                     try {
@@ -172,6 +172,14 @@ final class DeadlineModel {
                     + (value.equals(declared) ? "" : ", resolved to '" + value + "',")
                     + " which is not an ISO-8601 duration");
         }
+    }
+
+    /**
+     * The step methods in name order. {@code getDeclaredMethods} has no order, so the step an error names must not
+     * depend on the JVM (the same deadline is often started by two steps with the same placeholder).
+     */
+    private static List<Method> byName(List<Method> methods) {
+        return methods.stream().sorted(java.util.Comparator.comparing(Method::getName)).toList();
     }
 
     private static boolean isPlaceholder(String duration) {
