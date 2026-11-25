@@ -44,7 +44,8 @@ class CompensationPersistenceTest {
 
     static Stream<CompensationTrigger> triggers() {
         return Stream.of(REJECTED, CompensationTrigger.failed(FINAL, AT), CompensationTrigger.failed(EXHAUSTED, AT),
-                COMMAND_FAILED);
+                COMMAND_FAILED, CompensationTrigger.deadlineExpired("onPaymentWindowExpired",
+                        "io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached", "paymentWindow", AT));
     }
 
     static Stream<StepCompensation> compensations() {

@@ -31,5 +31,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - A saga that ends records `SagaCompleted`, `SagaFailed` or `SagaCompensated` (`core.outcome`); listen with
   `@TransactionalEventListener` or `@ApplicationModuleListener`, deduplicate on `eventId()`. No saga step can take one.
   A failed compensation ends `COMPENSATION_FAILED`.
+- Time limits are deadlines: `@StartDeadline(name, duration | durationFrom, cancelledBy)` on a step and one
+  `@StartCompensation @DeadlineExpired(name) @SagaStep` timeout step (no `associationProperty`). They need the in-memory
+  transport's outbox and `saga-forge.transport.modulith-interop=false`. Test with `whenTimeElapses(...)`.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

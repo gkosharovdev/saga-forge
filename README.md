@@ -20,7 +20,9 @@ work for events from outside. A step can declare a retry policy for transient fa
 sends carries a stable identity, so a retried or redelivered step never applies a command's effect twice.
 When the process fails after earlier units of work committed, a business failure marked with `@StartCompensation`
 or a final technical failure, Saga Forge undoes those steps with their `@SagaCompensation` methods, most recent
-first, each in its own unit of work. You write steps; Saga Forge forges the process around them.
+first, each in its own unit of work. A step can start a named deadline; if the awaited event does not arrive in time,
+a timeout step runs instead, and leaving `RUNNING` cancels every deadline still open. A step can also schedule a
+command for later through the same `CommandGateway`. You write steps; Saga Forge forges the process around them.
 
 The example is a web shop's checkout: hold the stock at Inventory, authorise the card at Payments, confirm the order.
 
@@ -41,12 +43,15 @@ public class CheckoutSaga {
     public void onOrderPlaced(OrderPlacedEvent event) {
         context.putState("orderId", event.orderId());
         context.putState("amount", event.amount().toPlainString());
+        context.putState("paymentWindow", event.express() ? "PT10M" : "PT30M");
         commandGateway.send(new ReserveStockCommand(event.orderId(), event.lines()));
     }
 
     // The provider answers within the call; a timeout is transient, so this unit of work runs up to 3 times.
+    // The customer now has the payment window, read from the SagaContext, to pass the card challenge.
     @SagaStep(associationProperty = "orderId",
             retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200, multiplier = 2.0))
+    @StartDeadline(name = "paymentWindow", durationFrom = "paymentWindow")
     public void onStockReserved(StockReservedEvent event) {
         context.putState("reservationId", event.reservationId());
         commandGateway.send(new AuthorizePaymentCommand(event.orderId(), amount()));
@@ -74,13 +79,26 @@ public class CheckoutSaga {
         context.putState("declineReason", event.reason());
     }
 
+    // Failure outcome: the customer abandoned the card challenge and the payment window closed.
+    @StartCompensation
+    @DeadlineExpired("paymentWindow")
+    @SagaStep
+    public void onPaymentWindowExpired(DeadlineReached deadline) {
+        context.putState("timedOutAt", deadline.dueAt().toString());
+    }
+
     // Undoes the step that sent ReserveStockCommand, whatever ended the checkout. Inventory releases
     // whatever it holds for the order, nothing if it holds nothing.
     @SagaCompensation(forStep = "onOrderPlaced")
     public void cancelCheckout(CompensationTrigger trigger) {
-        Order.RejectionReason reason = "onStockUnavailable".equals(trigger.stepName())
-                ? Order.RejectionReason.OUT_OF_STOCK
-                : Order.RejectionReason.PAYMENT_NOT_AUTHORIZED;
+        Order.RejectionReason reason;
+        if (trigger.kind() == CompensationTriggerKind.DEADLINE_EXPIRED) {
+            reason = Order.RejectionReason.PAYMENT_TIMED_OUT;
+        } else if ("onStockUnavailable".equals(trigger.stepName())) {
+            reason = Order.RejectionReason.OUT_OF_STOCK;
+        } else {
+            reason = Order.RejectionReason.PAYMENT_NOT_AUTHORIZED;
+        }
         commandGateway.send(new ReleaseStockCommand(orderId()));
         commandGateway.send(new RejectOrderCommand(orderId(), reason));
     }
@@ -140,6 +158,7 @@ When things go wrong:
 |---|---|---|
 | An item is out of stock | `onStockUnavailable`, then `cancelCheckout` in its own unit of work | `COMPENSATED` |
 | The card is declined | `onPaymentDeclined`, then `cancelCheckout`: the stock is released, the order rejected | `COMPENSATED` |
+| No answer within the payment window (30 minutes, 10 for express) | `onPaymentWindowExpired`, then `cancelCheckout`: the order is rejected `PAYMENT_TIMED_OUT` | `COMPENSATED` |
 | The provider times out | `onStockReserved`'s unit of work again, up to 3 times, with the same idempotency key | as if it had not happened |
 | Retries run out, or a `FinalFailure` | `cancelCheckout` for the step that committed | `COMPENSATED` |
 | An unmarked exception | the unit of work rolls back | `FAILED` |
@@ -153,7 +172,27 @@ easily as checkout waits seconds for Inventory:
 OrderConfirmedEvent ─► RequestShipment ─► ShipmentDispatchedEvent ─► CapturePayment, CommitStock ─► ShipmentDeliveredEvent
    (@StartSaga)                                                                                       (@EndSaga)
                                       └─► DeliveryImpossibleEvent (@StartCompensation) ─► cancelOrder: refund or void, restock, cancel
+                                      └─► deadline courierAssignment expires (@StartCompensation) ─► cancelOrder
 ```
+
+`onOrderConfirmed` starts the `courierAssignment` deadline, two hours unless the property
+`checkout.courier-assignment` says otherwise, and `cancelledBy = "onShipmentDispatched"` closes it when the parcel
+leaves in time. Deadlines are messages with a due time in the durable message store, so they survive a restart; an
+overdue deadline runs once the application is back. A fixture test moves time on with `whenTimeElapses`:
+
+```java
+fixture.given(CONFIRMED)
+        .whenTimeElapses(Duration.ofHours(2))
+        .expectDeadlineExpired("courierAssignment")
+        .expectCompensations("cancelOrder")
+        .expectCommands(new CancelOrderCommand("o-1", "no courier assigned"),
+                new ReleasePaymentCommand("o-1", "payment-1"),
+                new ReleaseStockCommand("o-1"))
+        .expectCompensatedAfter("onCourierNotAssigned")
+        .expectOutcomeEvent(SagaCompensated.class);
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/FulfilmentSagaFixtureTest.java`.
 
 Both sagas, every failure path and their tests are in
 [docs/use-cases.md](docs/use-cases.md#1-ordering-and-checkout-checkoutsaga-and-fulfilmentsaga).
@@ -223,6 +262,7 @@ copied from compiling code in this repository. It is also published as a site at
 | [Model reference](docs/guide/model-reference.md) | every annotation: where it goes, what it needs, attributes and defaults |
 | [Validation rules](docs/guide/validation-rules.md) | each startup error text, what it means and how to fix it |
 | [Recipes](docs/guide/recipes.md) | multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, modular monolith |
+| [Deadlines](docs/guide/deadlines.md) | saga deadlines, timeout steps and scheduled commands |
 | [Testing](docs/guide/testing.md) | `SagaFixture` given/when/then tests, in memory |
 | [Operations](docs/guide/operations.md) | properties, Actuator, OpenTelemetry spans and metrics, schema upgrades |
 | [Limitations](docs/guide/limitations.md) | what to design around in 0.1.0 |
@@ -255,7 +295,7 @@ the snippet into `AGENTS.md`.
 
 0.1.0 is the first release, in production use in one Spring Boot monolith. It ships the annotation model with startup
 validation, the saga runtime (event routing by association, the saga-scoped unit of work in your transaction, step
-retry with stable command identities, compensation), Postgres storage, the in-memory transport with a durable message
+retry with stable command identities, compensation, saga deadlines and scheduled commands), Postgres storage, the in-memory transport with a durable message
 store (at least once, survives restarts, no broker), the Spring Boot starter (Spring Modulith and Actuator support),
 OpenTelemetry instrumentation and the `SagaFixture` test fixture. Not available yet: the Kafka transport, MySQL and
 MongoDB storage, a Quarkus extension. See [Limitations](docs/guide/limitations.md) for what to design around.

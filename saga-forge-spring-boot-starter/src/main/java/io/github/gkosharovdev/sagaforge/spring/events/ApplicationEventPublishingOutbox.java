@@ -47,7 +47,8 @@ public final class ApplicationEventPublishingOutbox implements Outbox {
 
     @Override
     public void store(OutgoingMessages batch) {
-        if (!batch.events().isEmpty() || !batch.commands().isEmpty() || delegate.observesRecordedEvents()) {
+        if (!batch.events().isEmpty() || !batch.commands().isEmpty() || !batch.scheduled().isEmpty()
+                || delegate.observesRecordedEvents()) {
             delegate.store(batch);
         }
         batch.recordedEvents().forEach(publisher::publishEvent);
@@ -56,5 +57,16 @@ public final class ApplicationEventPublishingOutbox implements Outbox {
     @Override
     public void committed(OutgoingMessages batch) {
         delegate.committed(batch);
+    }
+
+    /** Scheduling is the delegate's: deadlines and scheduled commands are stored by it, not by this wrapper (017). */
+    @Override
+    public boolean supportsScheduling() {
+        return delegate.supportsScheduling();
+    }
+
+    @Override
+    public java.util.Set<String> cancel(java.util.Collection<String> messageIds) {
+        return delegate.cancel(messageIds);
     }
 }

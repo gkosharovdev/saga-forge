@@ -51,6 +51,7 @@ public final class TransportInstrumentation {
     static final AttributeKey<String> MESSAGE_KIND = AttributeKey.stringKey("saga_forge.message.kind");
     static final AttributeKey<String> PAYLOAD_TYPE = AttributeKey.stringKey("saga_forge.payload.type");
     static final AttributeKey<Long> DELIVERY_ATTEMPT = AttributeKey.longKey("saga_forge.delivery.attempt");
+    static final AttributeKey<String> NOT_BEFORE = AttributeKey.stringKey("saga_forge.message.not_before");
     static final AttributeKey<String> MESSAGE_STATUS = AttributeKey.stringKey("saga_forge.message.status");
     static final AttributeKey<String> ERROR_TYPE = AttributeKey.stringKey("error.type");
     static final AttributeKey<String> FAILURE_MESSAGE = AttributeKey.stringKey("saga_forge.failure.message");
@@ -116,6 +117,15 @@ public final class TransportInstrumentation {
         }
     }
 
+    /**
+     * A message appended with a due time ({@code specs/017-saga-deadlines}): on its first attempt (the lease counted
+     * it) its next attempt is still the {@code notBefore} it was appended with, later than when it was recorded.
+     */
+    private static boolean scheduled(StoredMessage message) {
+        return message.attempts() <= 1 && message.nextAttemptAt() != null
+                && message.nextAttemptAt().isAfter(message.recordedAt());
+    }
+
     /** Starts the {@code CONSUMER} delivery span of {@code message}, parented by its stored context, and makes it current. */
     public Delivery startDelivery(StoredMessage message) {
         long started = System.nanoTime();
@@ -130,6 +140,9 @@ public final class TransportInstrumentation {
                     .setAttribute(MESSAGE_ID, message.messageId())
                     .setAttribute(DELIVERY_ATTEMPT, (long) message.attempts())
                     .startSpan();
+            if (scheduled(message)) {
+                span.setAttribute(NOT_BEFORE, message.nextAttemptAt().toString());
+            }
             return new Delivery(span, span.makeCurrent(), started, metricAttributes);
         } catch (RuntimeException failure) {
             failed(DELIVERY, failure);

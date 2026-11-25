@@ -30,12 +30,15 @@ import io.github.gkosharovdev.sagaforge.runtime.internal.RetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.internal.TimeAndIdentity;
 import java.time.Clock;
 import java.time.Duration;
+import io.github.gkosharovdev.sagaforge.core.command.ScheduledCommandId;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -74,7 +77,22 @@ public final class SagaRuntime implements EventReceiver {
     private final List<Class<?>> registered;
     private final EngineSettings settings;
     private final Diagnostics diagnostics;
-    private final CommandGateway commandGateway = command -> started().commandGateway().send(command);
+    private final CommandGateway commandGateway = new CommandGateway() {
+        @Override
+        public void send(Object command) {
+            started().commandGateway().send(command);
+        }
+
+        @Override
+        public ScheduledCommandId schedule(Object command, Instant at) {
+            return started().commandGateway().schedule(command, at);
+        }
+
+        @Override
+        public boolean cancel(ScheduledCommandId id) {
+            return started().commandGateway().cancel(id);
+        }
+    };
     private final EventPublisher eventPublisher = event -> started().eventPublisher().publish(event);
     private final CommandReceiver commandReceiver = new CommandReceiver() {
 
@@ -237,6 +255,7 @@ public final class SagaRuntime implements EventReceiver {
         private OpenTelemetry openTelemetry = OpenTelemetry.noop();
         private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
         private boolean outcomeEvents = true;
+        private Function<String, Optional<String>> propertyResolver = key -> Optional.empty();
 
         private Builder() {
         }
@@ -403,6 +422,17 @@ public final class SagaRuntime implements EventReceiver {
             return this;
         }
 
+        /**
+         * Optional: resolves the {@code key} of a deadline duration written as {@code "${key}"} or
+         * {@code "${key:default}"} ({@code specs/017-saga-deadlines}). Asked once per key at {@link SagaRuntime#start()};
+         * an empty answer falls back to the default, and a key with neither fails the start. Default: resolves
+         * nothing. The Spring Boot starter passes the application's {@code Environment}.
+         */
+        public Builder propertyResolver(Function<String, Optional<String>> propertyResolver) {
+            this.propertyResolver = requireNonNull(propertyResolver, "propertyResolver");
+            return this;
+        }
+
         /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
         public Builder logger(System.Logger logger) {
             this.logger = requireNonNull(logger, "logger");
@@ -445,7 +475,7 @@ public final class SagaRuntime implements EventReceiver {
                     new TimeAndIdentity(clock, sagaIds, unitOfWorkIds),
                     new RetrySettings(maxTotalRetryBackoff, retryPause::pause),
                     commandInterceptor != null ? commandInterceptor : CommandInterceptor.proceeding(),
-                    openTelemetry, telemetry, outcomeEvents);
+                    openTelemetry, telemetry, outcomeEvents, propertyResolver);
         }
 
         private static String randomId() {

@@ -23,6 +23,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepCompensation;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
 
@@ -48,12 +49,14 @@ final class SagaInstanceRows {
     /** The {@code saga_instance} columns, in the order {@link #bindInstance} binds them. */
     static final List<String> COLUMNS = List.of("saga_id", "saga_type", "state", "status", "created_at",
             "last_modified_at", "steps", "outcome", "failure_step_name", "failure_cause_type", "failure_message",
-            "failure_failed_at", "failure_classification", "failure_attempts", "pending_retry", "compensation_trigger");
+            "failure_failed_at", "failure_classification", "failure_attempts", "pending_retry", "compensation_trigger",
+            "open_deadlines");
 
     static final String STATE_FIELD = "saga_instance.state";
     static final String STEPS_FIELD = "saga_instance.steps";
     static final String PENDING_RETRY_FIELD = "saga_instance.pending_retry";
     static final String TRIGGER_FIELD = "saga_instance.compensation_trigger";
+    static final String DEADLINES_FIELD = "saga_instance.open_deadlines";
 
     private static final String STATUS = "status";
     private static final String TOUCHED_AGGREGATES = "touchedAggregates";
@@ -79,6 +82,11 @@ final class SagaInstanceRows {
     private static final String FAILURE = "failure";
     private static final String KIND = "kind";
     private static final String EVENT_TYPE = "eventType";
+    private static final String DEADLINE_NAME = "deadlineName";
+    private static final String DEADLINE_ID = "deadlineId";
+    private static final String DUE_AT = "dueAt";
+    private static final String STARTED_BY_STEP = "startedByStep";
+    private static final String STARTED_AT = "startedAt";
 
     private SagaInstanceRows() {
     }
@@ -92,8 +100,9 @@ final class SagaInstanceRows {
     }
 
     /**
-     * Binds {@code instance} to parameters 1 to 16, in {@link #COLUMNS} order; {@code state} (3), {@code steps} (7),
-     * {@code pending_retry} (15) and {@code compensation_trigger} (16; both SQL {@code NULL} when absent) are JSON
+     * Binds {@code instance} to parameters 1 to 17, in {@link #COLUMNS} order; {@code state} (3), {@code steps} (7),
+     * {@code pending_retry} (15), {@code compensation_trigger} (16; both SQL {@code NULL} when absent) and
+     * {@code open_deadlines} (17) are JSON
      * text for {@code ?::jsonb} placeholders. Everything is encoded before the first parameter is
      * set, so an unsupported value fails with {@link IllegalArgumentException} before any SQL runs.
      *
@@ -107,6 +116,7 @@ final class SagaInstanceRows {
         String steps = encodeSteps(instance.steps());
         String pendingRetry = encodePendingRetry(instance.pendingRetry());
         String trigger = encodeTrigger(TRIGGER_FIELD, instance.compensationTrigger());
+        String deadlines = encodeOpenDeadlines(instance.openDeadlines());
 
         statement.setString(1, instance.sagaId());
         statement.setString(2, instance.sagaType());
@@ -119,6 +129,7 @@ final class SagaInstanceRows {
         bindFailure(statement, 9, instance.failure());
         statement.setString(15, pendingRetry);
         statement.setString(16, trigger);
+        statement.setString(17, deadlines);
     }
 
     /**
@@ -140,7 +151,45 @@ final class SagaInstanceRows {
                 row.getString("outcome"),
                 failureFromRow(row),
                 decodePendingRetry(row.getString("pending_retry")),
-                decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")));
+                decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
+                decodeOpenDeadlines(row.getString("open_deadlines")));
+    }
+
+    // --- open deadlines (017) -------------------------------------------------------------------------------
+
+    static String encodeOpenDeadlines(Map<String, OpenDeadline> deadlines) {
+        Map<String, Object> plain = new LinkedHashMap<>();
+        deadlines.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            Map<String, Object> deadline = new LinkedHashMap<>();
+            deadline.put(DEADLINE_ID, entry.getValue().deadlineId());
+            deadline.put(DUE_AT, entry.getValue().dueAt().toString());
+            deadline.put(STARTED_BY_STEP, entry.getValue().startedByStep());
+            deadline.put(STARTED_AT, entry.getValue().startedAt().toString());
+            plain.put(entry.getKey(), deadline);
+        });
+        return JsonCodec.encodeObject(DEADLINES_FIELD, plain);
+    }
+
+    static Map<String, OpenDeadline> decodeOpenDeadlines(String json) {
+        if (json == null) {
+            return Map.of();
+        }
+        Map<String, Object> plain = JsonCodec.decodeObject(DEADLINES_FIELD, json);
+        Map<String, OpenDeadline> deadlines = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : plain.entrySet()) {
+            String path = DEADLINES_FIELD + "." + entry.getKey();
+            Map<?, ?> deadline = requireType(Map.class, path, entry.getValue());
+            try {
+                deadlines.put(entry.getKey(), new OpenDeadline(
+                        requireType(String.class, path + "." + DEADLINE_ID, deadline.get(DEADLINE_ID)),
+                        Instant.parse(requireType(String.class, path + "." + DUE_AT, deadline.get(DUE_AT))),
+                        requireType(String.class, path + "." + STARTED_BY_STEP, deadline.get(STARTED_BY_STEP)),
+                        Instant.parse(requireType(String.class, path + "." + STARTED_AT, deadline.get(STARTED_AT)))));
+            } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+                throw new IllegalStateException(path + " holds an invalid open deadline: " + e.getMessage(), e);
+            }
+        }
+        return deadlines;
     }
 
     // --- state ----------------------------------------------------------------------------------------------
@@ -453,6 +502,9 @@ final class SagaInstanceRows {
         if (trigger.failure() != null) {
             plain.put(FAILURE, failureToPlain(trigger.failure()));
         }
+        if (trigger.deadlineName() != null) {
+            plain.put(DEADLINE_NAME, trigger.deadlineName());
+        }
         plain.put(AT, trigger.at().toString());
         return JsonCodec.encodeObject(field, plain);
     }
@@ -473,7 +525,9 @@ final class SagaInstanceRows {
                     plain.get(COMMAND_TYPE) == null ? null
                             : requireType(String.class, field + "." + COMMAND_TYPE, plain.get(COMMAND_TYPE)),
                     plain.get(FAILURE) == null ? null : failureFromPlain(field + "." + FAILURE, plain.get(FAILURE)),
-                    Instant.parse(requireType(String.class, field + "." + AT, plain.get(AT))));
+                    Instant.parse(requireType(String.class, field + "." + AT, plain.get(AT))),
+                    plain.get(DEADLINE_NAME) == null ? null
+                            : requireType(String.class, field + "." + DEADLINE_NAME, plain.get(DEADLINE_NAME)));
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             throw new IllegalStateException(field + " holds an invalid compensation trigger: " + e.getMessage(), e);
         }

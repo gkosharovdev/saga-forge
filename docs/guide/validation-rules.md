@@ -12,7 +12,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R23), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R29), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -44,6 +44,17 @@ starter's configuration checks.
 | R21 | `@SagaCompensation method {m} in {S} cannot also be annotated with @SagaStep` | A step is also a compensation. | Keep them separate methods. |
 | R22 | `@SagaCompensation methods {m1}, {m2} in {S} both compensate step {step}` | Two compensations for one step. | Merge them into one method. |
 | R22 | `@SagaCompensation method {m} in {S} compensates step {step}, which is a @StartCompensation step` | The failure step itself has a compensation. | Remove it: the failure step starts compensation and is never undone. |
+| R24 | `@Saga class {S}: method {m} declares @StartDeadline or @DeadlineExpired but is not a @SagaStep` | A deadline annotation alone. | Add `@SagaStep`. |
+| R24 | `@Saga class {S}: deadline '{d}' is started by step {m} but no @DeadlineExpired step handles it` | No timeout step. | Add a `@SagaStep @DeadlineExpired("{d}")` method. |
+| R24 | `@Saga class {S}: deadline '{d}' has more than one @DeadlineExpired step: {m1}, {m2}` | Two timeout steps. | Keep one. |
+| R24 | `@Saga class {S}: @DeadlineExpired step {m} names deadline '{d}', which no step starts` | A timeout step for an unknown name. | Fix the name, or add the `@StartDeadline`. |
+| R24 | `@Saga class {S}: deadline '{d}' is started more than once by step {m}` / `a @StartDeadline on step {m} has a blank name` | Repeated or blank names on one step. | One `@StartDeadline` per name per step, with a name. |
+| R25 | `@Saga class {S}: deadline '{d}' on step {m} must declare exactly one of duration and durationFrom` | Neither or both. | Give one. |
+| R25 | `@Saga class {S}: deadline '{d}' on step {m} has duration '{x}', which is not an ISO-8601 duration` (or `which is negative`) | A bad fixed duration. | Use a value such as `PT30M`. |
+| R26 | `@Saga class {S}: deadline '{d}' is cancelled by '{x}', which is not a step of this saga` / `is cancelled by its own @DeadlineExpired step {m}` | A wrong `cancelledBy`. | Name a `@SagaStep` method of the saga other than the timeout step. |
+| R27 | `@Saga class {S}: @DeadlineExpired step {m} must take no parameter or one DeadlineReached` / `must not declare an associationProperty` | The timeout step's shape. | `@SagaStep` with no `associationProperty`; take nothing or `DeadlineReached`. |
+| R28 | `@Saga class {S}: @DeadlineExpired step {m} cannot also be @StartSaga` | A deadline cannot start an instance. | Use a separate start step. |
+| R29 | `@Saga class {S}: step {m} starts deadline '{d}' but also leaves RUNNING, so it would be cancelled at once` | A deadline on an `@EndSaga` or `@StartCompensation` step. | Start it on a step the saga keeps running after. |
 
 R19 violations (after `has an invalid retry policy: `):
 
@@ -83,6 +94,8 @@ R19 violations (after `has an invalid retry policy: `):
 | `@SagaStep {S.m}: total retry backoff {n} ms exceeds the engine maximum {max} ms` | The retry policy waits longer in total than allowed (default 30 000 ms). | Shorten the policy, or raise `saga-forge.runtime.max-total-retry-backoff` (plain Java: `SagaRuntime.Builder.maxTotalRetryBackoff`). Long waits are not supported (see [Limitations](limitations.md)). |
 | `@Saga class {S} must declare a no-argument constructor, or a SagaObjectProvider supporting it must be registered` | The saga cannot be instantiated. | Add a no-argument constructor (any visibility), or with the starter declare it a `@Scope("prototype")` bean. |
 | `@Saga class {S} is not supported by the registered SagaObjectProvider` | A custom provider refuses the saga. | Extend your provider, or drop it. |
+| `Saga {S} declares deadline '{d}', but the outbox ({O}) cannot schedule messages. ...` | Deadlines with the default `ImmediateDispatchOutbox` or another outbox without due times. | Use the in-memory transport over a scheduling message store (the starter's setup). With Spring Modulith interop, see below. |
+| `@Saga class {S}: deadline '{d}' on step '{m}' has duration '${key}', but no property '{key}' is set and it names no default` (also `which is not an ISO-8601 duration`, `which is negative`) | A placeholder duration did not resolve. | Set the property, or give a default: `${key:PT30M}`. |
 | `EventDispatcher rejected @Saga class {S}: {reason}` | The transport refused the saga type. | Follow `{reason}`. |
 
 ## Spring Boot starter failures
@@ -91,6 +104,7 @@ Reported by the starter's failure analyzers with a *Description* and an *Action*
 
 | Description | Action |
 |---|---|
+| `The saga model was refused at startup: ... Spring Modulith interop is on: the transport stores its messages in the Modulith event publication registry, which cannot hold a message until a due time.` | `Set saga-forge.transport.modulith-interop=false to keep Saga Forge's own message log.` |
 | `No Saga Forge storage module is on the class path; a saga needs durable storage.` | Add `saga-forge-storage-postgres`, or define your own `StorageProvider` and `SagaContextStore` beans. |
 | `The [postgres] storage module is on the class path, but no storage was assembled: it needs a DataSource and a PlatformTransactionManager bean.` | Configure `spring.datasource.*` with `spring-boot-starter-jdbc`. |
 | `Several Saga Forge storage modules are on the class path: ...` | Set `saga-forge.storage.type`, or remove the others. |

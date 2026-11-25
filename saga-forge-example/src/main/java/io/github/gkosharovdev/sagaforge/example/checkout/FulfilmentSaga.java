@@ -1,11 +1,13 @@
 package io.github.gkosharovdev.sagaforge.example.checkout;
 
+import io.github.gkosharovdev.sagaforge.core.annotation.DeadlineExpired;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartCompensation;
+import io.github.gkosharovdev.sagaforge.core.annotation.StartDeadline;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
@@ -31,14 +33,19 @@ import io.github.gkosharovdev.sagaforge.example.checkout.events.ShipmentDispatch
  * <table>
  *   <caption>Steps of the fulfilment</caption>
  *   <tr><th>Step</th><th>On</th><th>Sends</th></tr>
- *   <tr><td>{@code onOrderConfirmed} ({@code @StartSaga})</td><td>{@link OrderConfirmedEvent}</td>
- *       <td>{@link RequestShipmentCommand} (outbox, to Logistics)</td></tr>
+ *   <tr><td>{@code onOrderConfirmed} ({@code @StartSaga}); starts deadline {@code courierAssignment}</td>
+ *       <td>{@link OrderConfirmedEvent}</td><td>{@link RequestShipmentCommand} (outbox, to Logistics)</td></tr>
  *   <tr><td>{@code onShipmentDispatched}</td><td>{@link ShipmentDispatchedEvent}</td>
  *       <td>{@link CapturePaymentCommand}, {@link CommitStockCommand} (outbox)</td></tr>
  *   <tr><td>{@code onShipmentDelivered} ({@code @EndSaga})</td><td>{@link ShipmentDeliveredEvent}</td><td>-</td></tr>
  *   <tr><td>{@code onDeliveryImpossible} ({@code @StartCompensation})</td><td>{@link DeliveryImpossibleEvent}</td>
  *       <td>-; {@code cancelOrder} follows</td></tr>
+ *   <tr><td>{@code onCourierNotAssigned} ({@code @StartCompensation})</td><td>deadline
+ *       {@code courierAssignment}</td><td>-; {@code cancelOrder} follows</td></tr>
  * </table>
+ *
+ * <p>Logistics has {@code checkout.courier-assignment} (two hours unless the property says otherwise) to find a courier.
+ * The dispatch cancels that deadline; the delivery itself may then take days, with no deadline.</p>
  */
 @Saga
 public class FulfilmentSaga {
@@ -50,9 +57,11 @@ public class FulfilmentSaga {
 
     private CommandGateway commandGateway;
 
-    /** Asks Logistics to deliver the order, then waits for the parcel's progress. */
+    /** Asks Logistics to deliver the order, then waits for the parcel's progress; a courier must be found in time. */
     @StartSaga
     @SagaStep(associationProperty = "orderId")
+    @StartDeadline(name = "courierAssignment", duration = "${checkout.courier-assignment:PT2H}",
+            cancelledBy = "onShipmentDispatched")
     public void onOrderConfirmed(OrderConfirmedEvent event) {
         context.putState("orderId", event.orderId());
         context.putState("reservationId", event.reservationId());
@@ -80,6 +89,14 @@ public class FulfilmentSaga {
     @SagaStep(associationProperty = "orderId")
     public void onDeliveryImpossible(DeliveryImpossibleEvent event) {
         context.putState("cancellationReason", event.reason());
+    }
+
+    /** Failure outcome: no courier took the parcel in time. The order is cancelled and the money given back. */
+    @StartCompensation
+    @DeadlineExpired("courierAssignment")
+    @SagaStep
+    public void onCourierNotAssigned() {
+        context.putState("cancellationReason", "no courier assigned");
     }
 
     /**

@@ -25,6 +25,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
 import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
+import io.github.gkosharovdev.sagaforge.core.annotation.DeadlineExpired;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
@@ -61,6 +62,8 @@ import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
  *   <li>{@code validateCompensationTargets} — R22: one compensation per step, none for a trigger step (006)</li>
  *   <li>{@code validateRetryPolicies} — R19: every @SagaStep.retry policy is valid (specs/005-step-retry,
  *       Property 29)</li>
+ *   <li>{@code DeadlineRules} — R24 to R29: @StartDeadline and @DeadlineExpired (specs/017-saga-deadlines,
+ *       Properties 40 and 41)</li>
  * </ul>
  * Handler, loader, and saver host rules ({@code validateAll} only):
  * <ul>
@@ -109,6 +112,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         validateStartCompensation(sagaClass, errors);
         validateCompensationShape(sagaClass, errors);
         validateCompensationTargets(sagaClass, stepMethods, errors);
+        DeadlineRules.validate(sagaClass, stepMethods, errors);
 
         return new SagaValidationResult(sagaClass, errors);
     }
@@ -157,7 +161,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         Map<Class<?>, List<String>> methodsByEventType = new TreeMap<>(
                 Comparator.comparing((Class<?> type) -> type.getSimpleName()).thenComparing(Class::getName));
         for (Method method : stepMethods.values()) {
-            if (method.getParameterCount() == 1) {
+            if (method.getParameterCount() == 1 && !method.isAnnotationPresent(DeadlineExpired.class)) {
                 methodsByEventType.computeIfAbsent(method.getParameterTypes()[0], type -> new ArrayList<>())
                         .add(method.getName());
             }
@@ -676,6 +680,9 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
             }
 
             stepMethods.put(method.getName(), method);
+            if (method.isAnnotationPresent(DeadlineExpired.class)) {
+                continue; // a timeout step's shape is checked by DeadlineRules (R27)
+            }
 
             int paramCount = method.getParameterCount();
             if (paramCount != 1) {
@@ -689,6 +696,10 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 errors.add("@SagaStep method " + method.getName()
                         + " parameter type " + paramType.getSimpleName()
                         + " must be annotated with @DomainEvent");
+            }
+            if (method.getAnnotation(SagaStep.class).associationProperty().isBlank()) {
+                errors.add("@SagaStep method " + method.getName() + " in " + className
+                        + " must declare an associationProperty");
             }
         }
 

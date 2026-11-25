@@ -18,5 +18,11 @@ public enum CompensationTriggerKind {
      * An outbox command a step sent failed for good, {@code FINAL} or {@code EXHAUSTED} once the transport's attempts
      * were used up ({@code specs/012-outbox-command-failure-feedback} FR-008).
      */
-    COMMAND_FAILED
+    COMMAND_FAILED,
+
+    /**
+     * A {@code @StartCompensation} step that handles a deadline's expiry ({@code @DeadlineExpired}) ran and its unit of
+     * work committed ({@code specs/017-saga-deadlines} FR-015).
+     */
+    DEADLINE_EXPIRED
 }

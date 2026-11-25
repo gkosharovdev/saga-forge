@@ -53,10 +53,30 @@ public record CommandId(String sagaId, String stepName, String commandType, int 
      * @throws IllegalArgumentException if an argument is blank or {@code ordinal < 1}
      */
     public static CommandId of(String sagaId, String stepName, String commandType, int ordinal) {
+        return of(sagaId, stepName, commandType, ordinal, null);
+    }
+
+    /**
+     * The identity of a command sent by one occurrence of a step that can run more than once for an instance: a
+     * {@code @DeadlineExpired} step runs once per deadline it handles ({@code specs/017-saga-deadlines}), and its
+     * {@code occurrence} is that deadline's id. Retries of the same occurrence get the same identity; another
+     * occurrence gets another one.
+     *
+     * @param sagaId      the saga instance; non-blank
+     * @param stepName    the step that sends the command; non-blank
+     * @param commandType fully qualified class name of the command; non-blank
+     * @param ordinal     1-based position among commands of that type sent by that step run
+     * @param occurrence  which run of the step this is; {@code null} for a step that runs at most once, giving the
+     *                    identity of {@link #of(String, String, String, int)}
+     * @return the deterministic identity of that command
+     * @throws IllegalArgumentException if an argument other than {@code occurrence} is blank or {@code ordinal < 1}
+     */
+    public static CommandId of(String sagaId, String stepName, String commandType, int ordinal, String occurrence) {
         requireNonBlank(sagaId, "sagaId");
         requireNonBlank(stepName, "stepName");
         requireNonBlank(commandType, "commandType");
-        String name = sagaId + '\0' + stepName + '\0' + commandType + '\0' + ordinal;
+        String name = sagaId + '\0' + stepName + '\0' + commandType + '\0' + ordinal
+                + (occurrence == null ? "" : "\0" + occurrence);
         String value = UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)).toString();
         return new CommandId(sagaId, stepName, commandType, ordinal, value, true);
     }

@@ -63,5 +63,12 @@ public enum HandlingOutcome {
      * A compensation failed: its unit of work rolled back, unwinding stopped, and the instance is
      * {@link SagaStatus#COMPENSATION_FAILED} ({@code specs/006-saga-compensation} FR-016). Never retried.
      */
-    COMPENSATION_FAILED
+    COMPENSATION_FAILED,
+
+    /**
+     * A {@code DeadlineReached} was delivered for an instance that is missing, no longer {@link SagaStatus#RUNNING},
+     * or no longer holds that deadline open under the delivered id (cancelled, expired or replaced). No step ran and
+     * nothing changed ({@code specs/017-saga-deadlines} FR-014).
+     */
+    IGNORED
 }

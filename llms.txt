@@ -11,6 +11,7 @@ Key rules: steps return `void` and send commands through `CommandGateway` (never
 - [Model reference](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/model-reference.md): every annotation, where it goes, companions, attributes and defaults
 - [Validation rules](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/validation-rules.md): exact startup error texts mapped to their fix
 - [Recipes](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/recipes.md): multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, modular monolith
+- [Deadlines](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/deadlines.md): `@StartDeadline`/`@DeadlineExpired` timeout steps, `CommandGateway.schedule`
 - [Testing](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/testing.md): `SagaFixture` given/when/then tests
 - [Operations](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/operations.md): properties, Actuator, OpenTelemetry, schema upgrades
 - [Limitations](https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/limitations.md): what to design around in 0.1.0

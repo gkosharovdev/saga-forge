@@ -102,6 +102,15 @@ public class OrderProcessingSaga {
   transport's `max-attempts`), the saga that sent it compensates every completed step, the sender included; the
   trigger's kind is `COMMAND_FAILED` and it names the command type. The transport retries it with its own backoff,
   never the step's `@RetryPolicy`. In `SagaFixture`, `outboxCommandAttempts(n)` (default 1) plays `max-attempts`.
+- Give a wait a time limit with `@StartDeadline(name = "...", duration = "PT30M" | "${key:PT30M}" | durationFrom =
+  "<SagaContext attribute>", cancelledBy = {...})` on a `@SagaStep`, and one `@StartCompensation @DeadlineExpired("...")
+  @SagaStep` (no `associationProperty`; no parameter or one `DeadlineReached`) as the timeout step. Leaving `RUNNING`
+  closes every open deadline, so `cancelledBy` is only needed for steps the saga keeps running after. The trigger's kind
+  is `DEADLINE_EXPIRED`. Test with `fixture.given(...).whenTimeElapses(Duration.ofMinutes(30))
+  .expectDeadlineExpired("...")`.
+- Schedule a command for later with `commandGateway.schedule(command, instant)` (an `OUTBOX` command); keep the
+  returned `ScheduledCommandId`'s `value()` in `SagaContext` and `cancel` it if it must not run: ending the saga does
+  not cancel it.
 - With the starter, a saga that needs collaborators is a `@Scope("prototype")` bean; handler hosts are beans.
 - Test with `SagaFixture.of(Saga.class).build().given(...).when(...).expectCommands(...)`; use `.handlers(...)` to run
   real handlers and `givenAggregates(...)` to seed aggregates.
@@ -118,8 +127,10 @@ public class OrderProcessingSaga {
 - Don't put `@StartCompensation` with `@StartSaga` or `@EndSaga`; don't map a `@SagaCompensation` to a
   `@StartCompensation` step; at most one compensation per step.
 - Don't declare two steps for the same event type, two `@StartSaga` steps, or two handlers for one command.
-- Don't rely on long retry waits, deadlines or timeouts (not supported); use a scheduled job that publishes a timeout
-  event.
+- Don't rely on long retry waits (in-process, 30 s total by default); give a wait a time limit with a deadline instead.
+- Don't use deadlines or `CommandGateway.schedule` with `saga-forge.transport.modulith-interop` on (startup fails), or
+  with the default `ImmediateDispatchOutbox`. Don't put `associationProperty` on a `@DeadlineExpired` step, start a
+  deadline on an `@EndSaga`/`@StartCompensation` step, or make a timeout step `@StartSaga`.
 - Don't expect one event that continues a saga to also start a different saga type; record a separate event.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.

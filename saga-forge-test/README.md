@@ -69,6 +69,9 @@ Every method returns the same `Then`, so calls chain.
 | `expectOutcomeEvent(Class<T>, Predicate<T>)` | exactly one outcome event was committed, of that type, matching |
 | `expectOutcomeEvent(Class<?>)` | exactly one outcome event was committed, of that type |
 | `expectNoOutcomeEvent()` | no outcome event was committed: no instance ended |
+| `expectOpenDeadline(String)` / `expectNoOpenDeadline(String)` | the deadline is open (started, neither expired nor cancelled), or not |
+| `expectDeadlineExpired(String)` | the deadline came due and its `@DeadlineExpired` step ran |
+| `expectDeadlineIgnored(String)` | the deadline came due but the instance no longer waited on it |
 | `instance(Class<?>, String)` | switches the subject to the instance with that association value |
 | `result()` | the `EventResult`, for your own assertions (AssertJ, Hamcrest, ...) |
 
@@ -153,6 +156,21 @@ SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class)
   `FinalFailure`, `retryOn`), so retries, `EXHAUSTED` and compensation follow as in production.
 - Retry waits advance `fixture.clock()` instead of sleeping: a policy with 30 seconds of backoff takes milliseconds.
   The clock starts at `2026-01-01T00:00:00Z` (`startingAt(...)` changes it), and a test may `set` or `advance` it.
+- Deadlines and scheduled commands wait until the clock reaches their due time.
+  `whenTimeElapses(Duration)` and `whenTimeReaches(Instant)` move the clock, then deliver everything due by then,
+  earliest first, until nothing is due. `given(...).givenTimeElapses(...)` lets time pass in the history. Moving
+  `fixture.clock()` yourself delivers nothing until the next `whenTime...`, and neither does `when(event)`:
+
+  ```java
+  fixture.given(new BookingRequested("b-1", "PT30M"))
+          .whenTimeElapses(Duration.ofMinutes(30))
+          .expectDeadlineExpired("hold")
+          .expectCompensatedAfter("holdExpired")
+          .expectCommands(new ReleaseSeat("b-1"));
+  ```
+
+  `InstanceView.openDeadlines()` lists the open deadlines with their due times, and `property(key, value)` on the
+  builder sets what a `${key:default}` duration reads.
 - Saga ids are `saga-1`, `saga-2`, ... and unit-of-work ids `uow-1`, ..., so `CommandId`s are predictable.
   `result().commands()` holds the commands of the attempts that committed; `result().allAttempts()` holds every
   attempt, for example to check that a retry kept the same idempotency key.

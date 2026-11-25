@@ -25,6 +25,8 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.HoldPlaced;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.HoldSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssued;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.OrderPlaced;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentConfirmed;
@@ -68,7 +70,7 @@ class TransportTelemetryTest {
         // As the README's plain-Java setup: one OpenTelemetry for the transport and the runtime (FR-015).
         transport = InMemoryTransport.builder().messageStore(log).transactions(boundary)
                 .settings(TransportHarness.FAST).openTelemetry(telemetry.openTelemetry()).build();
-        runtime = SagaRuntime.builder().register(TransportAcceptanceSuite.MODEL).storage(storage)
+        runtime = SagaRuntime.builder().register(TransportAcceptanceSuite.MODEL).register(HoldSaga.class).storage(storage)
                 .contextStore(new InMemorySagaContextStore()).transactions(boundary)
                 .dispatcher(transport.dispatcher()).outbox(transport.outbox())
                 .handlerInstances(new MapHandlerInstanceProvider().register(new PaymentService())
@@ -174,6 +176,24 @@ class TransportTelemetryTest {
         assertThat(log.all().get(0).traceContext()).isEmpty();
         SpanData delivery = telemetry.only("saga_forge.delivery");
         assertThat(delivery.getParentSpanContext().isValid()).isFalse();
+    }
+
+    @Test
+    @DisplayName("017: a deadline's delivery span carries saga_forge.message.not_before; an ordinary one does not")
+    void scheduledDelivery() {
+        runtime.eventPublisher().publish(new HoldPlaced("h-1"));
+        await(() -> storage.committed().all().stream().anyMatch(i -> i.sagaType().equals(HoldSaga.class.getName())
+                && i.status() == SagaStatus.COMPENSATED), WAIT, "the hold to lapse");
+
+        AttributeKey<String> notBefore = AttributeKey.stringKey("saga_forge.message.not_before");
+        List<SpanData> deliveries = telemetry.named("saga_forge.delivery");
+        assertThat(deliveries).filteredOn(span -> attribute(span, notBefore) != null).singleElement()
+                .satisfies(span -> assertThat(java.time.Instant.parse(attribute(span, notBefore))).isEqualTo(
+                        log.all().stream().filter(m -> m.payload() instanceof
+                                io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached).findFirst()
+                                .map(m -> ((io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached) m.payload())
+                                        .dueAt()).orElseThrow()));
+        assertThat(deliveries).filteredOn(span -> attribute(span, notBefore) == null).isNotEmpty();
     }
 
     @Test

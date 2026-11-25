@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.opentelemetry.api.common.Attributes;
 import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
+import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
@@ -24,6 +25,7 @@ import java.util.function.Supplier;
  *
  * <ol>
  *   <li><b>Outcome events</b> (011 FR-017): a {@code SagaOutcome} gets a report with no results; no saga reacts.</li>
+ *   <li><b>Deadlines</b> (017): a {@code DeadlineReached} goes to {@link DeadlineDelivery}.</li>
  *   <li><b>Validate first</b> (FR-006): a {@code null} or non-{@code @DomainEvent} event, or a missing or empty
  *       association value for any reacting step of any saga type, is an {@link IllegalArgumentException} before
  *       anything runs.</li>
@@ -83,6 +85,7 @@ final class EventRouter {
     private final EngineSettings settings;
     private final InstanceLocks startLocks = new InstanceLocks();
     private final InstanceLocks instanceLocks;
+    private final DeadlineDelivery deadlines;
 
     /**
      * @param sagas         the registered saga types, in registration order
@@ -94,6 +97,7 @@ final class EventRouter {
         this.with = with;
         this.settings = with.settings();
         this.instanceLocks = instanceLocks;
+        this.deadlines = new DeadlineDelivery(sagas, with, instanceLocks);
     }
 
     HandlingReport receive(Object event) {
@@ -101,6 +105,10 @@ final class EventRouter {
         if (event instanceof SagaOutcome) {
             // 011 FR-017: outcome events are framework events; no saga reacts to one, and it is no error.
             return new HandlingReport(event, List.of());
+        }
+        if (event instanceof DeadlineReached reached) {
+            // 017: routed by saga type and id to the instance that started the deadline, never by association.
+            return deadlines.deliver(reached);
         }
         requireDomainEvent(event);
         List<Reaction> reactions = reactionsTo(event);
@@ -264,7 +272,8 @@ final class EventRouter {
         }
     }
 
-    private static void countOutcome(SagaInstrumentation telemetry, SagaInstrumentation.Traced span,
+    /** Counts {@code result} on the handled and ended counters; shared with {@link DeadlineDelivery} (017). */
+    static void countOutcome(SagaInstrumentation telemetry, SagaInstrumentation.Traced span,
             SagaHandlingResult result) {
         Attributes sagaType = Attributes.of(SagaInstrumentation.SAGA_TYPE, result.sagaType());
         telemetry.count(SagaInstrumentation.EVENT_HANDLED_COUNTER, sagaType.toBuilder()

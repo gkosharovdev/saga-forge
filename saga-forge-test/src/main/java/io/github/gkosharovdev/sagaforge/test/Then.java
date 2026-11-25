@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
+import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -237,6 +239,57 @@ public final class Then {
                     typed(context.get(key))));
         }
         return this;
+    }
+
+    // --- deadlines (017) --------------------------------------------------------------------------------------------
+
+    /** The subject has the deadline {@code name} open: started, neither expired nor cancelled. */
+    public Then expectOpenDeadline(String name) {
+        Map<String, OpenDeadline> open = subject().openDeadlines();
+        if (!open.containsKey(name)) {
+            throw fail(Messages.expectedActual("expected open deadline", name, "open", open.keySet()));
+        }
+        return this;
+    }
+
+    /** The subject does not have the deadline {@code name} open. */
+    public Then expectNoOpenDeadline(String name) {
+        Map<String, OpenDeadline> open = subject().openDeadlines();
+        if (open.containsKey(name)) {
+            throw fail(Messages.expectedActual("expected deadline '" + name + "'", "closed", "open until",
+                    open.get(name).dueAt()));
+        }
+        return this;
+    }
+
+    /** In this result, the deadline {@code name} came due and its {@code @DeadlineExpired} step ran. */
+    public Then expectDeadlineExpired(String name) {
+        if (deadlineOutcomes(name).stream().noneMatch(outcome -> outcome != HandlingOutcome.IGNORED)) {
+            throw fail(Messages.expectedActual("expected deadline '" + name + "'", "expired", "delivered with",
+                    deadlineOutcomes(name)));
+        }
+        return this;
+    }
+
+    /** In this result, the deadline {@code name} came due but was ignored: the instance was no longer waiting on it. */
+    public Then expectDeadlineIgnored(String name) {
+        if (!deadlineOutcomes(name).contains(HandlingOutcome.IGNORED)) {
+            throw fail(Messages.expectedActual("expected deadline '" + name + "'", "ignored", "delivered with",
+                    deadlineOutcomes(name)));
+        }
+        return this;
+    }
+
+    /** Outcomes of this result's deliveries of the deadline {@code name}, for the subject if there is one. */
+    private List<HandlingOutcome> deadlineOutcomes(String name) {
+        Optional<String> sagaId = trySubject().map(InstanceView::sagaId);
+        return result.reports().stream()
+                .filter(report -> report.event() instanceof DeadlineReached reached
+                        && reached.deadlineName().equals(name)
+                        && sagaId.map(id -> id.equals(reached.sagaId())).orElse(true))
+                .flatMap(report -> report.results().stream())
+                .map(SagaHandlingResult::outcome)
+                .toList();
     }
 
     // --- outcome events --------------------------------------------------------------------------------------------

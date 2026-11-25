@@ -111,6 +111,34 @@ class PaymentNotifier {
 
 `ApplicationModules.of(App.class).verify()` keeps passing: the starter adds no type to your modules.
 
+Modulith's registry cannot hold a message until a due time, so a model with saga deadlines (`@StartDeadline`) refuses
+to start under interop. Set `saga-forge.transport.modulith-interop=false` to keep Saga Forge's own message log; the
+failure analysis says so.
+
+### With saga deadlines
+
+Deadlines need nothing beyond the baseline setup: the transport's outbox over the Postgres message store schedules and
+cancels them. Two things come from the application context:
+
+- **`${...}` durations** are resolved through Spring's `Environment`, so a deadline's length is an ordinary property:
+
+  ```java
+  @StartDeadline(name = "courierAssignment", duration = "${checkout.courier-assignment:PT2H}",
+          cancelledBy = "onShipmentDispatched")
+  ```
+
+  ```properties
+  checkout.courier-assignment=PT90M
+  ```
+
+  A property that is unset with no default, or that holds no ISO-8601 duration, fails startup naming the saga, the
+  deadline and the key.
+- **One clock.** A `java.time.Clock` bean is used by the runtime (when a deadline is due) and by the transport (when a
+  message is delivered). Without one, both use the UTC system clock.
+
+A due deadline is delivered on the transport's next poll, so it can run up to `saga-forge.transport.poll-interval`
+late.
+
 ### With OpenTelemetry
 
 Nothing to add when the application already traces with OpenTelemetry: the starter passes the application's
@@ -163,10 +191,11 @@ management.endpoints.web.exposure.include=health,sagaforge
 ```
 
 `GET /actuator/sagaforge` returns the message counts per status (capped at 1,000 each) and the age of the oldest
-unconsumed message:
+unconsumed message. `CANCELLED` counts deadlines and scheduled commands cancelled before they were due; an
+`UNCONSUMED` one may be a scheduled message that is not due yet:
 
 ```json
-{ "counts": { "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+{ "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
 ```
 
 The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator. Switch
@@ -285,6 +314,7 @@ saga-forge.enabled=false
   maps. Keep a `BigDecimal` as its plain string.
 - **Spring Data maps constructor parameters by name.** Compile with `-parameters`; Spring Boot's parent POM does this
   for you.
+- **Saga deadlines need Saga Forge's own message log**, not Spring Modulith interop (see "With Spring Modulith").
 - **An event a step of its own saga runs is not passed on to other saga types.** Give the second saga an event of its
   own (memory.md G-ENG-24).
 

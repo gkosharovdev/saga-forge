@@ -101,4 +101,33 @@ public interface MessageStore {
 
     /** @return the heartbeats last seen at or after {@code since} */
     List<ConsumerHeartbeat> liveConsumers(Instant since);
+
+    /**
+     * Whether this store keeps a message's {@link NewMessage#notBefore()} and implements
+     * {@link #cancel(LocalTransaction, Collection, Instant)} ({@code specs/017-saga-deadlines} FR-001 to FR-005).
+     * A message with a {@code notBefore} is held back by the leasable rule above: its {@code nextAttemptAt} starts at
+     * {@code notBefore}.
+     *
+     * @return {@code false} unless the store overrides it
+     */
+    default boolean supportsScheduling() {
+        return false;
+    }
+
+    /**
+     * Cancels, in {@code tx}, each listed message that is {@link MessageStatus#UNCONSUMED} and not held by an unexpired
+     * lease at {@code at}: it becomes {@link MessageStatus#CANCELLED} with {@code consumedAt = at}, is never leased
+     * again and does not block its ordering key. A leased, consumed, set-aside, cancelled or unknown message is left
+     * unchanged. If {@code tx} rolls back, nothing is cancelled.
+     *
+     * <p>This default throws {@link UnsupportedOperationException}.</p>
+     *
+     * @param tx         the transaction to write in
+     * @param messageIds the messages to cancel
+     * @param at         the cancellation time, also the time leases are judged against
+     * @return the ids of the messages this call cancelled
+     */
+    default Set<String> cancel(LocalTransaction tx, Collection<String> messageIds, Instant at) {
+        throw new UnsupportedOperationException(getClass().getName() + " does not support cancelling messages");
+    }
 }

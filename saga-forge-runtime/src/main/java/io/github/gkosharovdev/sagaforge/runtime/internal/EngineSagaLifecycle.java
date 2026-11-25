@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
@@ -20,6 +21,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.StepCompensation;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import io.github.gkosharovdev.sagaforge.core.spi.StepStatus;
@@ -28,6 +30,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,6 +52,11 @@ import java.util.Optional;
  * transitions until {@link #clearPendingRetry}, a terminal transition or entering compensation drops it (005 research
  * §9). Each completed step gets the next {@code completionSequence} of its instance (006 research §5).</p>
  *
+ * <p>Open deadlines (017) travel with the working copy while it is {@code CREATED} or {@code RUNNING}. A transition
+ * to any other status closes every open deadline: one opened by this write is simply not scheduled, an earlier one is
+ * cancelled. {@link #drain} hands the write the messages to schedule and the ids to cancel, both in the order they
+ * arose.</p>
+ *
  * <p>{@code start} checks for a duplicate against storage: an active instance of the same saga type with the same
  * association value raises {@link DuplicateSagaInstanceException} (001 FR-006). Every other transition on an
  * instance other than the working copy raises {@link InvalidSagaTransitionException#notFound}, and on a terminal
@@ -62,11 +70,23 @@ final class EngineSagaLifecycle implements SagaLifecycle {
      * What one write persists: the instance and the entries produced since the last drain, in transition order, and
      * the outcome event of the terminal transition among them, if any (specs/011-saga-outcome-events research §2).
      */
-    record PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries, Optional<SagaOutcome> outcome) {
+    /**
+     * {@code scheduled} are the deadline messages this write opened; {@code cancelled} maps the ids of the deadlines it
+     * cancelled to their names (017).
+     */
+    record PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries, Optional<SagaOutcome> outcome,
+            List<ScheduledMessage> scheduled, Map<String, String> cancelled) {
 
         PendingWrite {
             entries = List.copyOf(entries);
             outcome = outcome == null ? Optional.empty() : outcome;
+            scheduled = List.copyOf(scheduled);
+            cancelled = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(cancelled));
+        }
+
+        /** A write that schedules and cancels nothing. */
+        PendingWrite(SagaInstance instance, List<SagaLifecycleEntry> entries, Optional<SagaOutcome> outcome) {
+            this(instance, entries, outcome, List.of(), Map.of());
         }
 
         /** A write without an outcome event. */
@@ -85,6 +105,9 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     private final StorageProvider storage;
     private final TimeAndIdentity sources;
     private final List<SagaLifecycleEntry> pending = new ArrayList<>();
+    private final Map<String, ScheduledMessage> scheduledHere = new LinkedHashMap<>();
+    /** Cancelled deadline ids to their names, in the order they were cancelled. */
+    private final Map<String, String> cancelled = new LinkedHashMap<>();
     private SagaInstance workingCopy;
     private SagaOutcome outcome;
 
@@ -351,6 +374,63 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     }
 
     /**
+     * Opens the deadline {@code name} (017): records {@code deadline} on the working copy and schedules
+     * {@code message}. A deadline already open under that name is replaced: it is closed as by
+     * {@link #cancelDeadline}. Produces no entry.
+     *
+     * @throws InvalidSagaTransitionException if the working copy is not {@code CREATED} or {@code RUNNING}
+     */
+    void openDeadline(String name, OpenDeadline deadline, ScheduledMessage message) {
+        requireNonNull(name, "name");
+        requireNonNull(deadline, "deadline");
+        requireNonNull(message, "message");
+        SagaInstance current = requireActive(workingCopy == null ? null : workingCopy.sagaId(), "openDeadline");
+        if (current.status() != SagaStatus.CREATED && current.status() != SagaStatus.RUNNING) {
+            throw InvalidSagaTransitionException.terminal(current.sagaId(), "openDeadline", current.status());
+        }
+        cancelDeadline(name);
+        Map<String, OpenDeadline> open = new LinkedHashMap<>(workingCopy.openDeadlines());
+        open.put(name, deadline);
+        workingCopy = workingCopy.withOpenDeadlines(open);
+        scheduledHere.put(name, message);
+    }
+
+    /**
+     * Closes the open deadline {@code name}, if there is one (017): one opened by this write is no longer scheduled,
+     * an earlier one's id is cancelled. Produces no entry.
+     *
+     * @return {@code true} if a deadline was open under {@code name}
+     */
+    boolean cancelDeadline(String name) {
+        return close(name, true);
+    }
+
+    /**
+     * Closes the open deadline {@code name} because its timeout step runs (017): its message is being delivered, so
+     * nothing is cancelled. Produces no entry.
+     *
+     * @return {@code true} if a deadline was open under {@code name}
+     */
+    boolean expireDeadline(String name) {
+        return close(name, false);
+    }
+
+    private boolean close(String name, boolean cancel) {
+        requireNonNull(name, "name");
+        if (workingCopy == null || !workingCopy.openDeadlines().containsKey(name)) {
+            return false;
+        }
+        OpenDeadline closed = workingCopy.openDeadlines().get(name);
+        if (scheduledHere.remove(name) == null && cancel) {
+            cancelled.put(closed.deadlineId(), name);
+        }
+        Map<String, OpenDeadline> open = new LinkedHashMap<>(workingCopy.openDeadlines());
+        open.remove(name);
+        workingCopy = workingCopy.withOpenDeadlines(open);
+        return true;
+    }
+
+    /**
      * @return the steps of {@code instance} whose compensation is {@code NOT_ATTEMPTED}, most recently completed
      *         first (006 research §5)
      */
@@ -404,8 +484,11 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     PendingWrite drain(String sagaId) {
         requireNonNull(sagaId, "sagaId");
         requireHeld(sagaId, "drain");
-        PendingWrite write = new PendingWrite(workingCopy, pending, Optional.ofNullable(outcome));
+        PendingWrite write = new PendingWrite(workingCopy, pending, Optional.ofNullable(outcome),
+                List.copyOf(scheduledHere.values()), cancelled);
         pending.clear();
+        scheduledHere.clear();
+        cancelled.clear();
         outcome = null;
         return write;
     }
@@ -444,9 +527,12 @@ final class EngineSagaLifecycle implements SagaLifecycle {
             CompensationTrigger trigger, Instant now) {
         boolean active = status == SagaStatus.CREATED || status == SagaStatus.RUNNING;
         PendingRetry retry = active ? workingCopy.pendingRetry() : null;
+        if (!active) {
+            List.copyOf(workingCopy.openDeadlines().keySet()).forEach(this::cancelDeadline);
+        }
         workingCopy = new SagaInstance(workingCopy.sagaId(), workingCopy.sagaType(), Map.of(),
                 workingCopy.associations(), status, workingCopy.createdAt(), now, steps, ending.outcomeStep(),
-                ending.failure(), retry, trigger);
+                ending.failure(), retry, trigger, workingCopy.openDeadlines());
     }
 
     private Map<String, StepRecord> notRunSteps() {

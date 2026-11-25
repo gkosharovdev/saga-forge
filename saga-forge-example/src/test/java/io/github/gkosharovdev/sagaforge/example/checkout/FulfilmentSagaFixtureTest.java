@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.example.checkout;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -102,5 +104,42 @@ class FulfilmentSagaFixtureTest {
                 .expectOutcomeEvent(SagaCompensated.class, compensated ->
                         compensated.trigger().kind() == CompensationTriggerKind.COMMAND_FAILED
                                 && CapturePaymentCommand.class.getName().equals(compensated.trigger().commandType()));
+    }
+
+    @Test
+    @DisplayName("no courier in two hours: the money and the stock are given back and the order cancelled")
+    void noCourierInTime() {
+        fixture.given(CONFIRMED)
+                .whenTimeElapses(Duration.ofHours(2))
+                .expectDeadlineExpired("courierAssignment")
+                .expectCompensations("cancelOrder")
+                .expectCommands(new CancelOrderCommand("o-1", "no courier assigned"),
+                        new ReleasePaymentCommand("o-1", "payment-1"),
+                        new ReleaseStockCommand("o-1"))
+                .expectCompensatedAfter("onCourierNotAssigned")
+                .expectOutcomeEvent(SagaCompensated.class);
+    }
+
+    @Test
+    @DisplayName("a dispatch in time stops the deadline; three hours later the saga still waits for the delivery")
+    void dispatchInTimeStopsTheDeadline() {
+        fixture.given(CONFIRMED)
+                .when(new ShipmentDispatchedEvent("shipment-1", "o-1"))
+                .expectNoOpenDeadline("courierAssignment");
+
+        fixture.whenTimeElapses(Duration.ofHours(3)).expectNoCommands();
+        assertThat(fixture.instance(FulfilmentSaga.class, "o-1").status()).isEqualTo(SagaStatus.RUNNING);
+    }
+
+    @Test
+    @DisplayName("checkout.courier-assignment sets the deadline's length")
+    void courierAssignmentProperty() {
+        SagaFixture shorter = SagaFixture.of(FulfilmentSaga.class)
+                .register(LogisticsService.class, PaymentService.class, InventoryService.class)
+                .property("checkout.courier-assignment", "PT45M").build();
+
+        shorter.when(CONFIRMED).expectOpenDeadline("courierAssignment");
+        assertThat(shorter.instance(FulfilmentSaga.class, "o-1").openDeadlines().get("courierAssignment").dueAt())
+                .isEqualTo(shorter.clock().instant().plus(Duration.ofMinutes(45)));
     }
 }

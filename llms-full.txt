@@ -20,6 +20,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Model reference](model-reference.md) | know where each annotation goes, what it needs next to it, and its attributes |
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
+| [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
 | [Limitations](limitations.md) | know what to design around in 0.1.0 |
@@ -402,6 +403,33 @@ Other types a model uses:
   completed are compensated. A compensation that throws is never retried: the instance ends `COMPENSATION_FAILED`.
   A compensation can run again after a crash, so the commands it sends must be idempotent (pass `CommandId` on).
 
+### `@StartDeadline`
+
+- **Where**: on a `@SagaStep`, repeatable for different names; a step starts a name at most once (R24). A step that
+  ends `RUNNING` (`@EndSaga`, `@StartCompensation`) starts none (R29).
+- **Attributes**:
+
+  | Attribute | Type | Default | Meaning |
+  |---|---|---|---|
+  | `name` | `String` | required | the deadline's name; exactly one `@DeadlineExpired` step handles it (R24) |
+  | `duration` | `String` | `""` | ISO-8601 (`"PT15M"`) or `"${key}"` / `"${key:PT15M}"`, resolved at startup; not negative (R25) |
+  | `durationFrom` | `String` | `""` | the `SagaContext` attribute holding the duration as an ISO-8601 `String`, read after the step returned |
+  | `cancelledBy` | `String[]` | `{}` | steps of the saga whose completion closes the deadline; not its own timeout step (R26) |
+
+- Exactly one of `duration` and `durationFrom` (R25).
+- **Effect**: when the step's unit of work commits, the deadline is stored due at completion time plus the duration.
+  It closes when a `cancelledBy` step completes, when it is started again (replaced), and when the instance leaves
+  `RUNNING`. Needs a scheduling `IN_TRANSACTION` outbox. See [Deadlines](deadlines.md).
+
+### `@DeadlineExpired`
+
+- **Where**: on the `@SagaStep` that runs when the named deadline comes due; its `associationProperty` is left empty
+  and it takes no parameter or one `DeadlineReached` (R27); never `@StartSaga` (R28). Usually also
+  `@StartCompensation` (trigger kind `DEADLINE_EXPIRED`); may be `@EndSaga` or a plain step.
+- **Attributes**: `value`, the deadline's name.
+- **Runs when**: the deadline comes due while the instance is `RUNNING` and that start of the deadline is still open;
+  otherwise the delivery is `IGNORED`.
+
 ### `@RetryPolicy`
 
 - **Where**: only as the value of `@SagaStep(retry = ...)`.
@@ -533,7 +561,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R23), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R29), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -565,6 +593,17 @@ starter's configuration checks.
 | R21 | `@SagaCompensation method {m} in {S} cannot also be annotated with @SagaStep` | A step is also a compensation. | Keep them separate methods. |
 | R22 | `@SagaCompensation methods {m1}, {m2} in {S} both compensate step {step}` | Two compensations for one step. | Merge them into one method. |
 | R22 | `@SagaCompensation method {m} in {S} compensates step {step}, which is a @StartCompensation step` | The failure step itself has a compensation. | Remove it: the failure step starts compensation and is never undone. |
+| R24 | `@Saga class {S}: method {m} declares @StartDeadline or @DeadlineExpired but is not a @SagaStep` | A deadline annotation alone. | Add `@SagaStep`. |
+| R24 | `@Saga class {S}: deadline '{d}' is started by step {m} but no @DeadlineExpired step handles it` | No timeout step. | Add a `@SagaStep @DeadlineExpired("{d}")` method. |
+| R24 | `@Saga class {S}: deadline '{d}' has more than one @DeadlineExpired step: {m1}, {m2}` | Two timeout steps. | Keep one. |
+| R24 | `@Saga class {S}: @DeadlineExpired step {m} names deadline '{d}', which no step starts` | A timeout step for an unknown name. | Fix the name, or add the `@StartDeadline`. |
+| R24 | `@Saga class {S}: deadline '{d}' is started more than once by step {m}` / `a @StartDeadline on step {m} has a blank name` | Repeated or blank names on one step. | One `@StartDeadline` per name per step, with a name. |
+| R25 | `@Saga class {S}: deadline '{d}' on step {m} must declare exactly one of duration and durationFrom` | Neither or both. | Give one. |
+| R25 | `@Saga class {S}: deadline '{d}' on step {m} has duration '{x}', which is not an ISO-8601 duration` (or `which is negative`) | A bad fixed duration. | Use a value such as `PT30M`. |
+| R26 | `@Saga class {S}: deadline '{d}' is cancelled by '{x}', which is not a step of this saga` / `is cancelled by its own @DeadlineExpired step {m}` | A wrong `cancelledBy`. | Name a `@SagaStep` method of the saga other than the timeout step. |
+| R27 | `@Saga class {S}: @DeadlineExpired step {m} must take no parameter or one DeadlineReached` / `must not declare an associationProperty` | The timeout step's shape. | `@SagaStep` with no `associationProperty`; take nothing or `DeadlineReached`. |
+| R28 | `@Saga class {S}: @DeadlineExpired step {m} cannot also be @StartSaga` | A deadline cannot start an instance. | Use a separate start step. |
+| R29 | `@Saga class {S}: step {m} starts deadline '{d}' but also leaves RUNNING, so it would be cancelled at once` | A deadline on an `@EndSaga` or `@StartCompensation` step. | Start it on a step the saga keeps running after. |
 
 R19 violations (after `has an invalid retry policy: `):
 
@@ -604,6 +643,8 @@ R19 violations (after `has an invalid retry policy: `):
 | `@SagaStep {S.m}: total retry backoff {n} ms exceeds the engine maximum {max} ms` | The retry policy waits longer in total than allowed (default 30 000 ms). | Shorten the policy, or raise `saga-forge.runtime.max-total-retry-backoff` (plain Java: `SagaRuntime.Builder.maxTotalRetryBackoff`). Long waits are not supported (see [Limitations](limitations.md)). |
 | `@Saga class {S} must declare a no-argument constructor, or a SagaObjectProvider supporting it must be registered` | The saga cannot be instantiated. | Add a no-argument constructor (any visibility), or with the starter declare it a `@Scope("prototype")` bean. |
 | `@Saga class {S} is not supported by the registered SagaObjectProvider` | A custom provider refuses the saga. | Extend your provider, or drop it. |
+| `Saga {S} declares deadline '{d}', but the outbox ({O}) cannot schedule messages. ...` | Deadlines with the default `ImmediateDispatchOutbox` or another outbox without due times. | Use the in-memory transport over a scheduling message store (the starter's setup). With Spring Modulith interop, see below. |
+| `@Saga class {S}: deadline '{d}' on step '{m}' has duration '${key}', but no property '{key}' is set and it names no default` (also `which is not an ISO-8601 duration`, `which is negative`) | A placeholder duration did not resolve. | Set the property, or give a default: `${key:PT30M}`. |
 | `EventDispatcher rejected @Saga class {S}: {reason}` | The transport refused the saga type. | Follow `{reason}`. |
 
 ## Spring Boot starter failures
@@ -612,6 +653,7 @@ Reported by the starter's failure analyzers with a *Description* and an *Action*
 
 | Description | Action |
 |---|---|
+| `The saga model was refused at startup: ... Spring Modulith interop is on: the transport stores its messages in the Modulith event publication registry, which cannot hold a message until a due time.` | `Set saga-forge.transport.modulith-interop=false to keep Saga Forge's own message log.` |
 | `No Saga Forge storage module is on the class path; a saga needs durable storage.` | Add `saga-forge-storage-postgres`, or define your own `StorageProvider` and `SagaContextStore` beans. |
 | `The [postgres] storage module is on the class path, but no storage was assembled: it needs a DataSource and a PlatformTransactionManager bean.` | Configure `spring.datasource.*` with `spring-boot-starter-jdbc`. |
 | `Several Saga Forge storage modules are on the class path: ...` | Set `saga-forge.storage.type`, or remove the others. |
@@ -1244,6 +1286,185 @@ Rules:
   would hurt.
 - A rejected order is `COMPENSATED`, not `FAILED`; listen for `SagaCompensated` to react to it.
 
+<!-- docs/guide/deadlines.md -->
+
+# Deadlines and scheduled commands
+
+A saga waits for its next event. A deadline gives that wait a time limit: a step starts a named deadline, and if the
+awaited event does not arrive in time, a timeout step runs instead. A step can also schedule a command to be handled
+later. Both are stored in the transport's message store with a due time, in the step's own transaction, so they survive
+a restart and are cancelled with the rest of the unit of work when it rolls back.
+
+## Starting a deadline
+
+`@StartDeadline` goes on a `@SagaStep`. The deadline starts when that step's unit of work commits and is due at the
+step's completion time plus the duration. The checkout's payment window reads its length from the `SagaContext`:
+
+```java
+    @StartSaga
+    @SagaStep(associationProperty = "orderId")
+    public void onOrderPlaced(OrderPlacedEvent event) {
+        context.putState("orderId", event.orderId());
+        context.putState("amount", event.amount().toPlainString());
+        context.putState("paymentWindow", event.express() ? "PT10M" : "PT30M");
+        commandGateway.send(new ReserveStockCommand(event.orderId(), event.lines()));
+    }
+
+    @SagaStep(associationProperty = "orderId",
+            retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200, multiplier = 2.0))
+    @StartDeadline(name = "paymentWindow", durationFrom = "paymentWindow")
+    public void onStockReserved(StockReservedEvent event) {
+        context.putState("reservationId", event.reservationId());
+        commandGateway.send(new AuthorizePaymentCommand(event.orderId(), amount()));
+    }
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutSaga.java`.
+
+The fulfilment saga's courier deadline has a fixed length, taken from a property with a default:
+
+```java
+    @StartSaga
+    @SagaStep(associationProperty = "orderId")
+    @StartDeadline(name = "courierAssignment", duration = "${checkout.courier-assignment:PT2H}",
+            cancelledBy = "onShipmentDispatched")
+    public void onOrderConfirmed(OrderConfirmedEvent event) {
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/checkout/FulfilmentSaga.java`.
+
+| Attribute | Meaning |
+|---|---|
+| `name` | The deadline's name, unique within the saga. Several steps may start the same name. |
+| `duration` | An ISO-8601 duration (`"PT15M"`) or a placeholder `"${key}"` / `"${key:PT15M}"`, resolved once at startup. In Spring Boot the key is an ordinary property; in plain Java it comes from `SagaRuntime.Builder.propertyResolver`. |
+| `durationFrom` | The `SagaContext` attribute holding the duration as an ISO-8601 `String`, read after the step's method returned. |
+| `cancelledBy` | Steps whose completion closes the deadline. |
+
+Give exactly one of `duration` and `durationFrom`. A zero or negative duration from the context is due at once; a
+missing, non-`String` or unparsable context value fails the step with `DeadlineDurationException`, an unmarked
+failure. A step may carry several `@StartDeadline`s with different names.
+
+## When a deadline closes
+
+An open deadline closes, and its stored message is cancelled in the same transaction, when:
+
+- a step named in `cancelledBy` completes;
+- a step starts the same name again: the new deadline replaces the open one, and its duration counts from then;
+- the instance leaves `RUNNING`: an `@EndSaga` step, a `@StartCompensation` step, a `FAILED` write, or compensation
+  after a failure.
+
+So a deadline that only guards the path to the end of the saga needs no `cancelledBy`. The payment window has none:
+both answers from Payments end the checkout.
+
+## The timeout step
+
+Each deadline has exactly one `@DeadlineExpired` step. It is a `@SagaStep` with no `associationProperty` (the deadline
+is addressed to its instance directly) and takes no parameter or one `DeadlineReached`:
+
+```java
+    @StartCompensation
+    @DeadlineExpired("paymentWindow")
+    @SagaStep
+    public void onPaymentWindowExpired(DeadlineReached deadline) {
+        context.putState("timedOutAt", deadline.dueAt().toString());
+    }
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutSaga.java`.
+
+- With `@StartCompensation`, the usual case, the instance compensates. The `CompensationTrigger` and the outcome
+  event's `OutcomeTrigger` have kind `DEADLINE_EXPIRED` and carry `deadlineName()`, so a compensation can tell a
+  timeout from a business failure (`cancelCheckout` rejects the order `PAYMENT_TIMED_OUT`).
+- With `@EndSaga`, the timeout is a success outcome of its own.
+- As a plain step, the instance keeps running, for example a reminder that starts its own deadline again.
+
+A timeout step is never `@StartSaga`. It runs only while the instance is `RUNNING` and the deadline is still open under
+the same start. A deadline that arrives later (the instance ended or compensates, the deadline was cancelled or
+replaced) runs no step: the delivery is reported `IGNORED` and logged as `saga.deadline.ignored` with a reason
+`NOT_RUNNING`, `NOT_OPEN` or `REPLACED`.
+
+## Scheduled commands
+
+`CommandGateway.schedule(command, at)` stores an outbox command to be handled at `at` or soon after, and returns a
+`ScheduledCommandId`; `cancel(id)` withdraws it if it has not been handed over yet:
+
+```java
+    @StartSaga
+    @SagaStep(associationProperty = "subscriptionId")
+    public void onStarted(SubscriptionStarted event) {
+        ScheduledCommandId renewal = commandGateway.schedule(new ChargeCard(event.subscriptionId()),
+                Instant.now().plus(Duration.parse(event.chargeIn())));
+        context.putState("renewal", renewal.value());
+    }
+
+    @EndSaga
+    @SagaStep(associationProperty = "subscriptionId")
+    public void onCancelled(SubscriptionCancelled event) {
+        context.putState("renewalCancelled", String.valueOf(commandGateway.cancel(
+                new ScheduledCommandId(context.getState("renewal", String.class).orElseThrow()))));
+    }
+```
+
+Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/sagaforge/transport/inmemory/fixtures/RenewalSaga.java`
+(shortened).
+
+- The command's type must be `@Command(delivery = CommandDelivery.OUTBOX)`.
+- It is stored only if the sending unit of work commits; a time in the past is due at once.
+- `cancel` returns `false` when the command is already being delivered, was handled, was cancelled, or is unknown.
+- Unlike a deadline, a scheduled command is not cancelled when the saga ends: cancel it yourself if it must not run.
+- From a saga step, its `CommandId` is saga-scoped, and a final failure is reported to the saga like any outbox
+  command's.
+
+## What it needs
+
+- **An `IN_TRANSACTION` outbox that can schedule messages**: the in-memory transport over the Postgres message store
+  (the Spring Boot starter's default setup). With the default `ImmediateDispatchOutbox`, a saga that declares a deadline
+  fails startup, and `schedule` throws `UnsupportedOperationException`.
+- **Not with Spring Modulith interop**: Modulith's publication registry has no due time, so the starter refuses
+  deadlines while `saga-forge.transport.modulith-interop` is on. Set it to `false` to keep Saga Forge's own log.
+- **One clock**: the runtime and the transport read the same `java.time.Clock` (in Spring Boot, a `Clock` bean, or
+  the UTC system clock).
+- **Postgres**: an existing database applies `schema-upgrade-017.sql` (see [Operations](operations.md#schema-and-upgrades)).
+
+## Timing
+
+- A due message is picked up on the relay's next poll, so a deadline runs up to `saga-forge.transport.poll-interval`
+  after its due time, later if the relay is busy.
+- Deadlines that came due while the application was down run once it is back. Each runs at most once; overdue
+  messages are delivered in the order they were stored, not strictly in due order.
+- A deadline the relay has already leased when the awaited event cancels it is still delivered, and ignored.
+
+## Testing
+
+`SagaFixture` moves its clock with `whenTimeElapses(Duration)` or `whenTimeReaches(Instant)` and then delivers
+everything due, earliest first. `when(event)` never delivers merely-due messages:
+
+```java
+    @Test
+    @DisplayName("an abandoned card challenge: the window closes, the stock is released and the order rejected")
+    void abandonedChallengeTimesOut() {
+        fixture.given(PLACED, RESERVED)
+                .whenTimeElapses(Duration.ofMinutes(29))
+                .expectNoCommands();
+
+        fixture.whenTimeElapses(Duration.ofMinutes(1))
+                .expectDeadlineExpired("paymentWindow")
+                .expectCompensations("cancelCheckout")
+                .expectCommands(new RejectOrderCommand("o-1", Order.RejectionReason.PAYMENT_TIMED_OUT),
+                        new ReleaseStockCommand("o-1"))
+                .expectCompensatedAfter("onPaymentWindowExpired")
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                        compensated.trigger().kind() == CompensationTriggerKind.DEADLINE_EXPIRED
+                                && "paymentWindow".equals(compensated.trigger().deadlineName()));
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutSagaFixtureTest.java`.
+
+More in [Testing](testing.md#deadlines): `expectOpenDeadline`, `expectNoOpenDeadline`, `expectDeadlineIgnored`,
+`InstanceView.openDeadlines()` and `Builder.property(key, value)` for `${key}` durations.
+
 <!-- docs/guide/testing.md -->
 
 # Testing with `SagaFixture`
@@ -1421,6 +1642,33 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 
 `result().outboxFailures()` still lists every failed attempt; `result().commands()` leaves out the failed command.
 
+## Deadlines
+
+The fixture's clock only moves when the test says so. `whenTimeElapses(Duration)` and `whenTimeReaches(Instant)` move
+it, then deliver every deadline and scheduled command due by then, earliest first, until nothing is due.
+`given(...).givenTimeElapses(...)` lets time pass in the history. `when(event)` delivers nothing that is merely due.
+
+```java
+    @Test
+    @DisplayName("a dispatch in time stops the deadline; three hours later the saga still waits for the delivery")
+    void dispatchInTimeStopsTheDeadline() {
+        fixture.given(CONFIRMED)
+                .when(new ShipmentDispatchedEvent("shipment-1", "o-1"))
+                .expectNoOpenDeadline("courierAssignment");
+
+        fixture.whenTimeElapses(Duration.ofHours(3)).expectNoCommands();
+        assertThat(fixture.instance(FulfilmentSaga.class, "o-1").status()).isEqualTo(SagaStatus.RUNNING);
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/FulfilmentSagaFixtureTest.java`.
+
+- `Builder.property(key, value)` sets what a `${key:default}` duration reads:
+  `SagaFixture.of(FulfilmentSaga.class).property("checkout.courier-assignment", "PT45M")`.
+- `InstanceView.openDeadlines()` maps each open deadline's name to its id and due time.
+- A timeout step that compensates shows `DEADLINE_EXPIRED` as the outcome event's trigger kind, with the deadline's
+  name. [Deadlines](deadlines.md#testing) has the payment-window test.
+
 ## Expectations
 
 | Method | Checks |
@@ -1435,6 +1683,8 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 | `expectFailure(Class, FailureClassification)` | the recorded failure |
 | `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value or its absence |
 | `expectOutcomeEvent(Class, Predicate)` / `expectOutcomeEvent(Class)` / `expectNoOutcomeEvent()` | exactly one outcome event (`SagaCompleted`, `SagaFailed`, `SagaCompensated`) of that type matching / of that type / none |
+| `expectOpenDeadline(String)` / `expectNoOpenDeadline(String)` | the deadline is open (started, neither expired nor cancelled), or not |
+| `expectDeadlineExpired(String)` / `expectDeadlineIgnored(String)` | the deadline came due and its `@DeadlineExpired` step ran / came due but the instance no longer waited on it |
 | `instance(Class, String)` | switch to the instance with that association value (several sagas reacting) |
 | `result()` | the `EventResult`, for your own assertions |
 
@@ -1537,7 +1787,7 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
@@ -1545,6 +1795,8 @@ with your own bean.
   any new upgrade script.
 - `schema-upgrade-011.sql` renames the status `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` and removes the
   history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
+- `schema-upgrade-017.sql` adds the message store's due time and the `CANCELLED` status, for deadlines and scheduled
+  commands.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -1560,7 +1812,7 @@ management.endpoints.web.exposure.include=health,sagaforge
   age of the oldest unconsumed message:
 
   ```json
-  { "counts": { "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
   ```
 
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
@@ -1626,9 +1878,14 @@ Metrics:
 | `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `compensation_failed`) |
 | `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
 | `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
+| `saga_forge.deadlines` | counter | — | `saga_forge.saga.type`, `saga_forge.deadline.name`, `saga_forge.deadline.event` (`started`, `cancelled`, `expired`, `ignored`) |
 | `saga_forge.command.failures` | counter | — | `classification` (`final`, `exhausted`): outbox commands the transport gave up on and reported to their saga |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+
+A deadline delivery's `saga_forge.handle` span carries `saga_forge.deadline.name`; a delivery span of a message with a
+due time carries `saga_forge.message.not_before` on its first attempt. A deadline that arrives when its instance no
+longer waits on it is logged at INFO as `saga.deadline.ignored` with `reason=NOT_RUNNING`, `NOT_OPEN` or `REPLACED`.
 
 Runtime log lines written inside a unit of work carry `traceId=` and `spanId=`.
 
@@ -1757,14 +2014,15 @@ status in later releases.
 |---|---|---|
 | 1 | **One running application instance per database** (G-007-09). The in-memory transport's relay assumes it is the only consumer of its message store; a second instance is detected and logged, not coordinated. | Run one replica, or put sagas in a single-replica deployment. Blue/green deploys must stop the old instance before the new one delivers. |
 | 2 | **No operator path out of `COMPENSATION_FAILED`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=compensation_failed}`; repair by hand. |
-| 3 | **No deadlines or scheduled waits** (G-ENG-25, G-005-01). A saga waits for its next event forever; retry backoff is in-process and capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Run a scheduled job that finds stale instances and publishes a timeout event the saga has a step for. Keep retry policies short. |
-| 4 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
-| 5 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
-| 6 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |
-| 7 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
-| 8 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
-| 9 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
-| 10 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |
+| 3 | **Retry backoff is in-process** (G-005-01): capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Keep retry policies short; for a long wait use a deadline whose timeout step re-arms it, or a scheduled command (see [Deadlines](deadlines.md)). |
+| 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) and assume one running instance per message store (G-017-02). A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
+| 5 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
+| 6 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
+| 7 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |
+| 8 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
+| 9 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
+| 10 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
+| 11 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |
 
 Further constraints of the model:
 
@@ -1782,6 +2040,9 @@ Further constraints of the model:
   `FinalFailure` (or list them in `retryOn`) when the difference matters.
 - **An outbox command's failure is retried with the transport's backoff**, not the sending step's `@RetryPolicy`; an
   unmarked exception there is retried up to `saga-forge.transport.max-attempts` and then compensates the saga.
+- **Deadlines**: a deadline the relay already leased when it was cancelled is still delivered, then ignored
+  (G-017-05); a scheduled command is not cancelled when its saga ends, so cancel it in the ending step if it must not
+  run (G-017-06).
 - **Delivery order is per aggregate, not per saga instance** (G-007-04); the transport is at least once.
 - **Not available**: Kafka transport, MySQL and MongoDB storage, a Quarkus extension, programmatic abort, Spring test
   slices for the fixture (G-009-01).

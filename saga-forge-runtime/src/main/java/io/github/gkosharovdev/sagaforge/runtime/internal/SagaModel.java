@@ -7,7 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
+import io.github.gkosharovdev.sagaforge.core.annotation.DeadlineExpired;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
@@ -16,6 +18,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartCompensation;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Reflection.PropertyReader;
 
@@ -32,9 +35,22 @@ import io.github.gkosharovdev.sagaforge.runtime.internal.Reflection.PropertyRead
  */
 final class SagaModel {
 
-    /** One {@code @SagaStep} method. */
+    /**
+     * One {@code @SagaStep} method. A {@code @DeadlineExpired} step (017) has {@code deadlineName} set, reacts to
+     * {@link DeadlineReached}, has no association property and {@code takesEvent} only if it declares the parameter.
+     */
     record Step(String name, Method method, Class<?> eventType, String associationProperty, boolean start,
-            boolean end, boolean startsCompensation) {
+            boolean end, boolean startsCompensation, String deadlineName, boolean takesEvent) {
+
+        Step(String name, Method method, Class<?> eventType, String associationProperty, boolean start,
+                boolean end, boolean startsCompensation) {
+            this(name, method, eventType, associationProperty, start, end, startsCompensation, null, true);
+        }
+
+        /** {@code true} for a {@code @DeadlineExpired} step (017). */
+        boolean expiresDeadline() {
+            return deadlineName != null;
+        }
 
         /** The step's {@code @SagaStep(retry = ...)} policy (005). */
         RetryPolicy retryPolicy() {
@@ -54,7 +70,10 @@ final class SagaModel {
     }
 
     private final Class<?> type;
+    private final List<Step> steps;
     private final Map<Class<?>, Step> stepsByEventType;
+    private final Map<String, Step> stepsByDeadline;
+    private final DeadlineModel deadlines;
     private final Map<Class<?>, PropertyReader> associationReaders;
     private final Step startStep;
     private final Field sagaIdField;
@@ -63,10 +82,22 @@ final class SagaModel {
     private final Optional<Constructor<?>> noArgumentConstructor;
     private final Map<String, Compensation> compensationsByStep;
 
-    private SagaModel(Class<?> type, Map<Class<?>, Step> stepsByEventType) {
+    private SagaModel(Class<?> type, List<Step> steps, DeadlineModel deadlines) {
         this.type = type;
+        this.steps = List.copyOf(steps);
+        this.deadlines = deadlines;
         this.compensationsByStep = compensations(type);
+        Map<Class<?>, Step> stepsByEventType = new LinkedHashMap<>();
+        Map<String, Step> stepsByDeadline = new LinkedHashMap<>();
+        steps.forEach(step -> {
+            if (step.expiresDeadline()) {
+                stepsByDeadline.put(step.deadlineName(), step);
+            } else {
+                stepsByEventType.put(step.eventType(), step);
+            }
+        });
         this.stepsByEventType = Map.copyOf(stepsByEventType);
+        this.stepsByDeadline = Map.copyOf(stepsByDeadline);
         this.associationReaders = associationReaders(stepsByEventType);
         this.startStep = stepsByEventType.values().stream().filter(Step::start).findFirst()
                 .orElseThrow(() -> new IllegalStateException(type.getName() + " declares no @StartSaga step"));
@@ -82,12 +113,22 @@ final class SagaModel {
      * @throws IllegalStateException if the class declares no {@code @StartSaga} step or no {@code @SagaId} field
      */
     static SagaModel of(Class<?> sagaType) {
-        Map<Class<?>, Step> steps = new LinkedHashMap<>();
-        for (Method method : Reflection.annotatedMethods(sagaType, SagaStep.class)) {
-            Step step = stepOf(method);
-            steps.put(step.eventType(), step);
-        }
-        return new SagaModel(sagaType, steps);
+        return of(sagaType, key -> Optional.empty());
+    }
+
+    /**
+     * Reads the model of {@code sagaType}, which {@code validateAll} has accepted, resolving {@code ${...}} deadline
+     * durations through {@code properties} (017).
+     *
+     * @throws IllegalStateException if the class declares no {@code @StartSaga} step or no {@code @SagaId} field, or
+     *                               a deadline duration cannot be resolved
+     *                               ({@link DeadlineModel.UnresolvedDurationException})
+     */
+    static SagaModel of(Class<?> sagaType, Function<String, Optional<String>> properties) {
+        List<Step> steps = Reflection.annotatedMethods(sagaType, SagaStep.class).stream()
+                .map(SagaModel::stepOf)
+                .toList();
+        return new SagaModel(sagaType, steps, DeadlineModel.of(sagaType, properties));
     }
 
     Class<?> type() {
@@ -108,6 +149,16 @@ final class SagaModel {
         return startStep;
     }
 
+    /** The {@code @DeadlineExpired} step of the deadline {@code name}, if any (017). */
+    Optional<Step> expiryStep(String deadlineName) {
+        return Optional.ofNullable(stepsByDeadline.get(deadlineName));
+    }
+
+    /** The deadlines this saga declares (017). */
+    DeadlineModel deadlines() {
+        return deadlines;
+    }
+
     /** The {@code @SagaCompensation} undoing the step named {@code stepName}, if one is declared (006). */
     Optional<Compensation> compensationFor(String stepName) {
         return Optional.ofNullable(compensationsByStep.get(stepName));
@@ -115,7 +166,7 @@ final class SagaModel {
 
     /** {@code true} if a {@code @SagaStep} method is named {@code methodName}. */
     boolean hasStep(String methodName) {
-        return stepsByEventType.values().stream().anyMatch(step -> step.name().equals(methodName));
+        return steps.stream().anyMatch(step -> step.name().equals(methodName));
     }
 
     /** The {@code @SagaCompensation} method named {@code methodName}, if one is declared (012). */
@@ -129,7 +180,7 @@ final class SagaModel {
      * The retry policy of the step named {@code stepName}; the default one-attempt policy if no step has that name.
      */
     RetryPolicy retryPolicyOf(String stepName) {
-        return stepsByEventType.values().stream().filter(step -> step.name().equals(stepName)).findFirst()
+        return steps.stream().filter(step -> step.name().equals(stepName)).findFirst()
                 .map(Step::retryPolicy)
                 .orElseGet(() -> DefaultRetryPolicy.INSTANCE);
     }
@@ -155,7 +206,7 @@ final class SagaModel {
 
     /** Every step's name, sorted, for a new instance's {@code NOT_RUN} step records. */
     List<String> stepNames() {
-        return stepsByEventType.values().stream().map(Step::name).sorted().toList();
+        return steps.stream().map(Step::name).sorted().toList();
     }
 
     /**
@@ -187,9 +238,16 @@ final class SagaModel {
         gatewayField.ifPresent(field -> Reflection.write(field, saga, injection.gateway()));
     }
 
-    /** Runs {@code step} on {@code saga} with {@code event}; the step's own exception leaves unchanged. */
+    /**
+     * Runs {@code step} on {@code saga} with {@code event}, or without an argument if the step takes none (a
+     * {@code @DeadlineExpired} step, 017); the step's own exception leaves unchanged.
+     */
     void run(Step step, Object saga, Object event) {
-        Reflection.invoke(step.method(), saga, event);
+        if (step.takesEvent()) {
+            Reflection.invoke(step.method(), saga, event);
+        } else {
+            Reflection.invoke(step.method(), saga);
+        }
     }
 
     /**
@@ -206,6 +264,12 @@ final class SagaModel {
 
     private static Step stepOf(Method method) {
         SagaStep sagaStep = method.getAnnotation(SagaStep.class);
+        DeadlineExpired expired = method.getAnnotation(DeadlineExpired.class);
+        if (expired != null) {
+            return new Step(method.getName(), method, DeadlineReached.class, "", false,
+                    method.isAnnotationPresent(EndSaga.class), method.isAnnotationPresent(StartCompensation.class),
+                    expired.value(), method.getParameterCount() == 1);
+        }
         return new Step(method.getName(), method, method.getParameterTypes()[0], sagaStep.associationProperty(),
                 method.isAnnotationPresent(StartSaga.class), method.isAnnotationPresent(EndSaga.class),
                 method.isAnnotationPresent(StartCompensation.class));

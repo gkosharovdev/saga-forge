@@ -11,9 +11,16 @@ parcel cannot be delivered. Two sagas run the process, handing over at `OrderCon
 ```text
 CheckoutSaga    OrderPlaced ─► StockReserved ─► PaymentAuthorized ─► ConfirmOrder ─┐
                      └─ StockUnavailable / PaymentDeclined ─► cancelCheckout       │ OrderConfirmedEvent
+                     └─ payment window expires ─► cancelCheckout                   │
 FulfilmentSaga  OrderConfirmed ─► ShipmentDispatched ─► ShipmentDelivered  ◄───────┘
                      └─ DeliveryImpossible ─► cancelOrder (refund or void, restock, cancel)
+                     └─ courier assignment expires ─► cancelOrder
 ```
+
+Both sagas also wait against the clock. Checkout gives the customer a payment window to pass the card challenge, and
+fulfilment gives Logistics a time to find a courier. Each is a named saga deadline: a step starts it with
+`@StartDeadline`, a `@DeadlineExpired` timeout step runs if it comes due, and it closes when the awaited step runs or
+the instance leaves `RUNNING`.
 
 | Context | Owns | Talks to the sagas through |
 |---|---|---|
@@ -44,11 +51,13 @@ public class CheckoutSaga {
     public void onOrderPlaced(OrderPlacedEvent event) {
         context.putState("orderId", event.orderId());
         context.putState("amount", event.amount().toPlainString());
+        context.putState("paymentWindow", event.express() ? "PT10M" : "PT30M");
         commandGateway.send(new ReserveStockCommand(event.orderId(), event.lines()));
     }
 
     @SagaStep(associationProperty = "orderId",
             retry = @RetryPolicy(maxAttempts = 3, initialBackoffMillis = 200, multiplier = 2.0))
+    @StartDeadline(name = "paymentWindow", durationFrom = "paymentWindow")
     public void onStockReserved(StockReservedEvent event) {
         context.putState("reservationId", event.reservationId());
         commandGateway.send(new AuthorizePaymentCommand(event.orderId(), amount()));
@@ -73,11 +82,23 @@ public class CheckoutSaga {
         context.putState("declineReason", event.reason());
     }
 
+    @StartCompensation
+    @DeadlineExpired("paymentWindow")
+    @SagaStep
+    public void onPaymentWindowExpired(DeadlineReached deadline) {
+        context.putState("timedOutAt", deadline.dueAt().toString());
+    }
+
     @SagaCompensation(forStep = "onOrderPlaced")
     public void cancelCheckout(CompensationTrigger trigger) {
-        Order.RejectionReason reason = "onStockUnavailable".equals(trigger.stepName())
-                ? Order.RejectionReason.OUT_OF_STOCK
-                : Order.RejectionReason.PAYMENT_NOT_AUTHORIZED;
+        Order.RejectionReason reason;
+        if (trigger.kind() == CompensationTriggerKind.DEADLINE_EXPIRED) {
+            reason = Order.RejectionReason.PAYMENT_TIMED_OUT;
+        } else if ("onStockUnavailable".equals(trigger.stepName())) {
+            reason = Order.RejectionReason.OUT_OF_STOCK;
+        } else {
+            reason = Order.RejectionReason.PAYMENT_NOT_AUTHORIZED;
+        }
         commandGateway.send(new ReleaseStockCommand(orderId()));
         commandGateway.send(new RejectOrderCommand(orderId(), reason));
     }
@@ -104,6 +125,12 @@ What Saga Forge does with it:
 - **Compensation.** A `@StartCompensation` step names the failure outcome. The runtime then runs the compensation of
   every completed step, here `cancelCheckout` for `onOrderPlaced`, in its own unit of work. The `CompensationTrigger`
   says which outcome it was, and the order is rejected with the matching reason.
+- **Payment window.** `onStockReserved` starts the `paymentWindow` deadline, its length read from the `SagaContext`
+  value `onOrderPlaced` wrote: 30 minutes, or 10 at express checkout. The deadline is stored as a message with a due
+  time in the same transaction. If neither `PaymentAuthorizedEvent` nor `PaymentDeclinedEvent` arrives in time, the
+  timeout step `onPaymentWindowExpired` runs with a `DeadlineReached` and starts compensation; the trigger's kind is
+  `DEADLINE_EXPIRED`, and the order is rejected `PAYMENT_TIMED_OUT`. The deadline needs no `cancelledBy`: both answers
+  end the saga, and leaving `RUNNING` closes every open deadline.
 - **Hand-over.** The `Order` aggregate records `OrderConfirmedEvent` while it handles `ConfirmOrderCommand`. No
   checkout step takes that event, so it leaves through the outbox and starts `FulfilmentSaga`.
 
@@ -122,6 +149,8 @@ public class FulfilmentSaga {
 
     @StartSaga
     @SagaStep(associationProperty = "orderId")
+    @StartDeadline(name = "courierAssignment", duration = "${checkout.courier-assignment:PT2H}",
+            cancelledBy = "onShipmentDispatched")
     public void onOrderConfirmed(OrderConfirmedEvent event) {
         context.putState("orderId", event.orderId());
         context.putState("reservationId", event.reservationId());
@@ -148,6 +177,13 @@ public class FulfilmentSaga {
         context.putState("cancellationReason", event.reason());
     }
 
+    @StartCompensation
+    @DeadlineExpired("courierAssignment")
+    @SagaStep
+    public void onCourierNotAssigned() {
+        context.putState("cancellationReason", "no courier assigned");
+    }
+
     @SagaCompensation(forStep = "onOrderConfirmed")
     public void cancelOrder() {
         String orderId = context.getState("orderId", String.class).orElseThrow();
@@ -164,6 +200,12 @@ Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/examp
 The saga waits between Logistics' events for as long as the delivery takes; its state is in the database, not in
 memory. When Logistics reports `DeliveryImpossibleEvent`, `cancelOrder` gives everything back. The handlers keep the
 business rules: Payments refunds a captured payment and voids one that was only authorised.
+
+Logistics must find a courier within `checkout.courier-assignment`, two hours unless the property says otherwise.
+`onShipmentDispatched` is named in `cancelledBy`, so a dispatch in time closes the deadline while the saga goes on
+waiting for the delivery. Otherwise `onCourierNotAssigned` runs and `cancelOrder` voids the payment and releases the
+stock. The timeout step takes no parameter: it needs nothing from the `DeadlineReached`. A deadline that comes due
+while the application is down runs once it is back, in due order.
 
 ```java
     @CommandHandler
@@ -187,6 +229,8 @@ Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/examp
 | Card declined | `cancelCheckout` | never authorised | released | checkout `COMPENSATED` |
 | Provider times out twice | - | authorised once | held | as delivered |
 | Provider down past the retries | `cancelCheckout` | never authorised | released | checkout `COMPENSATED` |
+| Card challenge abandoned, payment window closes | `cancelCheckout` | never authorised | released | checkout `COMPENSATED` |
+| No courier within the assignment time | `cancelOrder` | voided | released | fulfilment `COMPENSATED` |
 | No courier for the address | `cancelOrder` | voided | released | fulfilment `COMPENSATED` |
 | Returned after failed attempts | `cancelOrder` | refunded | booked back in | fulfilment `COMPENSATED` |
 | Inventory's event delivered twice | - | - | - | reported `DUPLICATE`, nothing runs |
@@ -215,7 +259,33 @@ Payments would send and checks what the saga does next, with no database or tran
 
 Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutSagaFixtureTest.java`.
 
-`FulfilmentSagaFixtureTest` does the same for fulfilment. `CheckoutAndFulfilmentTest` runs both sagas with the real
+A deadline test moves the fixture's clock on with `whenTimeElapses`. Nothing happens a minute before the window
+closes; at 30 minutes the timeout step runs:
+
+```java
+    @Test
+    @DisplayName("an abandoned card challenge: the window closes, the stock is released and the order rejected")
+    void abandonedChallengeTimesOut() {
+        fixture.given(PLACED, RESERVED)
+                .whenTimeElapses(Duration.ofMinutes(29))
+                .expectNoCommands();
+
+        fixture.whenTimeElapses(Duration.ofMinutes(1))
+                .expectDeadlineExpired("paymentWindow")
+                .expectCompensations("cancelCheckout")
+                .expectCommands(new RejectOrderCommand("o-1", Order.RejectionReason.PAYMENT_TIMED_OUT),
+                        new ReleaseStockCommand("o-1"))
+                .expectCompensatedAfter("onPaymentWindowExpired")
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                        compensated.trigger().kind() == CompensationTriggerKind.DEADLINE_EXPIRED
+                                && "paymentWindow".equals(compensated.trigger().deadlineName()));
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutSagaFixtureTest.java`.
+
+`FulfilmentSagaFixtureTest` does the same for fulfilment, including the courier deadline. `CheckoutAndFulfilmentTest` runs both sagas with the real
 handlers, from a placed order to a refund.
 
 ## 2. The smallest shape: `OrderProcessingSaga`

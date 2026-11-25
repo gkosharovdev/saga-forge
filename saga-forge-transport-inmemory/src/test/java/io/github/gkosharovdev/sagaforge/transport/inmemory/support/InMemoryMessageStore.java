@@ -199,6 +199,40 @@ public final class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public boolean supportsScheduling() {
+        return true;
+    }
+
+    @Override
+    public Set<String> cancel(LocalTransaction tx, Collection<String> messageIds, Instant at) {
+        Scope scope = scope(tx);
+        Set<String> cancelled = new HashSet<>();
+        synchronized (this) {
+            for (String id : messageIds) {
+                if (cancellable(messages.get(id), at)) {
+                    cancelled.add(id);
+                }
+            }
+        }
+        scope.onCommit(() -> {
+            synchronized (this) {
+                for (String id : cancelled) {
+                    StoredMessage message = messages.get(id);
+                    if (cancellable(message, at)) {
+                        messages.put(id, message.cancelled(at));
+                    }
+                }
+            }
+        });
+        return Set.copyOf(cancelled);
+    }
+
+    private static boolean cancellable(StoredMessage message, Instant at) {
+        return message != null && message.status() == MessageStatus.UNCONSUMED
+                && (message.leasedUntil() == null || !message.leasedUntil().isAfter(at));
+    }
+
+    @Override
     public synchronized void release(String consumerId) {
         for (StoredMessage message : List.copyOf(messages.values())) {
             if (consumerId.equals(message.leasedBy())) {
@@ -230,8 +264,8 @@ public final class InMemoryMessageStore implements MessageStore {
     @Override
     public synchronized int purgeConsumed(Instant cutoff, int batchSize) {
         List<String> purged = messages.values().stream()
-                .filter(message -> message.status() == MessageStatus.CONSUMED
-                        && message.consumedAt().isBefore(cutoff))
+                .filter(message -> (message.status() == MessageStatus.CONSUMED
+                        || message.status() == MessageStatus.CANCELLED) && message.consumedAt().isBefore(cutoff))
                 .limit(batchSize).map(StoredMessage::messageId).toList();
         purged.forEach(messages::remove);
         return purged.size();

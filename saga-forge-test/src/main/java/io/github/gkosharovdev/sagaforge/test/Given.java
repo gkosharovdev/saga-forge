@@ -48,6 +48,34 @@ public final class Given {
     }
 
     /**
+     * Moves the clock forward and delivers what came due, as {@link SagaFixture#whenTimeElapses}.
+     *
+     * @throws IllegalArgumentException if {@code duration} is {@code null} or negative
+     */
+    public Then whenTimeElapses(java.time.Duration duration) {
+        return new Then(fixture, fixture.elapse(duration), null);
+    }
+
+    /**
+     * Sets the clock and delivers what came due, as {@link SagaFixture#whenTimeReaches}.
+     *
+     * @throws IllegalArgumentException if {@code instant} is {@code null} or before the clock's current time
+     */
+    public Then whenTimeReaches(java.time.Instant instant) {
+        return new Then(fixture, fixture.reach(instant), null);
+    }
+
+    /**
+     * Lets time pass in the history: delivers what came due, without counting towards expectations.
+     *
+     * @throws IllegalArgumentException if {@code duration} is {@code null} or negative
+     */
+    public Given givenTimeElapses(java.time.Duration duration) {
+        last = fixture.elapse(duration);
+        return this;
+    }
+
+    /**
      * Expectations over the last given event, for a test with no "when" step.
      *
      * @throws IllegalStateException if no event was given

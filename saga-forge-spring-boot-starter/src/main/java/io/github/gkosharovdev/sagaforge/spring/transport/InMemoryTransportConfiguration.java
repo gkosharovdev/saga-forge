@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.spring.transport;
 
+import java.time.Clock;
 import java.time.Duration;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -51,10 +52,11 @@ public class InMemoryTransportConfiguration {
     @ConditionalOnMissingBean
     public InMemoryTransport sagaForgeInMemoryTransport(MessageStore messageStore, TransactionBoundary transactions,
             TransportProperties properties, ThreadPoolTaskExecutor sagaForgeTransportExecutor,
-            ObjectProvider<SagaForgeTelemetry> telemetry) {
+            ObjectProvider<SagaForgeTelemetry> telemetry, ObjectProvider<Clock> clock) {
         SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
         return InMemoryTransport.builder().messageStore(messageStore).transactions(transactions)
                 .settings(properties.toSettings()).executor(sagaForgeTransportExecutor)
+                .clock(clock.getIfUnique(Clock::systemUTC))
                 .openTelemetry(resolved.openTelemetry()).telemetry(resolved.settings()).build();
     }
 

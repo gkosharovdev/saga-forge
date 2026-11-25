@@ -114,4 +114,32 @@ public interface Outbox {
      */
     default void committed(OutgoingMessages batch) {
     }
+
+    /**
+     * Whether this outbox stores {@link OutgoingMessages#scheduled()} messages, holding each back until its
+     * {@link ScheduledMessage#notBefore()}, and implements {@link #cancel(java.util.Collection)} ({@code specs/017-saga-deadlines}
+     * FR-008, FR-016). Only an {@link Timing#IN_TRANSACTION} outbox over a store that keeps due times can. The runtime
+     * refuses to start a model that declares deadlines when this is {@code false}.
+     *
+     * @return {@code false} unless the outbox overrides it
+     */
+    default boolean supportsScheduling() {
+        return false;
+    }
+
+    /**
+     * Cancels stored scheduled messages, in the current unit of work's transaction
+     * ({@link TransactionBoundary#current()}), so the cancellation commits or rolls back with it. Called by the runtime
+     * for deadlines that are cancelled and for {@code CommandGateway.cancel}. A message being delivered at that moment,
+     * or already handled, is not cancelled.
+     *
+     * <p>This default throws {@link UnsupportedOperationException}.</p>
+     *
+     * @param messageIds the scheduled messages' ids
+     * @return the ids that were cancelled
+     * @throws IllegalStateException if no transaction is active
+     */
+    default java.util.Set<String> cancel(java.util.Collection<String> messageIds) {
+        throw new UnsupportedOperationException(getClass().getName() + " cannot cancel scheduled messages");
+    }
 }

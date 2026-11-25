@@ -68,17 +68,21 @@ final class SagaInstrumentation {
     static final AttributeKey<String> CONTENT = AttributeKey.stringKey("saga_forge.content");
     static final AttributeKey<String> ERROR_TYPE = AttributeKey.stringKey("error.type");
     static final AttributeKey<String> FAILURE_MESSAGE = AttributeKey.stringKey("saga_forge.failure.message");
+    static final AttributeKey<String> DEADLINE_NAME = AttributeKey.stringKey("saga_forge.deadline.name");
+    static final AttributeKey<String> DEADLINE_EVENT = AttributeKey.stringKey("saga_forge.deadline.event");
 
     /** Attributes that may appear on metrics: bounded by the model and fixed enumerations (FR-009). */
     static final Set<AttributeKey<?>> LOW_CARDINALITY = Set.of(SAGA_TYPE, EVENT_TYPE, HANDLING_OUTCOME, SAGA_STARTED,
             SAGA_OUTCOME, ATTEMPT_RESULT, FAILURE_CLASSIFICATION, STEP_NAME, COMMAND_TYPE, COMMAND_DELIVERY,
-            COMMAND_RESULT, COMPENSATION_STATUS, COMPENSATION_TRIGGER, ERROR_TYPE);
+            COMMAND_RESULT, COMPENSATION_STATUS, COMPENSATION_TRIGGER, ERROR_TYPE, DEADLINE_NAME, DEADLINE_EVENT);
 
     static final String SAGA_STARTED_COUNTER = "saga_forge.saga.started";
     static final String SAGA_ENDED_COUNTER = "saga_forge.saga.ended";
     static final String EVENT_HANDLED_COUNTER = "saga_forge.event.handled";
     static final String RETRY_SCHEDULED_COUNTER = "saga_forge.retry.scheduled";
     static final String RETRY_EXHAUSTED_COUNTER = "saga_forge.retry.exhausted";
+    /** Deadlines by {@code event}: {@code started}, {@code cancelled}, {@code expired} or {@code ignored} (017). */
+    static final String DEADLINES_COUNTER = "saga_forge.deadlines";
 
     private static final int CONTENT_LIMIT = 1_000;
 

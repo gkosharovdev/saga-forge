@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
@@ -43,6 +44,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
  * @param telemetry          what is recorded through {@code openTelemetry}
  * @param outcomeEvents      whether terminal writes hand an outcome event to the outbox; {@code true} by default
  *                           (specs/011-saga-outcome-events FR-016)
+ * @param properties         resolves the keys of {@code @StartDeadline(duration = "${key[:default]}")} at startup;
+ *                           resolves nothing by default (specs/017-saga-deadlines FR-010)
  */
 public record EngineSettings(
         StorageProvider storage,
@@ -60,7 +63,8 @@ public record EngineSettings(
         CommandInterceptor commandInterceptor,
         OpenTelemetry openTelemetry,
         SagaTelemetrySettings telemetry,
-        boolean outcomeEvents) {
+        boolean outcomeEvents,
+        Function<String, Optional<String>> properties) {
 
     /**
      * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -79,8 +83,21 @@ public record EngineSettings(
         requireNonNull(commandInterceptor, "commandInterceptor");
         requireNonNull(openTelemetry, "openTelemetry");
         requireNonNull(telemetry, "telemetry");
+        requireNonNull(properties, "properties");
         aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
         parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
+    }
+
+    /** Settings that resolve no deadline property (017). */
+    public EngineSettings(StorageProvider storage, SagaContextStore contextStore, TransactionBoundary transactions,
+            EventDispatcher dispatcher, HandlerInstanceProvider handlerInstances,
+            List<AggregateResolver> aggregateResolvers, List<HandlerParameterResolver> parameterResolvers,
+            Optional<SagaObjectProvider> sagaObjects, Outbox outbox, Outbox.Timing outboxTiming,
+            TimeAndIdentity sources, RetrySettings retry, CommandInterceptor commandInterceptor,
+            OpenTelemetry openTelemetry, SagaTelemetrySettings telemetry, boolean outcomeEvents) {
+        this(storage, contextStore, transactions, dispatcher, handlerInstances, aggregateResolvers,
+                parameterResolvers, sagaObjects, outbox, outboxTiming, sources, retry, commandInterceptor,
+                openTelemetry, telemetry, outcomeEvents, key -> Optional.empty());
     }
 
     /** Settings with outcome events on (011). */

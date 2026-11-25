@@ -7,6 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
+import io.github.gkosharovdev.sagaforge.core.annotation.StartDeadline;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -34,6 +35,10 @@ import java.util.stream.Stream;
  *   <li><b>Saga objects</b> (Property 23): with a {@link SagaObjectProvider} registered, it supports every
  *       {@code @Saga} class; without one, every {@code @Saga} class declares a no-argument constructor (any
  *       visibility).</li>
+ *   <li><b>Deadlines</b> (specs/017-saga-deadlines FR-010, FR-016): every {@code ${key[:default]}} deadline duration
+ *       resolves through the engine's property resolver to a non-negative ISO-8601 duration, and a saga that declares a
+ *       deadline runs over an outbox that {@linkplain io.github.gkosharovdev.sagaforge.core.spi.Outbox#supportsScheduling()
+ *       supports scheduling}.</li>
  * </ul>
  *
  * <p>All errors are collected in one pass, in registration order. Only {@code supports} methods are called: no saga
@@ -46,6 +51,19 @@ import java.util.stream.Stream;
 final class StartupChecks {
 
     private StartupChecks() {
+    }
+
+    private static Optional<String> schedulingError(Class<?> sagaType, EngineSettings settings) {
+        if (settings.outbox().supportsScheduling()) {
+            return Optional.empty();
+        }
+        return Reflection.annotatedMethods(sagaType, SagaStep.class).stream()
+                .flatMap(method -> Stream.of(method.getAnnotationsByType(StartDeadline.class)))
+                .findFirst()
+                .map(deadline -> "Saga " + sagaType.getName() + " declares deadline '" + deadline.name()
+                        + "', but the outbox (" + settings.outbox().getClass().getSimpleName() + ") cannot schedule"
+                        + " messages. Deadlines need an IN_TRANSACTION outbox over a message store that supports"
+                        + " scheduling, such as InMemoryTransport with PostgresMessageStore.");
     }
 
     /**
@@ -62,6 +80,8 @@ final class StartupChecks {
             if (type.isAnnotationPresent(Saga.class)) {
                 sagaObjectError(type, settings).ifPresent(errors::add);
                 errors.addAll(retryBackoffErrors(type, settings));
+                errors.addAll(DeadlineModel.placeholderErrors(type, settings.properties()));
+                schedulingError(type, settings).ifPresent(errors::add);
                 continue;
             }
             if (type.isAnnotationPresent(Aggregate.class) && hasInstanceHandler(type)

@@ -16,19 +16,23 @@ import java.time.Instant;
  * <p>The canonical constructor throws {@link IllegalArgumentException} if a rule above is violated.</p>
  *
  * @param kind        what started compensation; non-null
- * @param stepName    the {@code @StartCompensation} step ({@code FAILURE_OUTCOME}), the step that failed, or the step
- *                    that sent the failed command ({@code COMMAND_FAILED}); non-blank
- * @param eventType   fully qualified class name of the event the {@code @StartCompensation} step handled; non-null if
- *                    and only if {@code kind == FAILURE_OUTCOME}
+ * @param stepName    the {@code @StartCompensation} step ({@code FAILURE_OUTCOME}, {@code DEADLINE_EXPIRED}), the
+ *                    step that failed, or the step that sent the failed command ({@code COMMAND_FAILED}); non-blank
+ * @param eventType   fully qualified class name of the event the {@code @StartCompensation} step handled
+ *                    ({@code DeadlineReached} for {@code DEADLINE_EXPIRED}); non-null if and only if {@code kind} is
+ *                    {@code FAILURE_OUTCOME} or {@code DEADLINE_EXPIRED}
  * @param commandType fully qualified class name of the outbox command that failed; non-null if and only if
  *                    {@code kind == COMMAND_FAILED} ({@code specs/012-outbox-command-failure-feedback})
  * @param failure     the recorded failure, classified {@code FINAL} for {@code FINAL_FAILURE}, {@code EXHAUSTED} for
  *                    {@code RETRIES_EXHAUSTED}, and either for {@code COMMAND_FAILED}; its step is {@code stepName};
- *                    non-null if and only if {@code kind != FAILURE_OUTCOME}
+ *                    non-null if and only if {@code kind} is a failure kind (not {@code FAILURE_OUTCOME} or
+ *                    {@code DEADLINE_EXPIRED})
  * @param at          when compensation started; non-null
+ * @param deadlineName the expired deadline; non-null if and only if {@code kind == DEADLINE_EXPIRED}
+ *                    ({@code specs/017-saga-deadlines})
  */
 public record CompensationTrigger(CompensationTriggerKind kind, String stepName, String eventType,
-        String commandType, SagaFailure failure, Instant at) {
+        String commandType, SagaFailure failure, Instant at, String deadlineName) {
 
     public CompensationTrigger {
         if (kind == null) {
@@ -40,13 +44,16 @@ public record CompensationTrigger(CompensationTriggerKind kind, String stepName,
         if (at == null) {
             throw new IllegalArgumentException("at must not be null");
         }
-        boolean outcome = kind == CompensationTriggerKind.FAILURE_OUTCOME;
-        requirePresentIff(eventType, outcome, "eventType", "kind is FAILURE_OUTCOME", kind);
+        boolean outcome = kind == CompensationTriggerKind.FAILURE_OUTCOME
+                || kind == CompensationTriggerKind.DEADLINE_EXPIRED;
+        requirePresentIff(eventType, outcome, "eventType", "kind is FAILURE_OUTCOME or DEADLINE_EXPIRED", kind);
         requirePresentIff(commandType, kind == CompensationTriggerKind.COMMAND_FAILED, "commandType",
                 "kind is COMMAND_FAILED", kind);
+        requirePresentIff(deadlineName, kind == CompensationTriggerKind.DEADLINE_EXPIRED, "deadlineName",
+                "kind is DEADLINE_EXPIRED", kind);
         if (outcome == (failure != null)) {
-            throw new IllegalArgumentException(
-                    "failure must be non-null if and only if kind is not FAILURE_OUTCOME, but kind is " + kind);
+            throw new IllegalArgumentException("failure must be non-null if and only if kind is a failure kind, but "
+                    + "kind is " + kind);
         }
         if (failure != null) {
             requireClassification(kind, failure.classification());
@@ -55,6 +62,22 @@ public record CompensationTrigger(CompensationTriggerKind kind, String stepName,
                         + failure.stepName());
             }
         }
+    }
+
+    /**
+     * The trigger as it was before {@code specs/017-saga-deadlines}: no deadline name, so any kind but
+     * {@code DEADLINE_EXPIRED}.
+     *
+     * @param kind        what started compensation
+     * @param stepName    the step
+     * @param eventType   the handled event's type for {@code FAILURE_OUTCOME}, otherwise {@code null}
+     * @param commandType the failed command's type for {@code COMMAND_FAILED}, otherwise {@code null}
+     * @param failure     the step failure, {@code null} for {@code FAILURE_OUTCOME}
+     * @param at          when compensation started
+     */
+    public CompensationTrigger(CompensationTriggerKind kind, String stepName, String eventType, String commandType,
+            SagaFailure failure, Instant at) {
+        this(kind, stepName, eventType, commandType, failure, at, null);
     }
 
     /**
@@ -68,7 +91,7 @@ public record CompensationTrigger(CompensationTriggerKind kind, String stepName,
      */
     public CompensationTrigger(CompensationTriggerKind kind, String stepName, String eventType, SagaFailure failure,
             Instant at) {
-        this(kind, stepName, eventType, null, failure, at);
+        this(kind, stepName, eventType, null, failure, at, null);
     }
 
     /**
@@ -79,6 +102,19 @@ public record CompensationTrigger(CompensationTriggerKind kind, String stepName,
      */
     public static CompensationTrigger failureOutcome(String stepName, String eventType, Instant at) {
         return new CompensationTrigger(CompensationTriggerKind.FAILURE_OUTCOME, stepName, eventType, null, null, at);
+    }
+
+    /**
+     * @param stepName     the {@code @StartCompensation} {@code @DeadlineExpired} step whose unit of work committed
+     * @param eventType    fully qualified class name of the delivered deadline ({@code DeadlineReached})
+     * @param deadlineName the expired deadline
+     * @param at           when compensation started
+     * @return a {@code DEADLINE_EXPIRED} trigger
+     */
+    public static CompensationTrigger deadlineExpired(String stepName, String eventType, String deadlineName,
+            Instant at) {
+        return new CompensationTrigger(CompensationTriggerKind.DEADLINE_EXPIRED, stepName, eventType, null, null, at,
+                deadlineName);
     }
 
     /**
@@ -138,7 +174,7 @@ public record CompensationTrigger(CompensationTriggerKind kind, String stepName,
             case RETRIES_EXHAUSTED -> classification == FailureClassification.EXHAUSTED;
             case COMMAND_FAILED -> classification == FailureClassification.FINAL
                     || classification == FailureClassification.EXHAUSTED;
-            case FAILURE_OUTCOME -> false;
+            case FAILURE_OUTCOME, DEADLINE_EXPIRED -> false;
         };
         if (!allowed) {
             String expected = kind == CompensationTriggerKind.COMMAND_FAILED ? "FINAL or EXHAUSTED"

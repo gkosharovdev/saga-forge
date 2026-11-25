@@ -1,6 +1,8 @@
 package io.github.gkosharovdev.sagaforge.spring.runtime;
 
+import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -10,6 +12,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
@@ -66,7 +69,8 @@ public class SagaRuntimeConfiguration {
             ObjectProvider<EventDispatcher> dispatcher, ObjectProvider<Outbox> outbox,
             ObjectProvider<SagaObjectProvider> sagaObjects, ObjectProvider<HandlerInstanceProvider> handlerInstances,
             ObjectProvider<HandlerParameterResolver> parameterResolvers,
-            ObjectProvider<AggregateResolver> aggregateResolvers, ObjectProvider<SagaForgeTelemetry> telemetry) {
+            ObjectProvider<AggregateResolver> aggregateResolvers, ObjectProvider<SagaForgeTelemetry> telemetry,
+            ObjectProvider<Clock> clock, Environment environment) {
         properties.validate();
         StorageDetection detection = new StorageDetection(beanFactory.getBeanClassLoader());
         detection.checkSelection(properties.getStorage().getType());
@@ -97,7 +101,9 @@ public class SagaRuntimeConfiguration {
                 .transactions(boundary)
                 .dispatcher(eventDispatcher)
                 .maxTotalRetryBackoff(properties.getRuntime().getMaxTotalRetryBackoff())
-                .outcomeEvents(properties.getOutcomeEvents().isEnabled());
+                .outcomeEvents(properties.getOutcomeEvents().isEnabled())
+                .clock(clock.getIfUnique(Clock::systemUTC))
+                .propertyResolver(key -> Optional.ofNullable(environment.getProperty(key)));
         outbox.ifAvailable(builder::outbox);
         sagaObjects.ifAvailable(builder::sagaObjects);
         handlerInstances.ifAvailable(builder::handlerInstances);

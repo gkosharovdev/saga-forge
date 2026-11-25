@@ -126,6 +126,27 @@ public final class SagaFixture {
     }
 
     /**
+     * Moves the clock forward by {@code duration}, then delivers every deadline and scheduled command due by then,
+     * earliest first, with what they cause in turn, until none is due ({@code specs/017-saga-deadlines}).
+     *
+     * @throws IllegalArgumentException if {@code duration} is {@code null} or negative
+     * @throws SagaExpectationError     if a step stored a {@code SagaContext} value durable storage cannot persist
+     */
+    public Then whenTimeElapses(Duration duration) {
+        return new Then(this, elapse(duration), null);
+    }
+
+    /**
+     * Sets the clock to {@code instant}, then delivers what is due by then, as {@link #whenTimeElapses}.
+     *
+     * @throws IllegalArgumentException if {@code instant} is {@code null} or before the clock's current time
+     * @throws SagaExpectationError     if a step stored a {@code SagaContext} value durable storage cannot persist
+     */
+    public Then whenTimeReaches(Instant instant) {
+        return new Then(this, reach(instant), null);
+    }
+
+    /**
      * The most recently created instance of {@code sagaType} with {@code associationValue} as one of its association
      * values.
      *
@@ -158,6 +179,32 @@ public final class SagaFixture {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
+        return record(event, (reports, outboxFailures) -> {
+            reports.add(runtime.receive(event));
+            transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+        });
+    }
+
+    synchronized EventResult elapse(Duration duration) {
+        if (duration == null || duration.isNegative()) {
+            throw new IllegalArgumentException("duration must be zero or positive, but is " + duration);
+        }
+        return reach(clock.instant().plus(duration));
+    }
+
+    synchronized EventResult reach(Instant instant) {
+        if (instant == null || instant.isBefore(clock.instant())) {
+            throw new IllegalArgumentException("the time must not be before the clock's " + clock.instant()
+                    + ", but is " + instant);
+        }
+        clock.set(instant);
+        return record("time reaches " + instant, (reports, outboxFailures) -> transport.deliverDue(runtime,
+                interceptor, clock::instant, reports::add, outboxFailures::add));
+    }
+
+    /** Runs {@code work} and collects what it caused, labelled {@code cause} in messages. */
+    private EventResult record(Object cause,
+            java.util.function.BiConsumer<List<HandlingReport>, List<RuntimeException>> work) {
         Map<String, InstanceView> before = new LinkedHashMap<>();
         storage.all().forEach(instance -> before.put(instance.sagaId(), view(instance)));
         int committedMark = interceptor.committedSnapshot().size();
@@ -168,8 +215,7 @@ public final class SagaFixture {
 
         List<HandlingReport> reports = new ArrayList<>();
         List<RuntimeException> outboxFailures = new ArrayList<>();
-        reports.add(runtime.receive(event));
-        transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+        work.accept(reports, outboxFailures);
         List<SagaOutcome> outcomeEvents = transport.takeOutcomes();
 
         Set<String> touchedIds = new LinkedHashSet<>();
@@ -185,7 +231,7 @@ public final class SagaFixture {
         List<RecordedCommand> committed = interceptor.committedSnapshot();
         List<RecordedCommand> attempts = interceptor.attemptsSnapshot();
         List<FixtureLogger.Logged> logged = logger.logged();
-        EventResult result = new EventResult(event, reports, committed.subList(committedMark, committed.size()),
+        EventResult result = new EventResult(cause, reports, committed.subList(committedMark, committed.size()),
                 attempts.subList(attemptsMark, attempts.size()), before, touched, outboxFailures,
                 logged.subList(loggedMark, logged.size()), outcomeEvents);
         List<UnsupportedContextValueException> rejected = contexts.takeRejections();
@@ -254,6 +300,7 @@ public final class SagaFixture {
         private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
         private boolean outcomeEvents = true;
         private int outboxCommandAttempts = 1;
+        private final Map<String, String> properties = new LinkedHashMap<>();
 
         private Builder() {
         }
@@ -401,6 +448,20 @@ public final class SagaFixture {
         }
 
         /**
+         * Sets a property a {@code ${key[:default]}} deadline duration reads, as the application's configuration would
+         * ({@code specs/017-saga-deadlines}); unset keys fall back to their default.
+         *
+         * @throws IllegalArgumentException if {@code key} or {@code value} is {@code null}
+         */
+        public Builder property(String key, String value) {
+            if (key == null || value == null) {
+                throw new IllegalArgumentException("key and value must not be null");
+            }
+            properties.put(key, value);
+            return this;
+        }
+
+        /**
          * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the runtime's startup
          * does (FR-003).
          *
@@ -429,7 +490,9 @@ public final class SagaFixture {
             FixtureContextStore contexts = new FixtureContextStore(checkContextValues,
                     sagaId -> storage.findById(sagaId).map(SagaInstance::sagaType).orElse("unknown"));
             FixtureCommandInterceptor interceptor = new FixtureCommandInterceptor(transactions, rules, handledTypes);
-            LoopBackTransport transport = new LoopBackTransport(outboxCommandAttempts);
+            ScheduledMessages scheduled = new ScheduledMessages();
+            transactions.participant(scheduled);
+            LoopBackTransport transport = new LoopBackTransport(outboxCommandAttempts, scheduled);
             FixtureLogger logger = new FixtureLogger(System.getLogger(SagaRuntime.DEFAULT_LOGGER_NAME));
             FixtureObjects objects = new FixtureObjects(sagaFactories, hosts);
             Map<String, Map<String, String>> compensations = new LinkedHashMap<>();
@@ -456,6 +519,7 @@ public final class SagaFixture {
                     .openTelemetry(openTelemetry)
                     .telemetry(telemetry)
                     .outcomeEvents(outcomeEvents)
+                    .propertyResolver(key -> Optional.ofNullable(properties.get(key)))
                     .logger(logger);
             if (maxTotalRetryBackoff != null) {
                 runtime.maxTotalRetryBackoff(maxTotalRetryBackoff);

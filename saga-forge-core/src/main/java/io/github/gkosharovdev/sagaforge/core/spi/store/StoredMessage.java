@@ -28,7 +28,8 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
  * @param lastFailure    the latest failure; may be {@code null}
  * @param leasedBy      the leaseholder; both or neither with {@code leasedUntil}
  * @param leasedUntil   when the lease expires
- * @param consumedAt     non-null if and only if {@code status} is {@link MessageStatus#CONSUMED}
+ * @param consumedAt     non-null if and only if {@code status} is {@link MessageStatus#CONSUMED} or
+ *                       {@link MessageStatus#CANCELLED} (then: when it was cancelled)
  * @param setAsideReason non-null if and only if {@code status} is {@link MessageStatus#SET_ASIDE}
  * @param externalRef    in Spring Modulith interop mode the registry's publication identity; otherwise {@code null}
  */
@@ -49,7 +50,8 @@ public record StoredMessage(long position, String messageId, MessageKind kind, S
         Checks.commandIdMatchesKind(kind, commandId);
         Checks.bothOrNeither(sourceSagaType, sourceSagaId, "sourceSagaType", "sourceSagaId");
         Checks.bothOrNeither(leasedBy, leasedUntil, "leasedBy", "leasedUntil");
-        Checks.presentIff(status == MessageStatus.CONSUMED, consumedAt, "consumedAt", "status is CONSUMED");
+        Checks.presentIff(status == MessageStatus.CONSUMED || status == MessageStatus.CANCELLED, consumedAt,
+                "consumedAt", "status is CONSUMED or CANCELLED");
         Checks.presentIff(status == MessageStatus.SET_ASIDE, setAsideReason, "setAsideReason",
                 "status is SET_ASIDE");
         if (attempts < 0) {
@@ -73,13 +75,25 @@ public record StoredMessage(long position, String messageId, MessageKind kind, S
      *
      * @param position the assigned position
      * @param entry    the appended entry; non-null
-     * @return the message with status {@link MessageStatus#UNCONSUMED}, no attempts, due at its recording time
+     * @return the message with status {@link MessageStatus#UNCONSUMED}, no attempts, due at its {@code notBefore} or
+     *         else its recording time
      */
     public static StoredMessage appended(long position, NewMessage entry) {
         return new StoredMessage(position, entry.messageId(), entry.kind(), entry.payloadType(), entry.payload(),
                 entry.commandId(), entry.orderingKey(), entry.sourceSagaType(), entry.sourceSagaId(),
-                entry.recordedAt(), MessageStatus.UNCONSUMED, 0, entry.recordedAt(), null, null, null, null, null,
+                entry.recordedAt(), MessageStatus.UNCONSUMED, 0,
+                entry.notBefore() != null ? entry.notBefore() : entry.recordedAt(), null, null, null, null, null,
                 null, entry.traceContext());
+    }
+
+    /**
+     * @param at when it was cancelled; non-null
+     * @return this message, {@link MessageStatus#CANCELLED}
+     */
+    public StoredMessage cancelled(Instant at) {
+        return new StoredMessage(position, messageId, kind, payloadType, payload, commandId, orderingKey,
+                sourceSagaType, sourceSagaId, recordedAt, MessageStatus.CANCELLED, attempts, nextAttemptAt, lastFailure,
+                null, null, at, null, externalRef, traceContext);
     }
 
     /** @return whether the payload is loaded */

@@ -10,5 +10,10 @@ public enum MessageStatus {
     CONSUMED,
 
     /** Failed too often or could not be read; never delivered again unless an operator asks; never removed. */
-    SET_ASIDE
+    SET_ASIDE,
+    /**
+     * Withdrawn before it was handed over ({@code specs/017-saga-deadlines} FR-003): never leased, does not block its
+     * ordering key, removed by retention like {@link #CONSUMED}.
+     */
+    CANCELLED
 }

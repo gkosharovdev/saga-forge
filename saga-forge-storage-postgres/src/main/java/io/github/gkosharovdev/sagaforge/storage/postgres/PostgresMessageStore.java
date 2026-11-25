@@ -115,9 +115,9 @@ public class PostgresMessageStore implements MessageStore {
                 "The active transaction has no java.sql.Connection resource; PostgresMessageStore cannot join it"));
         String sql = "INSERT INTO saga_message_store (message_id, kind, payload_type, payload, command_id, ordering_key,"
                 + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, external_ref,"
-                + " trace_context)"
+                + " trace_context, not_before)"
                 + " VALUES (?, ?, ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, ?, ?, ?, 'UNCONSUMED', 0, ?, ?,"
-                + " CAST(? AS JSONB))";
+                + " CAST(? AS JSONB), ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             for (NewMessage entry : entries) {
                 statement.setString(1, entry.messageId());
@@ -130,10 +130,11 @@ public class PostgresMessageStore implements MessageStore {
                 statement.setString(7, entry.sourceSagaType());
                 statement.setString(8, entry.sourceSagaId());
                 statement.setObject(9, utc(entry.recordedAt()));
-                statement.setObject(10, utc(entry.recordedAt()));
+                statement.setObject(10, utc(entry.isScheduled() ? entry.notBefore() : entry.recordedAt()));
                 statement.setString(11, externalRef);
                 statement.setString(12, entry.traceContext().isEmpty() ? null
                         : JsonCodec.encodeObject("trace_context", entry.traceContext()));
+                statement.setObject(13, entry.isScheduled() ? utc(entry.notBefore()) : null);
                 statement.addBatch();
             }
             statement.executeBatch();
@@ -165,6 +166,46 @@ public class PostgresMessageStore implements MessageStore {
                 }
             }
         });
+    }
+
+    // ----- scheduling (specs/017-saga-deadlines) ------------------------------------------------------------
+
+    @Override
+    public boolean supportsScheduling() {
+        return true;
+    }
+
+    @Override
+    public Set<String> cancel(LocalTransaction tx, Collection<String> messageIds, Instant at) {
+        if (tx == null) {
+            throw new IllegalArgumentException("tx must not be null");
+        }
+        if (messageIds.isEmpty()) {
+            return Set.of();
+        }
+        Connection connection = tx.resource(Connection.class).orElseThrow(() -> new IllegalStateException(
+                "The active transaction has no java.sql.Connection resource; PostgresMessageStore cannot join it"));
+        try (PreparedStatement statement = connection.prepareStatement("UPDATE saga_message_store"
+                + " SET status = 'CANCELLED', consumed_at = ?, leased_by = NULL, leased_until = NULL"
+                + " WHERE message_id = ANY (?) AND status = 'UNCONSUMED'"
+                + " AND (leased_until IS NULL OR leased_until <= ?) RETURNING message_id")) {
+            statement.setObject(1, utc(at));
+            statement.setArray(2, connection.createArrayOf("varchar", messageIds.toArray()));
+            statement.setObject(3, utc(at));
+            Set<String> cancelled = new HashSet<>();
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    cancelled.add(resultSet.getString(1));
+                }
+            }
+            return Set.copyOf(cancelled);
+        } catch (SQLException e) {
+            tx.setRollbackOnly();
+            throw new UncheckedSqlException("could not cancel " + messageIds.size() + " message(s)", e);
+        } catch (RuntimeException e) {
+            tx.setRollbackOnly();
+            throw e;
+        }
     }
 
     // ----- leasing and leaseholder writes --------------------------------------------------------------------
@@ -390,8 +431,8 @@ public class PostgresMessageStore implements MessageStore {
     public int purgeConsumed(Instant cutoff, int batchSize) {
         return inOwnTransaction("purge consumed messages", connection -> {
             try (PreparedStatement statement = connection.prepareStatement("DELETE FROM saga_message_store"
-                    + " WHERE position IN (SELECT position FROM saga_message_store WHERE status = 'CONSUMED'"
-                    + " AND consumed_at < ? ORDER BY position LIMIT ?)")) {
+                    + " WHERE position IN (SELECT position FROM saga_message_store"
+                    + " WHERE status IN ('CONSUMED', 'CANCELLED') AND consumed_at < ? ORDER BY position LIMIT ?)")) {
                 statement.setObject(1, utc(cutoff));
                 statement.setInt(2, batchSize);
                 return statement.executeUpdate();

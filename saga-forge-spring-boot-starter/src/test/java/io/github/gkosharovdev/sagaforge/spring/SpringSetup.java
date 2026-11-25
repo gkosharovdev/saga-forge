@@ -101,6 +101,11 @@ public final class SpringSetup implements TransportAcceptanceSuite.Setup {
     }
 
     @Override
+    public boolean supportsScheduling() {
+        return !modulith;
+    }
+
+    @Override
     public PaymentService payments() {
         return services.payments();
     }

@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.example.checkout;
 
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
@@ -35,7 +37,9 @@ class CheckoutSagaFixtureTest {
 
     private static final BigDecimal AMOUNT = new BigDecimal("59.90");
     private static final List<OrderLine> LINES = List.of(new OrderLine("sku-mug", 2));
-    private static final OrderPlacedEvent PLACED = new OrderPlacedEvent("o-1", LINES, AMOUNT, "1 Main Street");
+    private static final OrderPlacedEvent PLACED = new OrderPlacedEvent("o-1", LINES, AMOUNT, "1 Main Street",
+            false);
+    private static final StockReservedEvent RESERVED = new StockReservedEvent("reservation-o-1", "o-1");
 
     private final SagaFixture fixture = SagaFixture.of(CheckoutSaga.class).register(InventoryService.class).build();
 
@@ -120,5 +124,61 @@ class CheckoutSagaFixtureTest {
                 .expectCompensations("cancelCheckout")
                 .expectCommand(ReleaseStockCommand.class, release -> release.orderId().equals("o-1"))
                 .expectStatus(SagaStatus.COMPENSATED);
+    }
+
+    @Test
+    @DisplayName("held stock opens the payment window: 30 minutes, or 10 at express checkout")
+    void stockOpensThePaymentWindow() {
+        fixture.given(PLACED)
+                .when(RESERVED)
+                .expectOpenDeadline("paymentWindow");
+        assertThat(fixture.instance(CheckoutSaga.class, "o-1").openDeadlines().get("paymentWindow").dueAt())
+                .isEqualTo(fixture.clock().instant().plus(Duration.ofMinutes(30)));
+
+        fixture.given(new OrderPlacedEvent("o-2", LINES, AMOUNT, "1 Main Street", true))
+                .when(new StockReservedEvent("reservation-o-2", "o-2"));
+        assertThat(fixture.instance(CheckoutSaga.class, "o-2").openDeadlines().get("paymentWindow").dueAt())
+                .isEqualTo(fixture.clock().instant().plus(Duration.ofMinutes(10)));
+    }
+
+    @Test
+    @DisplayName("an abandoned card challenge: the window closes, the stock is released and the order rejected")
+    void abandonedChallengeTimesOut() {
+        fixture.given(PLACED, RESERVED)
+                .whenTimeElapses(Duration.ofMinutes(29))
+                .expectNoCommands();
+
+        fixture.whenTimeElapses(Duration.ofMinutes(1))
+                .expectDeadlineExpired("paymentWindow")
+                .expectCompensations("cancelCheckout")
+                .expectCommands(new RejectOrderCommand("o-1", Order.RejectionReason.PAYMENT_TIMED_OUT),
+                        new ReleaseStockCommand("o-1"))
+                .expectCompensatedAfter("onPaymentWindowExpired")
+                .expectStatus(SagaStatus.COMPENSATED)
+                .expectOutcomeEvent(SagaCompensated.class, compensated ->
+                        compensated.trigger().kind() == CompensationTriggerKind.DEADLINE_EXPIRED
+                                && "paymentWindow".equals(compensated.trigger().deadlineName()));
+    }
+
+    @Test
+    @DisplayName("payment in time closes the window: an hour later nothing happens")
+    void paymentInTimeNeverTimesOut() {
+        fixture.given(PLACED, RESERVED)
+                .when(new PaymentAuthorizedEvent("payment-1", "o-1", AMOUNT))
+                .expectNoOpenDeadline("paymentWindow")
+                .expectEndedWith("onPaymentAuthorized");
+
+        fixture.whenTimeElapses(Duration.ofHours(1)).expectNoCommands();
+    }
+
+    @Test
+    @DisplayName("a declined card closes the window with the rest of the checkout")
+    void declineClosesTheWindow() {
+        fixture.given(PLACED, RESERVED)
+                .when(new PaymentDeclinedEvent("declined-1", "o-1", "insufficient funds"))
+                .expectNoOpenDeadline("paymentWindow")
+                .expectCompensatedAfter("onPaymentDeclined");
+
+        fixture.whenTimeElapses(Duration.ofHours(1)).expectNoCommands();
     }
 }

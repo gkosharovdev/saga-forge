@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
+import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import java.time.Instant;
 import java.util.Map;
@@ -42,6 +43,9 @@ import java.util.Map;
  *                         {@code COMPENSATING}, {@code COMPENSATED} or {@code COMPENSATION_FAILED}
  *                         ({@code specs/006-saga-compensation} FR-017). Written once, by the write that enters
  *                         {@code COMPENSATING}
+ * @param openDeadlines    the deadlines started and neither expired nor cancelled, by name; an unmodifiable defensive
+ *                         copy; empty unless {@code status} is {@code CREATED} or {@code RUNNING}
+ *                         ({@code specs/017-saga-deadlines} FR-014). Committed with the step's unit of work
  */
 public record SagaInstance(
     String sagaId,
@@ -55,9 +59,11 @@ public record SagaInstance(
     String outcome,
     SagaFailure failure,
     PendingRetry pendingRetry,
-    CompensationTrigger compensationTrigger
+    CompensationTrigger compensationTrigger,
+    Map<String, OpenDeadline> openDeadlines
 ) {
     public SagaInstance {
+        openDeadlines = copyOpenDeadlines(openDeadlines);
         state = Map.copyOf(state);
         associations = Map.copyOf(associations);
         steps = copySteps(steps);
@@ -84,6 +90,22 @@ public record SagaInstance(
                 + "COMPENSATING, COMPENSATED or COMPENSATION_FAILED, but status is " + status);
         }
         requireCompensationStates(status, steps);
+        if (!openDeadlines.isEmpty() && !active) {
+            throw new IllegalArgumentException(
+                "openDeadlines must be empty unless status is CREATED or RUNNING, but status is " + status);
+        }
+    }
+
+    /**
+     * An instance without open deadlines, as before {@code specs/017-saga-deadlines}.
+     *
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public SagaInstance(String sagaId, String sagaType, Map<String, Object> state, Map<String, String> associations,
+            SagaStatus status, Instant createdAt, Instant lastModifiedAt, Map<String, StepRecord> steps,
+            String outcome, SagaFailure failure, PendingRetry pendingRetry, CompensationTrigger compensationTrigger) {
+        this(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps, outcome, failure,
+            pendingRetry, compensationTrigger, Map.of());
     }
 
     /**
@@ -95,7 +117,7 @@ public record SagaInstance(
             SagaStatus status, Instant createdAt, Instant lastModifiedAt, Map<String, StepRecord> steps,
             String outcome, SagaFailure failure, PendingRetry pendingRetry) {
         this(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps, outcome, failure,
-            pendingRetry, null);
+            pendingRetry, null, Map.of());
     }
 
     /**
@@ -107,7 +129,7 @@ public record SagaInstance(
             SagaStatus status, Instant createdAt, Instant lastModifiedAt, Map<String, StepRecord> steps,
             String outcome, SagaFailure failure) {
         this(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps, outcome, failure,
-            null, null);
+            null, null, Map.of());
     }
 
     /**
@@ -118,7 +140,7 @@ public record SagaInstance(
      */
     public SagaInstance withPendingRetry(PendingRetry retry) {
         return new SagaInstance(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps,
-            outcome, failure, retry, compensationTrigger);
+            outcome, failure, retry, compensationTrigger, openDeadlines);
     }
 
     /**
@@ -128,7 +150,17 @@ public record SagaInstance(
      */
     public SagaInstance withCompensationTrigger(CompensationTrigger trigger) {
         return new SagaInstance(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps,
-            outcome, failure, pendingRetry, trigger);
+            outcome, failure, pendingRetry, trigger, openDeadlines);
+    }
+
+    /**
+     * @param deadlines the open deadlines, by name; non-null
+     * @return this instance with {@code openDeadlines} replaced
+     * @throws IllegalArgumentException as for the canonical constructor
+     */
+    public SagaInstance withOpenDeadlines(Map<String, OpenDeadline> deadlines) {
+        return new SagaInstance(sagaId, sagaType, state, associations, status, createdAt, lastModifiedAt, steps,
+            outcome, failure, pendingRetry, compensationTrigger, deadlines);
     }
 
     /** {@code true} for {@code COMPENSATING}, {@code COMPENSATED} and {@code COMPENSATION_FAILED}. */
@@ -163,6 +195,18 @@ public record SagaInstance(
             throw new IllegalArgumentException("exactly one step must have a FAILED compensation if and only if "
                 + "status is COMPENSATION_FAILED, but status is " + status + " with " + failed);
         }
+    }
+
+    private static Map<String, OpenDeadline> copyOpenDeadlines(Map<String, OpenDeadline> deadlines) {
+        if (deadlines == null) {
+            throw new IllegalArgumentException("openDeadlines must not be null");
+        }
+        for (Map.Entry<String, OpenDeadline> entry : deadlines.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null) {
+                throw new IllegalArgumentException("openDeadlines must not contain blank keys or null values");
+            }
+        }
+        return Map.copyOf(deadlines);
     }
 
     private static Map<String, StepRecord> copySteps(Map<String, StepRecord> steps) {

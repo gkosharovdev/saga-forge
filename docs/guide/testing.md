@@ -173,6 +173,33 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 
 `result().outboxFailures()` still lists every failed attempt; `result().commands()` leaves out the failed command.
 
+## Deadlines
+
+The fixture's clock only moves when the test says so. `whenTimeElapses(Duration)` and `whenTimeReaches(Instant)` move
+it, then deliver every deadline and scheduled command due by then, earliest first, until nothing is due.
+`given(...).givenTimeElapses(...)` lets time pass in the history. `when(event)` delivers nothing that is merely due.
+
+```java
+    @Test
+    @DisplayName("a dispatch in time stops the deadline; three hours later the saga still waits for the delivery")
+    void dispatchInTimeStopsTheDeadline() {
+        fixture.given(CONFIRMED)
+                .when(new ShipmentDispatchedEvent("shipment-1", "o-1"))
+                .expectNoOpenDeadline("courierAssignment");
+
+        fixture.whenTimeElapses(Duration.ofHours(3)).expectNoCommands();
+        assertThat(fixture.instance(FulfilmentSaga.class, "o-1").status()).isEqualTo(SagaStatus.RUNNING);
+    }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/FulfilmentSagaFixtureTest.java`.
+
+- `Builder.property(key, value)` sets what a `${key:default}` duration reads:
+  `SagaFixture.of(FulfilmentSaga.class).property("checkout.courier-assignment", "PT45M")`.
+- `InstanceView.openDeadlines()` maps each open deadline's name to its id and due time.
+- A timeout step that compensates shows `DEADLINE_EXPIRED` as the outcome event's trigger kind, with the deadline's
+  name. [Deadlines](deadlines.md#testing) has the payment-window test.
+
 ## Expectations
 
 | Method | Checks |
@@ -187,6 +214,8 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 | `expectFailure(Class, FailureClassification)` | the recorded failure |
 | `expectContext(String, Object)` / `expectNoContext(String)` | a `SagaContext` value or its absence |
 | `expectOutcomeEvent(Class, Predicate)` / `expectOutcomeEvent(Class)` / `expectNoOutcomeEvent()` | exactly one outcome event (`SagaCompleted`, `SagaFailed`, `SagaCompensated`) of that type matching / of that type / none |
+| `expectOpenDeadline(String)` / `expectNoOpenDeadline(String)` | the deadline is open (started, neither expired nor cancelled), or not |
+| `expectDeadlineExpired(String)` / `expectDeadlineIgnored(String)` | the deadline came due and its `@DeadlineExpired` step ran / came due but the instance no longer waited on it |
 | `instance(Class, String)` | switch to the instance with that association value (several sagas reacting) |
 | `result()` | the `EventResult`, for your own assertions |
 

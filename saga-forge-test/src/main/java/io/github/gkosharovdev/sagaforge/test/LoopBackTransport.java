@@ -1,10 +1,15 @@
 package io.github.gkosharovdev.sagaforge.test;
 
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
@@ -14,6 +19,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 
@@ -41,10 +48,15 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     private final Deque<Object> queue = new ArrayDeque<>();
     private final List<OutgoingMessages> staged = new ArrayList<>();
     private final List<SagaOutcome> outcomes = new ArrayList<>();
+    private final ScheduledMessages scheduled;
 
-    /** @param outboxCommandAttempts attempts of a failing outbox command before it is reported; at least 1 */
-    LoopBackTransport(int outboxCommandAttempts) {
+    /**
+     * @param outboxCommandAttempts attempts of a failing outbox command before it is reported; at least 1
+     * @param scheduled             where deadlines and scheduled commands wait until due (017)
+     */
+    LoopBackTransport(int outboxCommandAttempts, ScheduledMessages scheduled) {
         this.outboxCommandAttempts = outboxCommandAttempts;
+        this.scheduled = scheduled;
     }
 
     @Override
@@ -73,8 +85,19 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     }
 
     @Override
+    public boolean supportsScheduling() {
+        return true;
+    }
+
+    @Override
     public synchronized void store(OutgoingMessages batch) {
         staged.add(batch);
+        scheduled.add(batch.scheduled());
+    }
+
+    @Override
+    public Set<String> cancel(Collection<String> messageIds) {
+        return scheduled.cancel(messageIds);
     }
 
     @Override
@@ -121,6 +144,32 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
         }
         synchronized (this) {
             staged.clear();
+        }
+    }
+
+    /**
+     * Delivers every scheduled message due at {@code now}, earliest first, each followed by a {@link #drain}, until
+     * none is due ({@code specs/017-saga-deadlines} contracts/fixture.md): deadlines to the runtime, scheduled
+     * commands to its {@code CommandReceiver}.
+     */
+    void deliverDue(SagaRuntime runtime, FixtureCommandInterceptor interceptor, Supplier<Instant> now,
+            Consumer<HandlingReport> reports, Consumer<RuntimeException> commandFailures) {
+        drain(runtime, interceptor, reports, commandFailures);
+        int deliveries = 0;
+        Optional<ScheduledMessage> due;
+        while ((due = scheduled.takeDue(now.get())).isPresent()) {
+            if (++deliveries > MAX_DELIVERIES) {
+                throw new IllegalStateException("more than " + MAX_DELIVERIES + " scheduled messages came due at "
+                        + now.get() + "; does a timeout step keep re-arming its deadline with no duration?");
+            }
+            ScheduledMessage message = due.get();
+            if (message.kind() == MessageKind.COMMAND) {
+                deliverCommand(runtime, interceptor, new OutgoingCommand(message.commandId(), message.payload()),
+                        commandFailures);
+            } else {
+                reports.accept(runtime.receive(message.payload()));
+            }
+            drain(runtime, interceptor, reports, commandFailures);
         }
     }
 

@@ -4,6 +4,7 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventRecorder;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import java.util.Optional;
 
 /**
@@ -45,6 +46,20 @@ interface BoundUnitOfWork extends DomainEventRecorder {
      * ({@code specs/007-in-memory-transport} research §3); it is discarded if the unit of work rolls back.
      */
     void recordOutboxCommand(OutgoingCommand command);
+
+    /** The id of the next command scheduled in this unit of work: {@code <unitOfWorkId>:scheduled:<n>} (017). */
+    String nextScheduledMessageId();
+
+    /** Stores {@code message} with this unit of work's batch (017). */
+    void recordScheduled(ScheduledMessage message);
+
+    /**
+     * Withdraws the scheduled message {@code messageId}: dropped from this unit of work's batch if it was scheduled
+     * here, else cancelled through the outbox in this unit of work's transaction (017).
+     *
+     * @return whether a pending message was withdrawn
+     */
+    boolean cancelScheduled(String messageId);
 
     /** The engine unit of work bound to the calling thread, if any; another recorder is not one. */
     static Optional<BoundUnitOfWork> current() {
