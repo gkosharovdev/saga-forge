@@ -27,9 +27,7 @@ final class ScheduledMessages implements FixtureTransactions.Participant {
     private Map<String, Entry> entries = new LinkedHashMap<>();
 
     synchronized void add(List<ScheduledMessage> scheduled) {
-        for (ScheduledMessage message : scheduled) {
-            entries.put(message.messageId(), new Entry(message, State.WAITING));
-        }
+        scheduled.forEach(message -> entries.put(message.messageId(), new Entry(message, State.WAITING)));
     }
 
     /** @return the ids among {@code messageIds} that were waiting and are now cancelled */

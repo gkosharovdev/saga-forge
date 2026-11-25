@@ -59,7 +59,8 @@ class ScheduledDeliveryTest {
 
         await(() -> harness.instance(HoldSaga.class, SagaStatus.COMPENSATED).isPresent(), WAIT, "the hold to lapse");
         assertThat(java.time.Instant.now()).isAfterOrEqualTo(((DeadlineReached) stored.payload()).dueAt());
-        assertThat(deadline().status()).isEqualTo(MessageStatus.CONSUMED);
+        // The message is marked consumed after the handling that compensated the saga commits, so wait for it.
+        await(() -> deadline().status() == MessageStatus.CONSUMED, WAIT, "the deadline to be consumed");
     }
 
     @Test

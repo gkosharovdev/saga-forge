@@ -56,9 +56,7 @@ final class DeadlinePlan {
             return;
         }
         deadlines.cancelledBy(stepName).forEach(lifecycle::cancelDeadline);
-        for (Declaration declaration : deadlines.startedBy(stepName)) {
-            start(declaration, lifecycle);
-        }
+        deadlines.startedBy(stepName).forEach(declaration -> start(declaration, lifecycle));
     }
 
     /** Closes the deadline {@code name} because its timeout step is about to run; its message is not cancelled. */

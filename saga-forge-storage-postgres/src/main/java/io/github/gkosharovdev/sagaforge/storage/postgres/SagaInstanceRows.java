@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
@@ -175,21 +176,22 @@ final class SagaInstanceRows {
             return Map.of();
         }
         Map<String, Object> plain = JsonCodec.decodeObject(DEADLINES_FIELD, json);
-        Map<String, OpenDeadline> deadlines = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : plain.entrySet()) {
-            String path = DEADLINES_FIELD + "." + entry.getKey();
-            Map<?, ?> deadline = requireType(Map.class, path, entry.getValue());
-            try {
-                deadlines.put(entry.getKey(), new OpenDeadline(
-                        requireType(String.class, path + "." + DEADLINE_ID, deadline.get(DEADLINE_ID)),
-                        Instant.parse(requireType(String.class, path + "." + DUE_AT, deadline.get(DUE_AT))),
-                        requireType(String.class, path + "." + STARTED_BY_STEP, deadline.get(STARTED_BY_STEP)),
-                        Instant.parse(requireType(String.class, path + "." + STARTED_AT, deadline.get(STARTED_AT)))));
-            } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
-                throw new IllegalStateException(path + " holds an invalid open deadline: " + e.getMessage(), e);
-            }
+        return plain.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
+                entry -> decodeOpenDeadline(DEADLINES_FIELD + "." + entry.getKey(), entry.getValue()),
+                (first, second) -> second, LinkedHashMap::new));
+    }
+
+    private static OpenDeadline decodeOpenDeadline(String path, Object value) {
+        Map<?, ?> deadline = requireType(Map.class, path, value);
+        try {
+            return new OpenDeadline(
+                    requireType(String.class, path + "." + DEADLINE_ID, deadline.get(DEADLINE_ID)),
+                    Instant.parse(requireType(String.class, path + "." + DUE_AT, deadline.get(DUE_AT))),
+                    requireType(String.class, path + "." + STARTED_BY_STEP, deadline.get(STARTED_BY_STEP)),
+                    Instant.parse(requireType(String.class, path + "." + STARTED_AT, deadline.get(STARTED_AT))));
+        } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(path + " holds an invalid open deadline: " + e.getMessage(), e);
         }
-        return deadlines;
     }
 
     // --- state ----------------------------------------------------------------------------------------------

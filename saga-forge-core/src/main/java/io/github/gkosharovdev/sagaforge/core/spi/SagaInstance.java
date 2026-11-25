@@ -201,10 +201,10 @@ public record SagaInstance(
         if (deadlines == null) {
             throw new IllegalArgumentException("openDeadlines must not be null");
         }
-        for (Map.Entry<String, OpenDeadline> entry : deadlines.entrySet()) {
-            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null) {
-                throw new IllegalArgumentException("openDeadlines must not contain blank keys or null values");
-            }
+        boolean malformed = deadlines.entrySet().stream()
+                .anyMatch(entry -> entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null);
+        if (malformed) {
+            throw new IllegalArgumentException("openDeadlines must not contain blank keys or null values");
         }
         return Map.copyOf(deadlines);
     }

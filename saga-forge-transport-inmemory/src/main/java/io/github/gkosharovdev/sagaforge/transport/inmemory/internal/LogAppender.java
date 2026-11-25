@@ -37,12 +37,12 @@ final class LogAppender {
                     command, outgoing.commandId(), OrderingKeys.ofCommand(command, outgoing.commandId()),
                     batch.sagaType(), batch.sagaId(), now, traceContext));
         }
-        for (ScheduledMessage scheduled : batch.scheduled()) {
+        batch.scheduled().forEach(scheduled -> {
             Object payload = scheduled.payload();
             entries.add(new NewMessage(scheduled.messageId(), scheduled.kind(), payload.getClass().getName(), payload,
                     scheduled.commandId(), null, batch.sagaType(), batch.sagaId(), now, traceContext,
                     scheduled.notBefore()));
-        }
+        });
         return entries;
     }
 
