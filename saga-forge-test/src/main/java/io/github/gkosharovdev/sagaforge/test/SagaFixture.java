@@ -253,6 +253,7 @@ public final class SagaFixture {
         private OpenTelemetry openTelemetry = OpenTelemetry.noop();
         private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
         private boolean outcomeEvents = true;
+        private int outboxCommandAttempts = 1;
 
         private Builder() {
         }
@@ -384,6 +385,22 @@ public final class SagaFixture {
         }
 
         /**
+         * How many times a failing outbox command is delivered before the fixture gives up on it and reports it to the
+         * saga that sent it as {@code EXHAUSTED}; default 1. A failure marked {@code FinalFailure} is given up on after
+         * one attempt whatever this is ({@code specs/012-outbox-command-failure-feedback} contracts/fixture.md). A
+         * transport's own setting is its {@code maxAttempts}.
+         *
+         * @throws IllegalArgumentException if {@code attempts < 1}
+         */
+        public Builder outboxCommandAttempts(int attempts) {
+            if (attempts < 1) {
+                throw new IllegalArgumentException("outboxCommandAttempts must be at least 1, but is " + attempts);
+            }
+            this.outboxCommandAttempts = attempts;
+            return this;
+        }
+
+        /**
          * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the runtime's startup
          * does (FR-003).
          *
@@ -412,7 +429,7 @@ public final class SagaFixture {
             FixtureContextStore contexts = new FixtureContextStore(checkContextValues,
                     sagaId -> storage.findById(sagaId).map(SagaInstance::sagaType).orElse("unknown"));
             FixtureCommandInterceptor interceptor = new FixtureCommandInterceptor(transactions, rules, handledTypes);
-            LoopBackTransport transport = new LoopBackTransport();
+            LoopBackTransport transport = new LoopBackTransport(outboxCommandAttempts);
             FixtureLogger logger = new FixtureLogger(System.getLogger(SagaRuntime.DEFAULT_LOGGER_NAME));
             FixtureObjects objects = new FixtureObjects(sagaFactories, hosts);
             Map<String, Map<String, String>> compensations = new LinkedHashMap<>();

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
@@ -102,5 +103,29 @@ class CommandDeliveryTest {
         await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPLETED).isPresent(), WAIT, "billing to end");
         harness.awaitQuiet(WAIT);
         assertThat(harness.messagesOf(CardCharged.class)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("012 US1: a charge that fails every attempt compensates the saga once, and is set aside MAX_ATTEMPTS")
+    void exhaustedCommandCompensates() {
+        int maxAttempts = TransportHarness.FAST.maxAttempts();
+        harness.cards.failNext(Integer.MAX_VALUE);
+        harness.start();
+        harness.publish(new InvoiceIssued("i-1"));
+
+        await(() -> harness.instance(BillingSaga.class, SagaStatus.COMPENSATED).isPresent(), WAIT,
+                "billing to compensate");
+        harness.awaitQuiet(WAIT);
+        assertThat(harness.cards.charges()).hasSize(maxAttempts);
+        assertThat(charge().status()).isEqualTo(MessageStatus.SET_ASIDE);
+        assertThat(charge().setAsideReason()).isEqualTo("MAX_ATTEMPTS");
+        assertThat(harness.instance(BillingSaga.class, SagaStatus.COMPENSATED).orElseThrow().compensationTrigger())
+                .satisfies(trigger -> {
+                    assertThat(trigger.commandType()).isEqualTo(ChargeCard.class.getName());
+                    assertThat(trigger.failure().classification()).isEqualTo(FailureClassification.EXHAUSTED);
+                    assertThat(trigger.failure().attempts()).isEqualTo(maxAttempts);
+                    assertThat(trigger.failure().message()).isNull();
+                });
+        assertThat(harness.messagesOf(CardCharged.class)).isEmpty();
     }
 }

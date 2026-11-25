@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
@@ -157,5 +158,26 @@ class TransportFaultInjectionContainerTest {
 
         assertThat(harness.messagesOf(ShipmentBooked.class)).isEmpty();
         assertThat(PostgresTransportHarness.instances(DeliverySaga.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("012 SC-003: a set-aside that fails rolls the saga's reaction back; the redelivery compensates once")
+    void failedSetAsideRollsTheReactionBack() {
+        harness.cards.decline();
+        harness.start();
+        PostgresTestSupport.failOnSetAside(ChargeCard.class, 1);
+
+        harness.publish(new InvoiceIssued("i-1"));
+
+        await(() -> PostgresTransportHarness.hasInstance(BillingSaga.class, "COMPENSATED"), WAIT,
+                "billing to compensate");
+        harness.awaitQuiet(WAIT);
+        assertThat(harness.cards.charges()).hasSize(2);
+        assertThat(harness.messagesOf(ChargeCard.class)).singleElement().satisfies(m -> {
+            assertThat(m.status()).isEqualTo(MessageStatus.SET_ASIDE);
+            assertThat(m.setAsideReason()).isEqualTo("FINAL_FAILURE");
+            assertThat(m.attempts()).isEqualTo(2);
+        });
+        assertThat(harness.messagesOf(SagaCompensated.class)).hasSize(1);
     }
 }

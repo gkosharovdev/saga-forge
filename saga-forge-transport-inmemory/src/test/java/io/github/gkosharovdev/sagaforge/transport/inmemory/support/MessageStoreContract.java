@@ -201,6 +201,38 @@ public abstract class MessageStoreContract {
     }
 
     @Test
+    @DisplayName("setAside in a transaction applies only if it commits, and keeps the lease until then (012)")
+    void setAsideInTransaction() {
+        appendCommitted(event("a", "k1"), event("b", "k1"));
+        leaseIds("c", T0);
+        DeliveryFailure failure = new DeliveryFailure("com.example.Declined", null, T0);
+
+        LocalTransaction rolledBack = transactions().begin();
+        log().setAside(rolledBack, "c", "a", failure, "FINAL_FAILURE");
+        rolledBack.rollback();
+        assertThat(statusOf("a")).isEqualTo(MessageStatus.UNCONSUMED);
+        assertThat(leaseIds("other", T0)).isEmpty();
+
+        inTransaction(tx -> log().setAside(tx, "c", "a", failure, "FINAL_FAILURE"));
+        assertThat(statusOf("a")).isEqualTo(MessageStatus.SET_ASIDE);
+        assertThat(log().query(MessageQuery.builder().statuses(MessageStatus.SET_ASIDE).build())).singleElement().satisfies(m -> {
+            assertThat(m.setAsideReason()).isEqualTo("FINAL_FAILURE");
+            assertThat(m.lastFailure()).isEqualTo(failure);
+        });
+        assertThat(leaseIds("c", T0)).containsExactly("b");
+    }
+
+    @Test
+    @DisplayName("setAside in a transaction needs the lease")
+    void setAsideInTransactionNeedsTheLease() {
+        appendCommitted(event("a", "k1"));
+        DeliveryFailure failure = new DeliveryFailure("com.example.Declined", null, T0);
+
+        assertThatThrownBy(() -> inTransaction(tx -> log().setAside(tx, "c", "a", failure, "FINAL_FAILURE")))
+                .isInstanceOf(LeaseLostException.class);
+    }
+
+    @Test
     @DisplayName("markConsumed in a transaction applies only if it commits")
     void markConsumedInTransaction() {
         appendCommitted(event("a", "k1"));

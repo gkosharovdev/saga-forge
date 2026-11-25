@@ -113,6 +113,18 @@ final class SagaModel {
         return Optional.ofNullable(compensationsByStep.get(stepName));
     }
 
+    /** {@code true} if a {@code @SagaStep} method is named {@code methodName}. */
+    boolean hasStep(String methodName) {
+        return stepsByEventType.values().stream().anyMatch(step -> step.name().equals(methodName));
+    }
+
+    /** The {@code @SagaCompensation} method named {@code methodName}, if one is declared (012). */
+    Optional<Compensation> compensationNamed(String methodName) {
+        return compensationsByStep.values().stream()
+                .filter(compensation -> compensation.name().equals(methodName))
+                .findFirst();
+    }
+
     /**
      * The retry policy of the step named {@code stepName}; the default one-attempt policy if no step has that name.
      */

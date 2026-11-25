@@ -3,9 +3,11 @@ package io.github.gkosharovdev.sagaforge.core.outcome;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import java.time.Instant;
 import java.util.HashMap;
@@ -128,6 +130,30 @@ class OutcomeTypesTest {
                     "com.example.StockUnavailableEvent", AT));
 
             assertThat(trigger).isEqualTo(REJECTED);
+        }
+
+        @Test
+        void ofACommandFailureCarriesTheCommandType() {
+            CommandFailure report = new CommandFailure(CommandId.of("saga-1", "processPayment",
+                    "com.example.CapturePayment", 1), FailureClassification.FINAL, "com.example.Declined", 1);
+            OutcomeTrigger trigger = OutcomeTrigger.of(CompensationTrigger.commandFailed(report, AT));
+
+            assertThat(trigger).isEqualTo(new OutcomeTrigger(CompensationTriggerKind.COMMAND_FAILED,
+                    "processPayment", FailureClassification.FINAL, "com.example.Declined", 1, AT,
+                    "com.example.CapturePayment"));
+        }
+
+        @Test
+        void commandTypeIsPresentOnlyForACommandFailure() {
+            assertThatThrownBy(() -> new OutcomeTrigger(CompensationTriggerKind.COMMAND_FAILED, "step",
+                    FailureClassification.FINAL, "com.example.Declined", 1, AT))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("commandType");
+            assertThatThrownBy(() -> new OutcomeTrigger(CompensationTriggerKind.FINAL_FAILURE, "step",
+                    FailureClassification.FINAL, "com.example.Declined", 1, AT, "com.example.CapturePayment"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("commandType must be null unless kind is COMMAND_FAILED");
+            assertThat(new OutcomeTrigger(CompensationTriggerKind.FINAL_FAILURE, "step", FailureClassification.FINAL,
+                    "com.example.Declined", 1, AT).commandType()).isNull();
         }
 
         @Test

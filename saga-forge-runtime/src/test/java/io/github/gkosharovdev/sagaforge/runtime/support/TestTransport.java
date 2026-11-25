@@ -2,7 +2,10 @@ package io.github.gkosharovdev.sagaforge.runtime.support;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
@@ -19,11 +22,27 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
  *       records the {@link HandlingReport}.</li>
  *   <li>After {@link #loopBack()}, every dispatched event is delivered back into the receiver synchronously, from
  *       inside {@code dispatch}, as a synchronous in-memory transport would.</li>
+ *   <li>{@link #connectCommands(CommandReceiver)} sets the command receiver; {@link #reportFailure(CommandFailure)}
+ *       reports a failed outbox command as a transport would (012) and records the {@link SetAside} its callback
+ *       made: whether it ran, and whether the transaction it ran in committed or rolled back.</li>
  * </ul>
  *
  * <p>Thread-safe.</p>
  */
 public final class TestTransport implements EventDispatcher {
+
+    /** How the transaction a set-aside callback ran in ended. */
+    public enum Ending { COMMITTED, ROLLED_BACK, UNKNOWN }
+
+    /**
+     * One call of the set-aside callback a {@link #reportFailure} passed: the report and how the transaction ended.
+     * {@code UNKNOWN} when the transaction is not an {@link InMemoryTransactionBoundary} one.
+     */
+    public record SetAside(CommandFailure report, Ending ending) {
+    }
+
+    private final List<SetAside> setAsides = new CopyOnWriteArrayList<>();
+    private volatile CommandReceiver commandReceiver;
 
     private final List<Object> dispatched = new CopyOnWriteArrayList<>();
     private final List<Class<?>> registeredSagaTypes = new CopyOnWriteArrayList<>();
@@ -42,6 +61,45 @@ public final class TestTransport implements EventDispatcher {
         }
         this.receiver = receiver;
         return this;
+    }
+
+    /**
+     * @param receiver where {@link #reportFailure(CommandFailure)} reports; must not be {@code null}
+     * @return this transport
+     * @throws IllegalArgumentException if {@code receiver} is {@code null}
+     */
+    public TestTransport connectCommands(CommandReceiver receiver) {
+        if (receiver == null) {
+            throw new IllegalArgumentException("receiver must not be null");
+        }
+        this.commandReceiver = receiver;
+        return this;
+    }
+
+    /**
+     * Reports {@code report} through {@code CommandReceiver.receiveFailure}, passing a set-aside callback that records
+     * one {@link SetAside} once its transaction ends. Exceptions propagate, as a real transport would see them.
+     *
+     * @throws IllegalStateException if no command receiver is connected
+     */
+    public void reportFailure(CommandFailure report) {
+        CommandReceiver connected = commandReceiver;
+        if (connected == null) {
+            throw new IllegalStateException("no CommandReceiver connected");
+        }
+        connected.receiveFailure(report, tx -> {
+            AtomicReference<Ending> ending = new AtomicReference<>(Ending.UNKNOWN);
+            tx.resource(InMemoryTransactionBoundary.Scope.class).ifPresentOrElse(scope -> {
+                scope.onCommit(() -> ending.set(Ending.COMMITTED));
+                scope.onRollback(() -> ending.set(Ending.ROLLED_BACK));
+                scope.onEnd(() -> setAsides.add(new SetAside(report, ending.get())));
+            }, () -> setAsides.add(new SetAside(report, Ending.UNKNOWN)));
+        });
+    }
+
+    /** @return every set-aside callback run, once its transaction ended, in order; unmodifiable */
+    public List<SetAside> setAsides() {
+        return List.copyOf(setAsides);
     }
 
     /**

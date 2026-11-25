@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
@@ -121,6 +122,17 @@ public final class Diagnostics {
     void eventDuplicate(Correlation about, String step) {
         logger.log(Level.DEBUG, () -> Line.of("saga.event.duplicate").event(about).saga(about).instance(about)
                 .with("step", step).toString());
+    }
+
+    /**
+     * {@code saga.command.failure.ignored}: a transport reported a failed outbox command the instance cannot react to
+     * (012 FR-012, contracts/runtime-reaction.md "Diagnostics"); the message was only set aside. No failure message.
+     */
+    void commandFailureIgnored(Correlation about, CommandFailure report, String reason) {
+        logger.log(Level.WARNING, Line.of("saga.command.failure.ignored").saga(about)
+                .with("sagaId", report.sagaId()).with("sender", report.senderName())
+                .with("command", report.commandType()).with("commandId", report.commandId().value())
+                .with("classification", report.classification()).with("reason", reason).toString());
     }
 
     /** {@code saga.command.skipped}: a command whose handling already committed was not handled again (FR-004). */

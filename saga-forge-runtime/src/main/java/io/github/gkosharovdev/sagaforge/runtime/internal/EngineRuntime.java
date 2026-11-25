@@ -4,6 +4,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Consumer;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
@@ -13,7 +14,9 @@ import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
+import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 
 /**
  * The assembled runtime of one started engine: its saga models, command routes, event router and publisher.
@@ -28,13 +31,15 @@ public final class EngineRuntime {
 
     private final List<SagaModel> sagas;
     private final EventRouter router;
+    private final CommandFailureHandler commandFailures;
     private final EngineCommandGateway commandGateway;
     private final EventPublisher eventPublisher;
 
-    private EngineRuntime(List<SagaModel> sagas, EventRouter router, EngineCommandGateway commandGateway,
-            EventPublisher eventPublisher) {
+    private EngineRuntime(List<SagaModel> sagas, EventRouter router, CommandFailureHandler commandFailures,
+            EngineCommandGateway commandGateway, EventPublisher eventPublisher) {
         this.sagas = sagas;
         this.router = router;
+        this.commandFailures = commandFailures;
         this.commandGateway = commandGateway;
         this.eventPublisher = eventPublisher;
     }
@@ -55,9 +60,12 @@ public final class EngineRuntime {
         AggregateAccess access = AggregateAccess.of(registered, settings.handlerInstances(),
                 settings.aggregateResolvers());
         EngineCommandGateway gateway = EngineCommandGateway.of(registered, access, settings, diagnostics);
-        EventRouter router = new EventRouter(sagas, new UnitOfWork.Collaborators(settings, gateway, diagnostics,
-                gateway.instrumentation()));
-        return new EngineRuntime(sagas, router, gateway, new EngineEventPublisher(settings.dispatcher()));
+        UnitOfWork.Collaborators with = new UnitOfWork.Collaborators(settings, gateway, diagnostics,
+                gateway.instrumentation());
+        InstanceLocks instanceLocks = new InstanceLocks();
+        return new EngineRuntime(sagas, new EventRouter(sagas, with, instanceLocks),
+                new CommandFailureHandler(sagas, with, instanceLocks), gateway,
+                new EngineEventPublisher(settings.dispatcher()));
     }
 
     /**
@@ -99,6 +107,14 @@ public final class EngineRuntime {
     /** Handles one outbox command delivered by a transport ({@code CommandReceiver}, 007 research §3). */
     public void receiveCommand(OutboxCommand delivery) {
         commandGateway.receive(delivery);
+    }
+
+    /**
+     * Reacts to a transport's report of a failed outbox command ({@code CommandReceiver.receiveFailure},
+     * specs/012-outbox-command-failure-feedback contracts/command-receiver-failure.md).
+     */
+    public void receiveCommandFailure(CommandFailure failure, Consumer<LocalTransaction> inTransaction) {
+        commandFailures.handle(failure, inTransaction);
     }
 
     /** The engine's event publisher. */

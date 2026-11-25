@@ -3,6 +3,8 @@ package io.github.gkosharovdev.sagaforge.runtime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -13,6 +15,11 @@ import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.Compensati
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.DeliveryFixture;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.UnwindFixture;
 import io.github.gkosharovdev.sagaforge.runtime.fixtures.compensation.UnwindSaga;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelDelivered;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelFixture;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ParcelSaga;
+import io.github.gkosharovdev.sagaforge.runtime.fixtures.commandfailure.ShipParcel;
+import io.github.gkosharovdev.sagaforge.runtime.support.TestTransport;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -106,5 +113,48 @@ class CompensationFaultInjectionTest {
         assertThat(fixture.payments().refundIds()).hasSize(2);
         assertThat(fixture.payments().refundIds().get(1)).isEqualTo(fixture.payments().refundIds().get(0));
         assertThat(fixture.payments().refunds()).hasSize(1);
+    }
+
+    /**
+     * 012 SC-003: a crash anywhere in the reaction to a failed command, then what a transport does next. A crash before
+     * the compensation start commits rolls the set-aside back with it, so the report comes again; a crash after it
+     * leaves the message set aside and the instance {@code COMPENSATING}, which the next event resumes. Either way each
+     * step is compensated exactly once, newest first, and the message is set aside once.
+     */
+    @ParameterizedTest(name = "crash at {0} #{1}")
+    @MethodSource("crashPoints")
+    @DisplayName("012: a crash anywhere in a command failure's reaction, then a resume: one compensation per step")
+    void commandFailureCrashThenResume(String where, int n) {
+        ParcelFixture fixture = new ParcelFixture();
+        String sagaId = fixture.packed("p-1");
+        CommandFailure report = ParcelFixture.report(fixture.sent(ShipParcel.class), FailureClassification.FINAL, 1);
+        CompensationFaults faults = fixture.withFaults();
+        if (where.equals("lock")) {
+            faults.crashOnLock(n);
+        } else {
+            faults.crashOnSave(n);
+        }
+
+        Throwable crashed = catchThrowable(() -> fixture.transport().reportFailure(report));
+        if (crashed != null) {
+            fixture.restart();
+            if (committedSetAsides(fixture) == 0) {
+                fixture.transport().reportFailure(report);
+            } else {
+                fixture.receive(new ParcelDelivered("p-1"));
+            }
+        }
+
+        assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
+        assertThat(fixture.storage().history(sagaId).stream().map(stored -> stored.entry())
+                .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
+                .map(entry -> entry.stepName()).toList()).as("committed after a crash at %s #%d", where, n)
+                .containsExactly(ParcelSaga.PACK, ParcelSaga.PAY, ParcelSaga.BOOK);
+        assertThat(committedSetAsides(fixture)).isEqualTo(1);
+    }
+
+    private static long committedSetAsides(ParcelFixture fixture) {
+        return fixture.transport().setAsides().stream()
+                .filter(setAside -> setAside.ending() == TestTransport.Ending.COMMITTED).count();
     }
 }

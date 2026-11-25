@@ -140,21 +140,33 @@ final class PostgresTestSupport {
      * drop the trigger.
      */
     static void failOnConsume(Class<?> payloadType, int times) {
+        failOnStatusChange(payloadType, "CONSUMED", times);
+    }
+
+    /**
+     * Like {@link #failOnConsume}, for the set-aside mark (012): a crash between a command's final failure and its
+     * set-aside, which rolls the saga's reaction back with it.
+     */
+    static void failOnSetAside(Class<?> payloadType, int times) {
+        failOnStatusChange(payloadType, "SET_ASIDE", times);
+    }
+
+    private static void failOnStatusChange(Class<?> payloadType, String status, int times) {
         try (Connection connection = newDataSource().getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute("DROP SEQUENCE IF EXISTS saga_forge_test_fault_seq");
             statement.execute("CREATE SEQUENCE saga_forge_test_fault_seq");
             statement.execute("CREATE OR REPLACE FUNCTION saga_forge_test_fault_consume_fn() RETURNS trigger "
                     + "LANGUAGE plpgsql AS $$ BEGIN "
-                    + "IF NEW.status = 'CONSUMED' AND OLD.status <> 'CONSUMED' AND NEW.payload_type = '"
+                    + "IF NEW.status = '" + status + "' AND OLD.status <> '" + status + "' AND NEW.payload_type = '"
                     + payloadType.getName() + "' AND nextval('saga_forge_test_fault_seq') <= " + times + " THEN "
-                    + "RAISE EXCEPTION 'injected test fault: consumed mark'; "
+                    + "RAISE EXCEPTION 'injected test fault: " + status + " mark'; "
                     + "END IF; RETURN NEW; END $$");
             statement.execute("DROP TRIGGER IF EXISTS " + FAULT_TRIGGER_PREFIX + "consume ON saga_message_store");
             statement.execute("CREATE TRIGGER " + FAULT_TRIGGER_PREFIX + "consume BEFORE UPDATE ON saga_message_store"
                     + " FOR EACH ROW EXECUTE FUNCTION saga_forge_test_fault_consume_fn()");
         } catch (SQLException e) {
-            throw new IllegalStateException("could not install the consume fault", e);
+            throw new IllegalStateException("could not install the " + status + " fault", e);
         }
     }
 

@@ -2,8 +2,6 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
-import io.github.gkosharovdev.sagaforge.core.failure.FinalFailure;
-import io.github.gkosharovdev.sagaforge.core.failure.TransientFailure;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -14,10 +12,9 @@ import java.util.Set;
  * Classifies the failure that rolled a unit of work back (005 contracts/retry-policy.md "Classification").
  *
  * <ol>
- *   <li>An {@link Error} is {@code UNCLASSIFIED}.</li>
- *   <li>Along the cause chain (stopping at a repeat), the first element implementing {@link FinalFailure} gives
- *       {@code FINAL}, the first implementing {@link TransientFailure} gives {@code TRANSIENT}; one implementing both
- *       is final.</li>
+ *   <li>The markers decide, as {@link FailureClassification#of(Throwable)} reads them: an {@link Error} is
+ *       {@code UNCLASSIFIED}, otherwise the first {@code FinalFailure} or {@code TransientFailure} along the cause
+ *       chain.</li>
  *   <li>Without a marker, an element that is an instance of a {@code retryOn} type of the failing step's policy
  *       gives {@code TRANSIENT}.</li>
  *   <li>Otherwise {@code UNCLASSIFIED}.</li>
@@ -30,19 +27,11 @@ final class FailureClassifier {
     }
 
     static FailureClassification classify(Throwable failure, RetryPolicy policy) {
-        if (failure instanceof Error) {
-            return FailureClassification.UNCLASSIFIED;
+        FailureClassification marked = FailureClassification.of(failure);
+        if (marked != FailureClassification.UNCLASSIFIED || failure instanceof Error) {
+            return marked;
         }
-        List<Throwable> chain = causeChain(failure);
-        for (Throwable element : chain) {
-            if (element instanceof FinalFailure) {
-                return FailureClassification.FINAL;
-            }
-            if (element instanceof TransientFailure) {
-                return FailureClassification.TRANSIENT;
-            }
-        }
-        for (Throwable element : chain) {
+        for (Throwable element : causeChain(failure)) {
             for (Class<? extends Throwable> retryable : policy.retryOn()) {
                 if (retryable.isInstance(element)) {
                     return FailureClassification.TRANSIENT;

@@ -61,6 +61,20 @@ public interface MessageStore {
     /** Sets the message aside with {@code failure} and {@code reason}; releases the lease. */
     void setAside(String consumerId, String messageId, DeliveryFailure failure, String reason);
 
+    /**
+     * Sets the message aside in {@code tx}, like {@link #setAside(String, String, DeliveryFailure, String)}, so the
+     * set-aside commits or rolls back together with the work that runs in {@code tx}, for example the engine's
+     * reaction to a failed outbox command ({@code specs/012-outbox-command-failure-feedback}). If {@code tx} rolls
+     * back, the message stays leased by {@code consumerId}.
+     *
+     * <p>This default throws {@link UnsupportedOperationException}, so a store written before the method existed
+     * still compiles.</p>
+     */
+    default void setAside(LocalTransaction tx, String consumerId, String messageId, DeliveryFailure failure,
+            String reason) {
+        throw new UnsupportedOperationException(getClass().getName() + " cannot set a message aside in a transaction");
+    }
+
     /** Releases every lease {@code consumerId} holds, leaving the messages unconsumed (shutdown). */
     void release(String consumerId);
 

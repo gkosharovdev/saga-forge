@@ -16,7 +16,7 @@ with your own bean.
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
-| `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |
+| `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator; for an outbox command a saga sent, also the attempts before its saga is told it failed (`EXHAUSTED`) and compensates. A `FinalFailure` is never retried. |
 | `saga-forge.transport.initial-backoff` | `1s` | Wait after a message's first failed delivery, doubled per further failure. |
 | `saga-forge.transport.max-backoff` | `1m` | Longest wait between delivery attempts. |
 | `saga-forge.transport.lease-duration` | `5m` | How long a leased message is reserved for this instance before another may take it. |
@@ -107,12 +107,15 @@ Spans (instrumentation scope `io.github.gkosharovdev.sagaforge`):
 | `saga_forge.step` | internal | step run | `saga_forge.saga.type`, `saga_forge.step`, `error.type` | `saga_forge.saga.id` |
 | `saga_forge.command` | internal | command handling | `saga_forge.command.type`, `saga_forge.command.delivery`, `saga_forge.command.result`, `error.type` | `saga_forge.command.id`, `saga_forge.step`, `saga_forge.saga.id`, content\* |
 | `saga_forge.compensation` | internal | compensation | `saga_forge.saga.type`, `saga_forge.step`, `saga_forge.compensation.status`, `saga_forge.compensation.trigger` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id` |
-| `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt` |
+| `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt`; a failed outbox command: `saga_forge.command.classification` (`final`, `transient`, `unclassified`), and `saga_forge.command.reported`=`true` once its saga was told |
 | `saga_forge.event.ignored` | internal | event no saga type reacts to | `saga_forge.event.type` | content\* |
 
 Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.saga.ended` (`saga_forge.saga.outcome`),
 `saga_forge.retry.scheduled` (`saga_forge.attempt.number`, `saga_forge.retry.wait` in ms),
-`saga_forge.compensation.started`. \* off by default; failure messages (`saga_forge.failure.message` and exception
+`saga_forge.compensation.started`. When a transport reports a failed outbox command, the runtime's reaction has a
+`saga_forge.handle` span of its own, with `saga_forge.command.type`, `saga_forge.compensation.trigger`=`COMMAND_FAILED`
+and `saga_forge.failure.classification` (`FINAL` or `EXHAUSTED`), and `saga_forge.handling.outcome` `COMPENSATED`,
+`COMPENSATION_FAILED` or `IGNORED`. \* off by default; failure messages (`saga_forge.failure.message` and exception
 events) likewise.
 
 Metrics:
@@ -124,6 +127,7 @@ Metrics:
 | `saga_forge.saga.ended` | counter | — | `saga_forge.saga.type`, `saga_forge.saga.outcome` (`completed:<step>`, `failed`, `compensated`, `compensation_failed`) |
 | `saga_forge.event.handled` | counter | — | `saga_forge.saga.type`, `saga_forge.handling.outcome` |
 | `saga_forge.retry.scheduled`, `saga_forge.retry.exhausted` | counter | — | `saga_forge.saga.type`, `saga_forge.step` |
+| `saga_forge.command.failures` | counter | — | `classification` (`final`, `exhausted`): outbox commands the transport gave up on and reported to their saga |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
 
@@ -142,6 +146,9 @@ sum(rate(saga_forge_saga_ended_total{saga_forge_saga_outcome="compensated"}[15m]
 
 # Retries exhausted
 sum by (saga_forge_saga_type, saga_forge_step) (increase(saga_forge_retry_exhausted_total[15m])) > 0
+
+# Outbox commands that failed for good and made their saga compensate
+sum by (classification) (increase(saga_forge_command_failures_total[15m])) > 0
 
 # Messages set aside for an operator
 saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
@@ -209,6 +216,24 @@ written and the failure is listed in the handling result's `outboxFailures()`.
 `RegexReplacement`) and in the OpenTelemetry Collector (`redaction` or `transform` processor). The `saga_instance` and
 lifecycle-history tables keep the raw message.
 
+## Messages set aside
+
+The in-memory transport sets a message aside with one of these reasons, visible in `MessageStoreQueries` and the
+Actuator endpoint:
+
+| Reason | When | Saga told? |
+|---|---|---|
+| `MAX_ATTEMPTS` | delivery failed `saga-forge.transport.max-attempts` times | for an outbox command a saga sent: yes, `EXHAUSTED` |
+| `FINAL_FAILURE` | an outbox command's handler threw a `FinalFailure`; not retried | for a command a saga sent: yes, `FINAL` |
+| `UNREADABLE: ...` | the payload could not be read back | for an outbox command a saga sent: yes, `FINAL` |
+
+When the saga is told, the message is set aside in the same transaction as the saga's reaction; if the reaction fails,
+the message stays and is delivered again after the backoff. A saga that had already ended or was already compensating
+is not changed: the runtime logs `saga.command.failure.ignored` (WARNING, with `sagaType`, `sagaId`, `sender`,
+`command`, `commandId`, `classification` and `reason`: `missing`, `terminal:<status>`, `compensating`,
+`already-compensated`, `not-compensated`, `nothing-committed` or `unknown-sender`). Redelivering a set-aside command
+after its saga compensated runs its handler again but does not compensate twice.
+
 ## Statuses an operator sees
 
 | `SagaStatus` | Meaning | Action |
@@ -216,7 +241,7 @@ lifecycle-history tables keep the raw message.
 | `RUNNING` | committed, waiting for the next event | none; a saga waits indefinitely (no timeouts) |
 | `COMPLETED` | ended at an `@EndSaga` step (the outcome is its name) | none |
 | `COMPENSATING` | compensations are being run | resumes on the next event for the instance |
-| `COMPENSATED` | all committed steps undone | none |
+| `COMPENSATED` | all committed steps undone; the trigger says why (a `@StartCompensation` step, a step's `FINAL` or `EXHAUSTED` failure, or a failed outbox command, `COMMAND_FAILED`) | none |
 | `FAILED` | an unclassified failure; committed effects stay in place | investigate; no resume path |
 | `COMPENSATION_FAILED` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
 | `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | investigate |

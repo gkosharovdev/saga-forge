@@ -277,15 +277,37 @@ public class PostgresMessageStore implements MessageStore {
 
     @Override
     public void setAside(String consumerId, String messageId, DeliveryFailure failure, String reason) {
-        String trimmed = reason.length() > 4096 ? reason.substring(0, 4096) : reason;
         inOwnTransaction("set message " + messageId + " aside", connection -> {
-            holderUpdate(connection, consumerId, messageId, "status = 'SET_ASIDE', set_aside_reason = ?,"
-                    + " last_failure = CAST(? AS JSONB), leased_by = NULL, leased_until = NULL", statement -> {
-                        statement.setString(1, trimmed);
-                        statement.setString(2, PayloadCodec.encodeFailure(failure));
-                    });
+            putAside(connection, consumerId, messageId, failure, reason);
             return null;
         });
+    }
+
+    /** Sets the message aside in the caller's transaction ({@code specs/012-outbox-command-failure-feedback}). */
+    @Override
+    public void setAside(LocalTransaction tx, String consumerId, String messageId, DeliveryFailure failure,
+            String reason) {
+        Connection connection = tx.resource(Connection.class).orElseThrow(() -> new IllegalStateException(
+                "The active transaction has no java.sql.Connection resource; PostgresMessageStore cannot join it"));
+        try {
+            putAside(connection, consumerId, messageId, failure, reason);
+        } catch (SQLException e) {
+            tx.setRollbackOnly();
+            throw new UncheckedSqlException("could not set message " + messageId + " aside", e);
+        } catch (RuntimeException e) {
+            tx.setRollbackOnly();
+            throw e;
+        }
+    }
+
+    private static void putAside(Connection connection, String consumerId, String messageId, DeliveryFailure failure,
+            String reason) throws SQLException {
+        String trimmed = reason.length() > 4096 ? reason.substring(0, 4096) : reason;
+        holderUpdate(connection, consumerId, messageId, "status = 'SET_ASIDE', set_aside_reason = ?,"
+                + " last_failure = CAST(? AS JSONB), leased_by = NULL, leased_until = NULL", statement -> {
+                    statement.setString(1, trimmed);
+                    statement.setString(2, PayloadCodec.encodeFailure(failure));
+                });
     }
 
     @Override

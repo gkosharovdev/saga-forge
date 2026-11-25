@@ -129,6 +129,14 @@ public final class ModulithMessageStore implements MessageStore {
     }
 
     @Override
+    public void setAside(LocalTransaction tx, String consumerId, String messageId, DeliveryFailure failure,
+            String reason) {
+        String publication = publicationOf(messageId);
+        records.setAside(tx, consumerId, messageId, failure, reason);
+        registry.markFailed(UUID.fromString(publication));
+    }
+
+    @Override
     public void release(String consumerId) {
         records.release(consumerId);
     }

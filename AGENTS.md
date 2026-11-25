@@ -80,7 +80,7 @@
   with the 008 container suites (starter and Spring example) passed on 2026-11-12 (1,502 tests). With 009 (the fixture,
   the interceptor and the example fixture tests) the whole build, container suites included, passed on 2026-11-12
   (1,574 tests). With 010 (OpenTelemetry instrumentation) the whole build, container suites included, passed on
-  2026-11-12 (1,612 tests; the opt-in `TelemetryOverheadTest` skipped). With 011 (outcome events) the whole build, container suites included, passed on 2026-11-20 (1,669 tests; `TelemetryOverheadTest` skipped).
+  2026-11-12 (1,612 tests; the opt-in `TelemetryOverheadTest` skipped). With 011 (outcome events) the whole build, container suites included, passed on 2026-11-20 (1,669 tests; `TelemetryOverheadTest` skipped). With 012 (outbox command failure feedback) the whole build, container suites included, passed on 2026-11-24 (1,768 tests; `TelemetryOverheadTest` skipped).
 - Implemented and tested, including container suites, added by `specs/008-spring-boot-starter`: the Spring Boot
   starter assembles and starts the runtime with no host code. It collects the model (auto-configuration packages,
   beans, `saga-forge.scan-packages`, `SagaModelContributor`), detects storage (`saga-forge.storage.type` when
@@ -132,6 +132,24 @@
   `expectNoOutcomeEvent`. `REQUIRES_INTERVENTION` is renamed `COMPENSATION_FAILED` (`SagaStatus`, `HandlingOutcome`,
   telemetry `compensation_failed`) and its lifecycle kind removed; existing databases apply `schema-upgrade-011.sql`.
   Property 38. The Spring example's `FailedOrders` listens for `SagaFailed`.
+- Implemented and tested, including container suites, added by `specs/012-outbox-command-failure-feedback`: outbox command failure feedback
+  (closes G-ADOPT-02). Core gains `core.spi.CommandFailure` (saga-scoped `CommandId`, `FINAL`/`EXHAUSTED`, cause type,
+  attempts; the command type comes from the id; no message), `FailureClassification.of(Throwable)` (marker walk shared
+  by runtime, transport and fixture), the default SPI methods `CommandReceiver.receiveFailure(CommandFailure,
+  Consumer<LocalTransaction>)` and `MessageStore.setAside(LocalTransaction, ...)`, `CompensationTriggerKind.COMMAND_FAILED`
+  and a nullable `commandType` on `CompensationTrigger` and `OutcomeTrigger` (old constructors kept). The relay retries a
+  failed outbox command with its own backoff (never `@RetryPolicy`), gives up at once on a `FinalFailure` (set aside
+  `FINAL_FAILURE`) or at `maxAttempts` (`MAX_ATTEMPTS`), and reports a saga-scoped one; the set-aside runs inside the
+  runtime's reaction transaction, and a throwing report is retried. The runtime's `CommandFailureHandler` (shared
+  `InstanceLocks`, one `UnitOfWork`) resolves the `Sender`: a step's command → `StartCompensation` with the trigger,
+  then `CompensationRun` (the sender compensated too); a compensation's command → `RecordCompensationCommandFailure`
+  (`COMPENSATED → FAILED`, instance `COMPENSATION_FAILED`, which Postgres `ForwardTransition` allows only together);
+  anything else → `saga.command.failure.ignored`. Postgres `PostgresMessageStore` and the starter's
+  `ModulithMessageStore` implement the transactional set-aside; the trigger JSON gains `commandType` (no upgrade
+  script). Telemetry: delivery span `saga_forge.command.classification`/`reported`, counter
+  `saga_forge.command.failures`, a `saga_forge.handle` span per report. Fixture: `SagaFixture.Builder.outboxCommandAttempts`
+  (default 1); `saga-forge-test` has the in-memory transport as a test dependency for `OutboxCommandFailureParityTest`.
+  Property 39.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -308,6 +326,11 @@
 - Outcome events (011), see memory.md G-011-01 and G-011-06 to G-011-08: no saga step can react to another saga's
   outcome event, so follow-up work starts from a listener (G-011-01); a status write's batch reuses the rolled-back
   unit of work's id (G-011-06); the fixture collects outcome events instead of delivering them (G-011-07).
+
+- Outbox command failure feedback (012), see memory.md G-012-01 to G-012-05: a compensation's failed command cannot
+  correct a `COMPENSATED` instance (G-012-01); a `COMPLETED` saga is not told (G-012-02); no step can take the failure,
+  the reaction is always full compensation (G-012-03); a crash after the reaction's first commit resumes only on the
+  next event (G-012-04); the fixture redelivers without backoff (G-012-05).
 
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,

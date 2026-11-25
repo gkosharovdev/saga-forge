@@ -26,6 +26,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - Business failures are events handled by a `@StartCompensation` step; undo steps with
   `@SagaCompensation(forStep = "<step method name>")`. A `FinalFailure` compensates only after an earlier unit of work
   of the instance committed; otherwise the saga ends `FAILED`.
+- An `@Command(delivery = OUTBOX)` command that fails for good (`FinalFailure`, or the transport's `max-attempts` used
+  up) makes the saga that sent it compensate (trigger kind `COMMAND_FAILED`); its step is not rolled back.
 - A saga that ends records `SagaCompleted`, `SagaFailed` or `SagaCompensated` (`core.outcome`); listen with
   `@TransactionalEventListener` or `@ApplicationModuleListener`, deduplicate on `eventId()`. No saga step can take one.
   A failed compensation ends `COMPENSATION_FAILED`.
