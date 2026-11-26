@@ -14,7 +14,8 @@ with your own bean.
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
-| `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
+| `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events, and events published through `EventPublisher`, are published as Spring application events inside the transaction. `after-delivery` (deprecated, refused while the inbound route is on): published when the transport delivers them, after the commit. `none`: not published. |
+| `saga-forge.application-events.inbound.enabled` | `true` | Whether events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) whose type a saga has a step for are stored for sagas, in the publishing transaction. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
 | `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator; for an outbox command a saga sent, also the attempts before its saga is told it failed (`EXHAUSTED`) and compensates. A `FinalFailure` is never retried. |
 | `saga-forge.transport.initial-backoff` | `1s` | Wait after a message's first failed delivery, doubled per further failure. |
@@ -27,7 +28,7 @@ with your own bean.
 | `saga-forge.transport.leadership.lease-duration` | `30s` | How long the delivering instance's leadership lasts without renewal; after a crash a standby takes over once it expires. |
 | `saga-forge.transport.leadership.renew-interval` | `10s` | How often the delivering instance renews its leadership; shorter than the lease duration. |
 | `saga-forge.transport.leadership.check-interval` | `5s` | How often a standby instance checks whether it can take over; shorter than the lease duration. |
-| `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
+| `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present; not set and a saga declares a deadline, Saga Forge's own log is kept. |
 | `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
 | `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |
 | `saga-forge.telemetry.metrics.enabled` | `true` | Whether saga metrics are recorded. |
@@ -257,8 +258,8 @@ How reliably it arrives depends on the outbox, like any event the unit of work r
 **Listening.** In Spring Boot, outcome events are published as application events by the same rule as recorded events
 (`saga-forge.application-events.mode`): use `@TransactionalEventListener` or `@ApplicationModuleListener`, which run
 after the commit and never for a rolled-back unit of work; see [recipe 6](recipes.md#6-reacting-to-how-a-saga-ended).
-In a plain Java host, register a delivery callback on the in-memory transport; the starter's after-delivery bridge
-does exactly that:
+In a plain Java host, register a delivery callback on the in-memory transport; the starter's deprecated after-delivery
+bridge does exactly that:
 
 ```java
 public ApplicationEventBridge(InMemoryTransport transport, ApplicationEventPublisher publisher) {

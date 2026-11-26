@@ -540,8 +540,13 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   observes recorded events (the starter's application-event publishing) sees it, but the transport does not.
 - **Origin**: 008 T019 (`RuntimeAssemblyContainerTest`, 2026-11-11); the test's second saga listens to an event of
   its own (`OrderReadyToShipEvent`) instead.
-- **Status**: open. Deciding needs a spec: hand on every recorded event that another saga type has a step for, and
-  keep in-process delivery for the owning instance only.
+- **Status**: closed, 2026-11-26 (`specs/014-publish-once`, Property 47). `UnitOfWork.buffered()` also hands on a
+  recorded event a step of the owning instance ran when another saga type has a step for it (`EventSubscriptions`);
+  core's `EventReceiver.receive(event, sourceSagaId)` (default method) lets the transport name the recording instance,
+  which the router leaves out when its step for the event is `COMPLETED`. The relay and the fixture deliver with the
+  stored `sourceSagaId`. Tests: `RecordedEventFanOutTest` (jqwik), `EventRouterSourceTest`,
+  `TransportAcceptanceSuite.recordedEventFansOut`, `RecordedEventFanOutFixtureTest`, `CorrelationTest`. With
+  `ImmediateDispatchOutbox` see G-014-04.
 
 ## Dependency alignment with Spring Boot 4.1.2 (future starter feature)
 
@@ -968,7 +973,15 @@ Noted only; nothing is bumped until the starter feature decides.
   event application code publishes through Spring's `ApplicationEventPublisher` is not routed to sagas. Sagas receive
   events through Saga Forge's `EventPublisher` or `DomainEvents.record`.
 - **Origin**: `specs/008-spring-boot-starter/research.md` §8, contracts/application-events.md.
-- **Status**: open (roadmap 014, inbound route from Spring's publisher into Saga Forge's log).
+- **Status**: closed, 2026-11-26 (`specs/014-publish-once`). The starter's `InboundSagaEventListener` stores an event
+  published through `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) whose exact class some saga has a
+  step for, in the publishing transaction, or records it in the unit of work running on the thread
+  (`AlreadyPublishedEvents` keeps it from being published to Spring again); `PublishingGuard` keeps Saga Forge's own
+  publications out; `saga-forge.application-events.inbound.enabled` (default `true`). `EventPublisher` also publishes to
+  Spring (`ApplicationEventPublishingEventPublisher`). `after-delivery` is deprecated and refused with the route. Tests:
+  `PublishOnceTest`, `InboundSagaEventListenerTest`, `PublishingGuardTest`, `AlreadyPublishedEventsTest`,
+  `ApplicationEventPublishingEventPublisherTest`, `ApplicationEventsModeTest`; `PublishOnceContainerTest` (Postgres,
+  rollback) written, not yet run (G-014-06).
 
 ### G-008-04: Repository tests cannot use `@SpringBootTest`
 - **Description**: the repository stays on JUnit 5 (jqwik 1.9 runs on JUnit Platform 1.x), while Spring Framework 7's
@@ -1135,11 +1148,11 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
    2026-11-20
 2. 012 outbox command failure feedback (G-ADOPT-02) - done 2026-11-24
 3. 013 active/standby relay (G-007-09) - done 2026-11-26
-4. 014 publish once: Spring events reach sagas, saga events reach Spring (G-008-03, G-ENG-24) - next; rescoped
-   2026-11-26 to two logs (Saga Forge's own, Modulith's registry), no shared outbox
+4. 014 publish once: Spring events reach sagas, saga events reach Spring (G-008-03, G-ENG-24) - done 2026-11-26
+   (`specs/014-publish-once`; container suites pending, G-014-06); two logs (Saga Forge's own, Modulith's registry)
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05) - done 2026-11-26 (`specs/015-saga-operations`), without retry
    5b. 015b retry a failed saga from its failed step (G-015-01), split from 015; after 014 and 016 (2026-11-26)
-6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
+6. 016 marker SPI and jMolecules adapter (G-ADOPT-04) - next
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
 8. 018 versioned schema migrations (G-003-25)
@@ -1496,8 +1509,9 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   off. `CommandGateway.schedule` throws `UnsupportedOperationException` there.
 - **Origin**: `specs/017-saga-deadlines` research R13, FR-006.
 - **Status**: accepted (2026-11-26, user: a common outbox with Modulith is not a goal; applications with deadlines
-  run Saga Forge's own log). Roadmap 014 makes the starter pick the own log when the model declares a deadline instead
-  of failing startup under the interop default.
+  run Saga Forge's own log). Since 014 the starter picks the own log when the model declares a deadline and the property
+  is not set (`ModulithInteropConfiguration`, log `saga.transport.modulithInterop.skipped`, `DeadlineInteropDefaultTest`);
+  an explicit `true` still fails startup.
 
 ### G-017-02: One running instance per message store, also for deadlines
 - **Description**: due messages are leased by the one relay, like every message (G-007-09). Two running instances may
@@ -1652,7 +1666,11 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   another saga type has a step for it. The transport delivers it with the stored `sourceSagaId`, so the source instance
   gets no result. The hand-assembled runtime's default `ImmediateDispatchOutbox` dispatches through
   `EventDispatcher.dispatch(event)`, which carries no source, so there the source instance reports `DUPLICATE`.
-- **Origin**: `specs/014-publish-once/research.md` R6 (planned).
+  The same holds for an `EventReceiver` decorator (for example an `EventReceiverCustomizer` wrapper) that forwards only
+  `receive(Object)`: the default `receive(Object, String)` drops the source. The fixture's parity suite
+  (`FixtureParityTest`) compares against a runtime over `ImmediateDispatchOutbox`, so it has no fan-out case; the fan-out
+  is checked by `RecordedEventFanOutFixtureTest` instead.
+- **Origin**: `specs/014-publish-once/research.md` R6.
 - **Status**: accepted (harmless; `EventDispatcher` not widened for an at-most-once fallback, G-ENG-07).
 
 ### G-014-05: An event published in a host transaction waits for the relay's next poll
@@ -1661,3 +1679,15 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   Applies to the inbound route and to `EventPublisher` alike.
 - **Origin**: `specs/014-publish-once/research.md` R9.
 - **Status**: open (a commit hook on `LocalTransaction` would signal after commit; a core SPI change of its own).
+
+### G-014-06: 014's Postgres container tests were written but not run when 014 was implemented
+- **Description**: the session that implemented 014 had no Docker. `PublishOnceContainerTest` (Spring transaction
+  commit, rollback, no transaction, over Postgres with Modulith's registry beside the own log) compiles but did not run,
+  and neither did the container setups of `TransportAcceptanceSuite.recordedEventFansOut` (Postgres own log, Spring own
+  log, Modulith interop) or the Spring example's container test with `OrderPlacement` on `ApplicationEventPublisher`.
+  Their logic ran green over in-memory doubles (`PublishOnceTest`, `PlainJavaAcceptanceTest`). Planned tasks not built
+  as separate tests: a real Spring Data `@DomainEvents` save inside a handler (T008; covered by a handler publishing
+  through Spring in `PublishOnceTest`), a restart between publication and delivery for the Spring route (T007), and the
+  Actuator endpoint naming the store chosen for a deadline model (DI4).
+- **Origin**: `specs/014-publish-once` implementation, 2026-11-26.
+- **Status**: open: run `mvn -Pcontainer-tests verify` and record the result in AGENTS.md.

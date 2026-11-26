@@ -21,6 +21,7 @@ import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.support.CapturingOutbox;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.runtime.support.TestTransport;
+import io.github.gkosharovdev.sagaforge.spring.SagaForgeConfigurationException;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.OrderCompletedEvent;
 import io.github.gkosharovdev.sagaforge.spring.fixtures.order.OrderEvents.OrderCreatedEvent;
 import io.github.gkosharovdev.sagaforge.spring.support.StarterRunner;
@@ -99,10 +100,31 @@ class ApplicationEventsModeTest {
   }
 
   @Test
-  @DisplayName("after-delivery: the bridge only, no publishing outbox")
-  void afterDelivery() {
+  @DisplayName(
+      "014 AD2: after-delivery with the inbound route on is refused, naming both properties")
+  void afterDeliveryWithInboundRefused() {
     runner
         .withPropertyValues("saga-forge.application-events.mode=after-delivery")
+        .withBean(MessageStore.class, InMemoryMessageStore::new)
+        .run(
+            context ->
+                assertThat(context)
+                    .hasFailed()
+                    .getFailure()
+                    .rootCause()
+                    .isInstanceOf(SagaForgeConfigurationException.class)
+                    .hasMessageContaining("saga-forge.application-events.mode=after-delivery")
+                    .hasMessageContaining("saga-forge.application-events.inbound.enabled"));
+  }
+
+  @Test
+  @DisplayName(
+      "after-delivery (deprecated, inbound route off): the bridge only, no publishing outbox")
+  void afterDelivery() {
+    runner
+        .withPropertyValues(
+            "saga-forge.application-events.mode=after-delivery",
+            "saga-forge.application-events.inbound.enabled=false")
         .withBean(MessageStore.class, InMemoryMessageStore::new)
         .run(
             context -> {

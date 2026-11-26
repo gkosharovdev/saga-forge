@@ -27,7 +27,8 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
 | Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
 | Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
-| Saga deadlines and scheduled commands (`@StartDeadline`/`@DeadlineExpired`, `DeadlineReached`, trigger kind `DEADLINE_EXPIRED`, `SagaInstance.openDeadlines`, `CommandGateway.schedule`/`cancel`, `MessageStore` due times and `cancel`, status `CANCELLED`, rules R24 to R29, Properties 40 to 43) | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites ([017](../specs/017-saga-deadlines/spec.md)); not with Spring Modulith interop (G-017-01) |
+| Saga deadlines and scheduled commands (`@StartDeadline`/`@DeadlineExpired`, `DeadlineReached`, trigger kind `DEADLINE_EXPIRED`, `SagaInstance.openDeadlines`, `CommandGateway.schedule`/`cancel`, `MessageStore` due times and `cancel`, status `CANCELLED`, rules R24 to R29, Properties 40 to 43) | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites ([017](../specs/017-saga-deadlines/spec.md)); not with Spring Modulith interop (G-017-01), which the starter leaves off for a model with deadlines unless set ([014](../specs/014-publish-once/spec.md)) |
+| Publish once ([014](../specs/014-publish-once/spec.md)): events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) reach sagas, `EventPublisher` publishes to Spring, a recorded event its own instance ran in process also reaches other saga types (Property 47, `EventReceiver.receive(event, sourceSagaId)`) | Implemented in core, the runtime, the in-memory transport, the starter and the fixture, tested without containers; the starter's `PublishOnceContainerTest` is written and compiles, not yet run against Postgres |
 | Saga operations (`SagaRuntime.operations()`: instance queries, `resumeCompensation`/`compensate`/`markResolved` with `OperatorRequest`, `recover()`; recovery sweeps with `RecoverySettings`/`AbandonedStartPolicy`; stranded-start adoption; `SagaResolution`, `compensationRound`; the starter's `sagas` Actuator endpoint) | Implemented in core, the runtime, Postgres, the starter and the fixture, tested, including container suites ([015](../specs/015-saga-operations/spec.md)); no retry of a failed step (G-015-01) |
 
 ## Module responsibilities
@@ -65,7 +66,11 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   - publishes every recorded domain event through Spring's `ApplicationEventPublisher` inside the unit of work
     (`saga-forge.application-events.mode`), so Spring Modulith's `@ApplicationModuleListener`s receive saga events
     with Modulith's guarantees, and with Modulith's registry present keeps the transport's messages there too (one
-    outbox);
+    outbox), unless the model declares deadlines and the property is not set (014);
+  - since 014, takes events published through Spring's `ApplicationEventPublisher` whose type a saga has a step for
+    into the transport's log in the publishing transaction (`InboundSagaEventListener`,
+    `saga-forge.application-events.inbound.enabled`), and makes `EventPublisher` publish to Spring as well, so
+    application code publishes an event once and both sagas and Spring listeners receive it;
   - exposes a read-only `sagaforge` Actuator endpoint and health indicator.
 
   Every bean backs off for an application bean of its type. There is no `SagaRuntimeConfig` for a user to
@@ -127,7 +132,12 @@ unit of work** (specified in
   then are its buffered events handed to its `Outbox` — with the in-memory transport, rows of the message store
   written in that same transaction, delivered after commit; with Kafka, records.
 - The transport carries events only *between* units of work: an external event (or one published through
-  `EventPublisher` outside any unit of work) starts or resumes a saga instance in a new unit of work.
+  `EventPublisher` or Spring's `ApplicationEventPublisher` outside any unit of work) starts or resumes a saga
+  instance in a new unit of work.
+- A recorded event is also handed to the outbox when another saga type has a step for it, even if a step of its own
+  instance ran it in process (Property 47, [014](../specs/014-publish-once/spec.md)). The stored message names its
+  source instance, and delivery gives that instance no result when its step for the event has completed, so each saga
+  type reacts to the event once.
 
 At the transport level this is choreography: no central dispatcher decides what happens next. But every
 `@Saga` instance keeps durable process state — its `SagaInstance` record (status, per-step `StepRecord`s,
@@ -306,7 +316,12 @@ names on the left are from *Enterprise Integration Patterns* (Hohpe and Woolf) u
 
 In a Spring application with Spring Modulith, the Message Store is Spring Modulith's event publication registry
 instead, and Saga Forge keeps only its delivery records beside it: one outbox per application, not two
-([007](../specs/007-in-memory-transport/spec.md) FR-028).
+([007](../specs/007-in-memory-transport/spec.md) FR-028). The registry has no due time, so an application with saga
+deadlines keeps Saga Forge's own log beside Modulith's registry: two logs, both written in the business transaction
+(the starter's default for a model with deadlines since [014](../specs/014-publish-once/spec.md)). Nothing orders an
+event in one log against an event in the other; Saga Forge's log orders the events it stores per aggregate
+(`@AggregateIdentifier`), on every publishing route, so a later broker transport can partition on the same key
+(G-014-01). Whether a broker transport would also publish an application's integration events is open (G-014-02).
 
 #### How other frameworks solved the same problems
 
@@ -581,7 +596,7 @@ and NServiceBus's saga timeouts, without a separate scheduler:
 - **Scheduled commands.** `CommandGateway.schedule(command, at)` stores an outbox command with a due time and returns a
   `ScheduledCommandId`; `cancel` withdraws a pending one.
 
-Known limitations: no deadlines with Spring Modulith interop (G-017-01); overdue messages run in stored, not due, order (G-017-03); latency is bounded by the relay's poll
+Known limitations: no deadlines with Spring Modulith interop (G-017-01; the starter keeps the own log for a model with deadlines unless the property is set, 014); overdue messages run in stored, not due, order (G-017-03); latency is bounded by the relay's poll
 interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command is not
 cancelled with its saga (G-017-06).
 

@@ -15,6 +15,11 @@ import org.springframework.context.ApplicationEventPublisher;
  * Modulith's registry stores a publication per such listener in the same transaction. A plain
  * {@code @EventListener} runs synchronously inside the unit of work, and its failure rolls the unit
  * of work back.
+ *
+ * <p>Since {@code specs/014-publish-once} (contracts/inbound-route.md PO1) it publishes under the
+ * {@code PublishingGuard}, so {@link InboundSagaEventListener} does not take these events back in,
+ * and skips the events Spring already delivered before {@link InboundSagaEventListener} recorded
+ * them into the unit of work.
  */
 public final class ApplicationEventPublishingOutbox implements Outbox {
 
@@ -56,7 +61,15 @@ public final class ApplicationEventPublishingOutbox implements Outbox {
         || delegate.observesRecordedEvents()) {
       delegate.store(batch);
     }
-    batch.recordedEvents().forEach(publisher::publishEvent);
+    try {
+      PublishingGuard.run(
+          () ->
+              batch.recordedEvents().stream()
+                  .filter(event -> !AlreadyPublishedEvents.contains(event))
+                  .forEach(publisher::publishEvent));
+    } finally {
+      AlreadyPublishedEvents.clear();
+    }
   }
 
   @Override

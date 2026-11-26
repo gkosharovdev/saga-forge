@@ -13,7 +13,15 @@ public enum ApplicationEventsMode {
    */
   IN_TRANSACTION,
 
-  /** Published after the transport delivered the event, outside any transaction (007's bridge). */
+  /**
+   * Published after the transport delivered the event, outside any transaction (007's bridge).
+   *
+   * @deprecated since 014 ({@code specs/014-publish-once} research R7): it re-publishes every
+   *     delivered event, including those that came in from Spring, so it is refused while {@code
+   *     saga-forge.application-events.inbound.enabled} is {@code true} (the default). Use {@link
+   *     #IN_TRANSACTION}.
+   */
+  @Deprecated
   AFTER_DELIVERY,
 
   /** Not published to Spring at all. */

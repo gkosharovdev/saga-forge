@@ -334,6 +334,32 @@ public class SagaForgeProperties {
     public void setMode(ApplicationEventsMode mode) {
       this.mode = mode;
     }
+
+    /** {@code saga-forge.application-events.inbound.*}. */
+    private final Inbound inbound = new Inbound();
+
+    public Inbound getInbound() {
+      return inbound;
+    }
+  }
+
+  /** {@code saga-forge.application-events.inbound.*} ({@code specs/014-publish-once}). */
+  public static class Inbound {
+
+    /**
+     * Whether events published through Spring's ApplicationEventPublisher (also Spring Data
+     * {@code @DomainEvents}) whose type a saga has a step for are stored for delivery to sagas, in
+     * the publishing transaction.
+     */
+    private boolean enabled = true;
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
   }
 
   /** Storage modules the starter can select. */

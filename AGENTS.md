@@ -206,6 +206,20 @@
   `management.endpoint.sagas.access=unrestricted`; needs a principal), health details for unresolved counts. Fixture:
   `SagaFixture.operations()`, `whenOperator(...)`, `Builder.recovery`, `Then.expectResolved`/`expectNotResolved`/
   `expectHistory`, `InstanceView.history`/`resolution`. Properties 44 to 46.
+- Implemented and tested without containers, added by `specs/014-publish-once` (closes G-008-03 and G-ENG-24; container
+  suites written but not yet run, G-014-06): publish once, with Saga Forge's own log beside Spring Modulith's registry
+  (two logs; interop unchanged). Core's `EventReceiver` gains the default `receive(event, sourceSagaId)`; the runtime's
+  `UnitOfWork` hands a recorded event its own instance ran in process to the outbox when another saga type has a step
+  for it (`runtime.internal.EventSubscriptions`), and `EventRouter` gives the source instance no result when its step
+  for the event is `COMPLETED` (Property 47); `SagaRuntime.eventTypes()`. The relay and the fixture's
+  `LoopBackTransport` deliver with the stored `sourceSagaId`. Starter: `InboundSagaEventListener` stores events
+  published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) whose type a saga has a step
+  for, in the publishing transaction, or records them in the unit of work on the thread (package-private
+  `AlreadyPublishedEvents`, `PublishingGuard`); `saga-forge.application-events.inbound.enabled` (default `true`);
+  `ApplicationEventPublishingEventPublisher` makes the starter's `EventPublisher` publish to Spring too;
+  `application-events.mode=after-delivery` is deprecated and refused while the route is on; with deadlines in the model
+  and `saga-forge.transport.modulith-interop` not set, the transport keeps the own log. The Spring example's
+  `OrderPlacement` publishes through `ApplicationEventPublisher`.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -367,9 +381,15 @@
   log with one active relay since 013 (G-007-09 closed).
 - Spring Boot starter (008), see memory.md G-008-01 to G-008-04: Modulith event externalization and `Scenario`
   support deferred (G-008-01); the `sagaforge` endpoint is read-only, repairs go through 015's `sagas` endpoint (G-008-02 closed); events published through Spring's own
-  `ApplicationEventPublisher` do not reach sagas (G-008-03); repository tests use `ApplicationContextRunner` /
-  `SpringApplicationBuilder`, not `@SpringBootTest` (G-008-04). An event a step of its own instance runs is not handed
-  to other saga types (G-ENG-24).
+  `ApplicationEventPublisher` reach sagas since 014 (G-008-03 closed); repository tests use `ApplicationContextRunner` /
+  `SpringApplicationBuilder`, not `@SpringBootTest` (G-008-04). An event a step of its own instance runs reaches other
+  saga types since 014 (G-ENG-24 closed, Property 47).
+- Publish once (014), see memory.md G-014-01 to G-014-06: no order between Saga Forge's log and Modulith's registry
+  (G-014-01); whether a Kafka transport publishes integration events is undecided (G-014-02); switching
+  `modulith-interop` strands in-flight messages (G-014-03); with `ImmediateDispatchOutbox` or a decorator that drops the
+  source, the source instance reports `DUPLICATE` on a fanned-out event (G-014-04); an event published in a host
+  transaction waits for the relay's next poll (G-014-05); the container suites have not run yet (G-014-06). An
+  `EventReceiver` decorator forwards `receive(event, sourceSagaId)`.
 - Postgres storage (003), see memory.md for detail: concurrency is a row lock plus a forward-transition check,
   with no version field (G-003-02, -03, -13, -19 to -22; G-003-01/-02 explicitly deferred); steps completed in one
   `save()` are ordered by a step-name tiebreak (G-003-04, -16); no lifecycle-history query API, FR-012
@@ -391,7 +411,8 @@
   the reaction is always full compensation (G-012-03); a crash after the reaction's first commit resumes only on the
   next event (G-012-04); the fixture redelivers without backoff (G-012-05).
 
-- Saga deadlines (017), see memory.md G-017-01 to G-017-10: none with Spring Modulith interop (G-017-01); overdue messages run in stored order (G-017-03); latency up to the
+- Saga deadlines (017), see memory.md G-017-01 to G-017-10: none with Spring Modulith interop (G-017-01; since 014 the
+  starter keeps the own log for a deadline model unless the property is set); overdue messages run in stored order (G-017-03); latency up to the
   poll interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command
   is not cancelled with its saga (G-017-06); a deadline does not resume a `COMPENSATING` instance (G-017-07);
   implementation decisions (G-017-08); the fixture duplicates the scheduling (G-017-09); no Spring example or Spring

@@ -19,8 +19,10 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
   record events with `DomainEvents.record(...)`. Aggregates extend/implement no Saga Forge type.
 - Events: `@DomainEvent(aggregate = X.class)` with exactly one `@AggregateIdentifier`. Commands to an aggregate
   instance method carry one `@AggregateIdentifier`.
-- Application code publishes start events with Saga Forge's `EventPublisher`, never Spring's
-  `ApplicationEventPublisher`. Other modules listen with `@ApplicationModuleListener`, not a plain `@EventListener`.
+- Application code publishes events once, the usual Spring way (`ApplicationEventPublisher` or Spring Data
+  `@DomainEvents`); sagas receive those whose type they have a step for. Saga Forge's `EventPublisher` also works,
+  but never publish one event both ways. Other modules listen with `@ApplicationModuleListener`, not a plain
+  `@EventListener`.
 - `SagaContext` values are JSON scalars: store `BigDecimal` as `toPlainString()`, `Instant` as a string.
 - Handlers that call outside systems take a `CommandId` and pass `commandId.value()` as the idempotency key.
 - Business failures are events handled by a `@StartCompensation` step; undo steps with
@@ -33,7 +35,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
   A failed compensation ends `COMPENSATION_FAILED`.
 - Time limits are deadlines: `@StartDeadline(name, duration | durationFrom, cancelledBy)` on a step and one
   `@StartCompensation @DeadlineExpired(name) @SagaStep` timeout step (no `associationProperty`). They need the in-memory
-  transport's outbox and `saga-forge.transport.modulith-interop=false`. Test with `whenTimeElapses(...)`.
+  transport's outbox and Saga Forge's own log (leave `saga-forge.transport.modulith-interop` unset or `false`). Test
+  with `whenTimeElapses(...)`.
 - Several application instances may share the database: one elected relay delivers messages and deadlines, the others
   stand by (`saga-forge.transport.leadership.*`). Don't expect delivery on every node; a takeover can redeliver.
 - Operators repair one saga at a time through `SagaRuntime.operations()` or the `sagas` Actuator endpoint:

@@ -71,7 +71,7 @@ Other paths are relative to the repository root. Short prefixes:
 - [X] T004 Implement `public Set<Class<?>> eventTypes()` in `rt/SagaRuntime.java`, computed in `build()` from the
   registered classes' `@SagaStep` event parameters with the router's exact-class rule (reuse `internal/SagaModel` via a
   package-private factory in `internal/EngineRuntime.java` if needed); Javadoc without `<h3>`.
-- [ ] T005 [P] Add `Inbound` (field `enabled`, default `true`) to `SagaForgeProperties.ApplicationEvents` in
+- [X] T005 [P] Add `Inbound` (field `enabled`, default `true`) to `SagaForgeProperties.ApplicationEvents` in
   `spring/SagaForgeProperties.java`, with the configuration-metadata description; extend
   `spring-test/SagaForgePropertiesTest.java`.
 
@@ -88,38 +88,38 @@ a saga handles is stored in Saga Forge's log in the publishing transaction and r
 
 ### Tests
 
-- [ ] T006 [P] [US1] Add `InboundSagaEventListenerTest` in `spring-test/events/InboundSagaEventListenerTest.java` over a
+- [X] T006 [P] [US1] Add `InboundSagaEventListenerTest` in `spring-test/events/InboundSagaEventListenerTest.java` over a
   recording `EventDispatcher` and `DomainEvents.capture`: IR2 (non-saga type ignored, subclass ignored), IR3 (inside a
   scope: recorded, not dispatched), IR4 (outside: dispatched), IR5 (no runtime start needed).
-- [ ] T007 [P] [US1] Add `PublishOnceContainerTest` in `spring-test/events/PublishOnceContainerTest.java`
+- [X] T007 [P] [US1] Add `PublishOnceContainerTest` in `spring-test/events/PublishOnceContainerTest.java`
   (`@Tag("container")`, `StarterPostgres`, `SpringApplicationBuilder`, interop off): a saga starting on `OrderPlaced`
   and continuing on `OrderPaid`, plus an `@ApplicationModuleListener` (or `@TransactionalEventListener`) counting calls.
   Cases: publish in a committed transaction → one instance, step once, listener once; rolled back → nothing stored,
   nothing delivered; publish with no transaction → delivered; continuing event → step once; non-saga event → nothing
   stored; restart between publication and delivery → delivered once.
-- [ ] T008 [P] [US1] Add `InboundRouteInUnitOfWorkTest` in `spring-test/events/InboundRouteInUnitOfWorkTest.java`
+- [X] T008 [P] [US1] Add `InboundRouteInUnitOfWorkTest` in `spring-test/events/InboundRouteInUnitOfWorkTest.java`
   (container): a command handler saves a Spring Data aggregate whose `@DomainEvents` hold a saga event the same instance
   waits for → the step runs in process in the same unit of work; on a forced rollback nothing is stored.
-- [ ] T009 [P] [US1] Add `InboundRouteDisabledTest` in `spring-test/events/InboundRouteDisabledTest.java`
+- [X] T009 [P] [US1] Add `InboundRouteDisabledTest` in `spring-test/events/InboundRouteDisabledTest.java`
   (`ApplicationContextRunner`): `saga-forge.application-events.inbound.enabled=false` → no `InboundSagaEventListener`
   bean; default → one.
 
 ### Implementation
 
-- [ ] T010 [P] [US1] Create `PublishingGuard` (package-private; `run(Runnable)` restoring the previous value in
+- [X] T010 [P] [US1] Create `PublishingGuard` (package-private; `run(Runnable)` restoring the previous value in
   `finally`, `active()`) in `spring/events/PublishingGuard.java` with `spring-test/events/PublishingGuardTest.java`
   (nesting, exception path). Needed by IR1; full use in US4.
-- [ ] T011 [P] [US1] Create `AlreadyPublishedEvents` (package-private identity set; `add` registers a
+- [X] T011 [P] [US1] Create `AlreadyPublishedEvents` (package-private identity set; `add` registers a
   `TransactionSynchronization` clearing it after completion when synchronization is active; `remove` returns presence)
   in `spring/events/AlreadyPublishedEvents.java` with `spring-test/events/AlreadyPublishedEventsTest.java` (identity
   not equality, cleared after commit and after rollback).
-- [ ] T012 [US1] Implement `InboundSagaEventListener` (public, `ApplicationListener<PayloadApplicationEvent<?>>`;
+- [X] T012 [US1] Implement `InboundSagaEventListener` (public, `ApplicationListener<PayloadApplicationEvent<?>>`;
   collaborators `Set<Class<?>>` and `EventDispatcher`) per contracts/inbound-route.md IR1 to IR5 in
   `spring/events/InboundSagaEventListener.java`.
-- [ ] T013 [US1] Register it in `spring/events/ApplicationEventsConfiguration.java`: `@ConditionalOnProperty`
+- [X] T013 [US1] Register it in `spring/events/ApplicationEventsConfiguration.java`: `@ConditionalOnProperty`
   `saga-forge.application-events.inbound.enabled` (match if missing), `@ConditionalOnBean({SagaRuntime.class,
   EventDispatcher.class})`, `@ConditionalOnMissingBean`, built from `SagaRuntime.eventTypes()`.
-- [ ] T014 [US1] Make T006 to T009 pass; check the Modulith interop acceptance
+- [X] T014 [US1] Make T006 to T009 pass; check the Modulith interop acceptance
   (`spring-test/modulith/ModulithInteropAcceptanceContainerTest.java`) stays green with the route on (research R10).
 
 **Checkpoint**: US1 works with interop off and on.
@@ -183,17 +183,17 @@ through Spring in the caller's transaction.
 
 ### Tests
 
-- [ ] T026 [P] [US3] Add `ApplicationEventPublishingEventPublisherTest` in
+- [X] T026 [P] [US3] Add `ApplicationEventPublishingEventPublisherTest` in
   `spring-test/events/ApplicationEventPublishingEventPublisherTest.java`: EP1 (inside a scope: delegate only), EP2
   (outside: delegate then Spring, under the guard), EP3 (delegate failure → nothing published to Spring).
-- [ ] T027 [US3] Add cases to `spring-test/events/PublishOnceContainerTest.java`: `EventPublisher.publish` committed →
+- [X] T027 [US3] Add cases to `spring-test/events/PublishOnceContainerTest.java`: `EventPublisher.publish` committed →
   listener once, step once; rolled back → neither; `mode=none` → saga only.
 
 ### Implementation
 
-- [ ] T028 [US3] Implement `ApplicationEventPublishingEventPublisher` (public, decorator holding `EventPublisher` and
+- [X] T028 [US3] Implement `ApplicationEventPublishingEventPublisher` (public, decorator holding `EventPublisher` and
   `ApplicationEventPublisher`) in `spring/events/ApplicationEventPublishingEventPublisher.java`.
-- [ ] T029 [US3] In `spring/events/ApplicationEventsConfiguration.java` (`InTransaction`), wrap the bean named
+- [X] T029 [US3] In `spring/events/ApplicationEventsConfiguration.java` (`InTransaction`), wrap the bean named
   `sagaForgeEventPublisher` only (a `BeanPostProcessor` matching by name, like the outbox wrapping); an
   application-defined `EventPublisher` is left alone; make T026, T027 pass.
 
@@ -208,24 +208,24 @@ unit of work are not published to Spring again; `after-delivery` refused with th
 
 ### Tests
 
-- [ ] T030 [P] [US4] Add the delivery-matrix cases (contracts/inbound-route.md table, every row) to
+- [X] T030 [P] [US4] Add the delivery-matrix cases (contracts/inbound-route.md table, every row) to
   `spring-test/events/PublishOnceContainerTest.java`, counting stored messages per event, saga step runs and listener
   calls; include an outcome event and a plain synchronous `@EventListener`.
-- [ ] T031 [P] [US4] Add `AfterDeliveryConflictTest` in `spring-test/events/AfterDeliveryConflictTest.java`
+- [X] T031 [P] [US4] Add `AfterDeliveryConflictTest` in `spring-test/events/AfterDeliveryConflictTest.java`
   (`ApplicationContextRunner`): AD2 failure with both property names in the failure analysis; AD3 with
   `inbound.enabled=false` starts and logs the deprecation (AD1).
 
 ### Implementation
 
-- [ ] T032 [US4] Change `spring/events/ApplicationEventPublishingOutbox.java` per PO1 (publish under `PublishingGuard`,
+- [X] T032 [US4] Change `spring/events/ApplicationEventPublishingOutbox.java` per PO1 (publish under `PublishingGuard`,
   skip and remove entries in `AlreadyPublishedEvents`); wire the guard into `InboundSagaEventListener` IR1 and the
   publisher decorator EP2 if not done yet.
-- [ ] T033 [US4] Deprecate `ApplicationEventsMode.AFTER_DELIVERY` in `spring/events/ApplicationEventsMode.java`
+- [X] T033 [US4] Deprecate `ApplicationEventsMode.AFTER_DELIVERY` in `spring/events/ApplicationEventsMode.java`
   (`@Deprecated` + Javadoc), log `saga.applicationEvents.afterDeliveryDeprecated` once in the `AfterDelivery`
   configuration, and throw `SagaForgeConfigurationException` with the AD2 texts when the route is on, in
   `spring/events/ApplicationEventsConfiguration.java`; check `spring/diagnostics/SagaForgeConfigurationFailureAnalyzer.java`
   renders it.
-- [ ] T034 [US4] Update `spring-test/events/ApplicationEventsModeTest.java` for the deprecation and conflict; make T030,
+- [X] T034 [US4] Update `spring-test/events/ApplicationEventsModeTest.java` for the deprecation and conflict; make T030,
   T031 pass.
 
 ---
@@ -236,13 +236,13 @@ unit of work are not published to Spring again; `after-delivery` refused with th
 
 **Independent test**: `DeadlineInteropDefaultTest`.
 
-- [ ] T035 [P] [US5] Add `DeadlineInteropDefaultTest` in `spring-test/modulith/DeadlineInteropDefaultTest.java`
+- [X] T035 [P] [US5] Add `DeadlineInteropDefaultTest` in `spring-test/modulith/DeadlineInteropDefaultTest.java`
   (container, Modulith JDBC registry): DI1 (no property, deadline model → own log, INFO log), DI2 (explicit `true` →
   refused, analyzer text), DI3 (no deadline → `ModulithMessageStore`), DI4 (`sagaforge` endpoint names the store used).
-- [ ] T036 [US5] In `spring/modulith/ModulithInteropConfiguration.java`, return `MessageStore`: when
+- [X] T036 [US5] In `spring/modulith/ModulithInteropConfiguration.java`, return `MessageStore`: when
   `saga-forge.transport.modulith-interop` is not set and a class from `SagaModelCollector.collect()` declares
   `@StartDeadline`, return a `PostgresMessageStore` and log `saga.transport.modulithInterop.skipped`.
-- [ ] T037 [US5] In `spring/diagnostics/DeadlinesRequireOwnLogFailureAnalyzer.java`, treat "not set" as not active
+- [X] T037 [US5] In `spring/diagnostics/DeadlinesRequireOwnLogFailureAnalyzer.java`, treat "not set" as not active
   (explicit `true` only); in `spring/actuator/SagaForgeEndpoint.java` report the store actually used if it reports
   interop today; make T035 pass.
 
@@ -250,20 +250,20 @@ unit of work are not published to Spring again; `after-delivery` refused with th
 
 ## Phase 8: Polish & Cross-Cutting
 
-- [ ] T038 [P] Switch `example/OrderPlacement.java` to Spring's `ApplicationEventPublisher` (SC-003); update its
+- [X] T038 [P] Switch `example/OrderPlacement.java` to Spring's `ApplicationEventPublisher` (SC-003); update its
   Javadoc; keep `saga-forge-example-spring/…test/example/spring/OrderApplicationContainerTest.java` green and assert the
   `FailedOrders` listener and saga each see one event.
-- [ ] T039 [P] Update `docs/architecture.md` (event flow with two logs, the three routes, Property 47 fan-out,
+- [X] T039 [P] Update `docs/architecture.md` (event flow with two logs, the three routes, Property 47 fan-out,
   ordering limits) and `docs/use-cases.md` where it shows `EventPublisher` from application code.
-- [ ] T040 [P] Update the guide: `docs/guide/getting-started.md`, `docs/guide/recipes.md` (publishing from module code,
+- [X] T040 [P] Update the guide: `docs/guide/getting-started.md`, `docs/guide/recipes.md` (publishing from module code,
   Spring Data `@DomainEvents`), `docs/guide/model-reference.md`, `docs/guide/limitations.md` (G-014-01, G-014-04,
   G-014-05, deprecated `after-delivery`), with snippets copied from compiling code naming their source file.
-- [ ] T041 [P] Update `saga-forge-spring-boot-starter/README.md` (defaults table, properties table with
+- [X] T041 [P] Update `saga-forge-spring-boot-starter/README.md` (defaults table, properties table with
   `saga-forge.application-events.inbound.enabled`, `after-delivery` deprecated, deadline default, an upgrade note for
   applications publishing an event both ways); `ReadmePropertiesTest` green.
-- [ ] T042 [P] Update `docs/agents/saga-forge/SKILL.md` and `docs/agents/AGENTS-snippet.md`; run
+- [X] T042 [P] Update `docs/agents/saga-forge/SKILL.md` and `docs/agents/AGENTS-snippet.md`; run
   `docs/guide/build-llms-full.sh` and commit `llms-full.txt`.
-- [ ] T043 Update `.specify/memory/memory.md`: close G-008-03 and G-ENG-24 (with the tests that prove them), update
+- [X] T043 Update `.specify/memory/memory.md`: close G-008-03 and G-ENG-24 (with the tests that prove them), update
   G-017-01 (implicit default done), revise G-014-04/G-014-05 to their final wording, record any new gap found; update
   `.specify/memory/roadmap.md` (014 done) and AGENTS.md "Current Status" (014 entry, test count).
 - [ ] T044 Run `mvn spotless:apply`, then `mvn -Pcontainer-tests verify` from the repository root and
@@ -307,4 +307,26 @@ T018 FixtureParityTest            (fixture-test/)
 
 ## Progress note
 
-(filled during `/speckit-implement`)
+- **Baseline (T001)**: `mvn verify` without containers green on 2026-11-26, 1,819 tests, 0 failures, 1 skipped. Docker
+  is not available in this session, so no `@Tag("container")` suite ran (G-014-06).
+- **Design skills (T002)**: `effective-java`, `clean-code-java` and `solid-design-review` are not installed; their
+  principles were applied by hand (research.md R12).
+- **Deviations**:
+  - T005: the property is covered by `ReadmePropertiesTest` and `PublishOnceTest.inboundDisabled`, not a new
+    `SagaForgePropertiesTest` case.
+  - T007: `PublishOnceContainerTest` covers commit, rollback and no transaction over Postgres; the restart case was not
+    added (the transport suites already restart stored messages). Written and compiled, not run.
+  - T008 and T009: folded into `PublishOnceTest` over the runtime's doubles (a handler publishing through Spring inside
+    its unit of work; the route switched off), not separate classes; a real Spring Data `@DomainEvents` save is not
+    exercised (G-014-06).
+  - T014, T017: the Modulith interop and Postgres setups of `TransportAcceptanceSuite` were not run (no Docker).
+  - T018: no fan-out case in `FixtureParityTest`, whose hand-assembled runtime uses `ImmediateDispatchOutbox` (no source,
+    G-014-04); `RecordedEventFanOutFixtureTest` checks the fixture instead. `CorrelationTest` was updated from the old
+    G-ENG-24 behaviour.
+  - T020: no separate `EventSubscriptionsTest`; covered by `SagaRuntimeEventTypesTest` and `RecordedEventFanOutTest`.
+  - T027, T030, T031: in `PublishOnceTest` and `ApplicationEventsModeTest` instead of the container test and a new
+    `AfterDeliveryConflictTest` class.
+  - T035: `DeadlineInteropDefaultTest` runs without a container over stub registry beans; DI4 (Actuator) not added.
+  - Existing tests changed because 014 changes behaviour (Property 47): `InTransactionOutboxTest`,
+    `OutboxObligationsTest`, `OutboxObligationsPropertyTest`, `RecordedEventsTest`, `CorrelationTest`,
+    `ApplicationEventsModeTest.afterDelivery`, `FailureAnalyzersTest`.

@@ -210,17 +210,19 @@ Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforg
 
 ## 4. Start a saga
 
-Publish the start event through Saga Forge's `EventPublisher` bean (never Spring's `ApplicationEventPublisher`). Inside
-a `@Transactional` method the event is stored with your own changes and delivered after the commit:
+Publish the start event the usual Spring way, through `ApplicationEventPublisher` (or from a Spring Data aggregate's
+`@DomainEvents`). Saga Forge takes every event whose type a saga has a step for: inside a `@Transactional` method the
+event is stored with your own changes and delivered to the saga after the commit, and Spring listeners receive the same
+publication:
 
 ```java
 @Service
 public class OrderPlacement {
 
     private final OrderRepository orders;
-    private final EventPublisher events;
+    private final ApplicationEventPublisher events;
 
-    public OrderPlacement(OrderRepository orders, EventPublisher events) {
+    public OrderPlacement(OrderRepository orders, ApplicationEventPublisher events) {
         this.orders = orders;
         this.events = events;
     }
@@ -228,7 +230,7 @@ public class OrderPlacement {
     @Transactional
     public void place(String orderId, BigDecimal amount, boolean inStock) {
         orders.save(Order.create(orderId, inStock));
-        events.publish(new OrderCreatedEvent(orderId, amount));
+        events.publishEvent(new OrderCreatedEvent(orderId, amount));
     }
 }
 ```

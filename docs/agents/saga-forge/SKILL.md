@@ -80,8 +80,10 @@ public class OrderProcessingSaga {
   repository or an `@AggregateLoader`, then saved), an `@Aggregate` constructor/static factory (creation), or a
   `@Service`/`@Component` method. Exactly one `@Command` parameter; one handler per command type.
 - Record resulting events in handlers and aggregates with `DomainEvents.record(new XEvent(...))`.
-- Start a saga from application code with the injected Saga Forge `EventPublisher.publish(event)`, inside your
-  `@Transactional` method if you also change state.
+- Start a saga from application code by publishing its start event the usual Spring way
+  (`ApplicationEventPublisher.publishEvent(event)`, or a Spring Data aggregate's `@DomainEvents`), inside your
+  `@Transactional` method if you also change state. Saga Forge's `EventPublisher.publish(event)` works too (and also
+  publishes to Spring); use one of the two per event, never both.
 - Store `SagaContext` values as JSON scalars: `String`, `Boolean`, `Integer`, `Long`, finite `Double`, `List`,
   `Map<String, ?>`. **`BigDecimal` → `amount.toPlainString()`**, read back with `new BigDecimal(...)`; `Instant` →
   ISO string; enum → `name()`.
@@ -138,7 +140,9 @@ public class OrderProcessingSaga {
 - Don't return a command (or anything) from a step; don't make a step take a command.
 - Don't put `@CommandHandler` on a `@Saga` class.
 - Don't make aggregates extend or implement a Saga Forge type, and don't call repositories for them from a saga.
-- Don't publish saga events with Spring's `ApplicationEventPublisher`: they never reach sagas.
+- Don't publish the same event both through Spring's `ApplicationEventPublisher` and through `EventPublisher`: it
+  is stored twice. Don't use `saga-forge.application-events.mode=after-delivery` (deprecated; refused while
+  `saga-forge.application-events.inbound.enabled` is on).
 - Don't use a plain `@EventListener` for saga events in another module: it runs inside the saga's transaction. Use
   `@ApplicationModuleListener` or `@TransactionalEventListener`.
 - Don't store `BigDecimal`, `Instant`, `LocalDate`, records, POJOs or `null` in `SagaContext`.
@@ -146,10 +150,10 @@ public class OrderProcessingSaga {
   `@StartCompensation` step; at most one compensation per step.
 - Don't declare two steps for the same event type, two `@StartSaga` steps, or two handlers for one command.
 - Don't rely on long retry waits (in-process, 30 s total by default); give a wait a time limit with a deadline instead.
-- Don't use deadlines or `CommandGateway.schedule` with `saga-forge.transport.modulith-interop` on (startup fails), or
+- Don't set `saga-forge.transport.modulith-interop=true` with deadlines or `CommandGateway.schedule` (startup fails;
+  left unset, the starter keeps Saga Forge's own log for a model with deadlines), or
   with the default `ImmediateDispatchOutbox`. Don't put `associationProperty` on a `@DeadlineExpired` step, start a
   deadline on an `@EndSaga`/`@StartCompensation` step, or make a timeout step `@StartSaga`.
-- Don't expect one event that continues a saga to also start a different saga type; record a separate event.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.
 - Don't expect every instance to deliver messages or run deadlines: only the active relay does, and delivery throughput

@@ -21,7 +21,8 @@ Requires Java 21 and Spring Boot 4.1.
 | Command handler, loader and saver hosts | their beans | `HandlerInstanceProvider` |
 | Extra handler parameters | resolved from the context like an injection point (`@Qualifier` honoured) | `HandlerParameterResolver` |
 | Aggregates without `@AggregateLoader`/`@AggregateSaver` | their Spring Data repository (`findById`/`save`) | `AggregateResolver` |
-| Domain events as Spring application events | every recorded event published inside the unit of work's transaction (`application-events.mode=in-transaction`) | set `saga-forge.application-events.mode` |
+| Domain events as Spring application events | every recorded event, and every `EventPublisher` publication, published inside its transaction (`application-events.mode=in-transaction`) | set `saga-forge.application-events.mode` |
+| Spring events to sagas | an event published through `ApplicationEventPublisher` whose type a saga has a step for is stored for sagas in the publishing transaction | `saga-forge.application-events.inbound.enabled=false` |
 | Lifecycle | the runtime starts after the context refreshed, then the transport; on shutdown the transport stops first | — |
 | Spring Modulith | with its event publication registry present, the transport stores its messages there: one outbox | `saga-forge.transport.modulith-interop=false` |
 | Actuator | with Actuator present, a read-only `sagaforge` endpoint and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
@@ -58,16 +59,17 @@ spring.datasource.password=orders
 saga-forge.storage.postgres.initialize-schema=always
 ```
 
-Publish the event that starts a saga through Saga Forge's `EventPublisher`. Inside a `@Transactional` method, the event
-is stored with your own changes and delivered after the commit:
+Publish the event that starts a saga the usual Spring way, through `ApplicationEventPublisher` (or from a Spring Data
+aggregate's `@DomainEvents`). Inside a `@Transactional` method, the event is stored with your own changes and delivered
+to the saga after the commit; Spring listeners receive the same publication:
 
 ```java
 @Service
 class OrderPlacement {
     private final OrderRepository orders;
-    private final EventPublisher events;
+    private final ApplicationEventPublisher events;
 
-    OrderPlacement(OrderRepository orders, EventPublisher events) {
+    OrderPlacement(OrderRepository orders, ApplicationEventPublisher events) {
         this.orders = orders;
         this.events = events;
     }
@@ -75,12 +77,29 @@ class OrderPlacement {
     @Transactional
     void place(String orderId, BigDecimal amount) {
         orders.save(Order.create(orderId));
-        events.publish(new OrderCreatedEvent(orderId, amount));
+        events.publishEvent(new OrderCreatedEvent(orderId, amount));
     }
 }
 ```
 
 The complete application is `saga-forge-example-spring`.
+
+### Publishing events: one publication, every consumer
+
+An event reaches every saga step and every Spring listener that wants it once, whichever way it was published:
+
+| Published by | Sagas | Spring listeners (`@ApplicationModuleListener`, `@TransactionalEventListener`, `@EventListener`) |
+|---|---|---|
+| `ApplicationEventPublisher.publishEvent`, or a Spring Data aggregate's `@DomainEvents`, outside a saga | stored in the publishing transaction, delivered after commit | Spring delivers it |
+| the same, inside a saga step or command handler | recorded in that unit of work, like `DomainEvents.record` | Spring delivers it; Saga Forge does not publish it again |
+| `DomainEvents.record` in a step or handler | the unit of work | published inside the unit of work's transaction |
+| Saga Forge's `EventPublisher` | stored in the caller's transaction | published in the same transaction |
+
+Only events whose type a saga has a step for are stored for sagas; others pass by untouched. Switch the Spring route off
+with `saga-forge.application-events.inbound.enabled=false`.
+
+**Upgrading:** an application that published the same event both through Spring and through `EventPublisher` now has
+it stored twice. Keep one of the two calls (Spring's, preferably).
 
 ### With Spring Modulith
 
@@ -111,9 +130,14 @@ class PaymentNotifier {
 
 `ApplicationModules.of(App.class).verify()` keeps passing: the starter adds no type to your modules.
 
-Modulith's registry cannot hold a message until a due time, so a model with saga deadlines (`@StartDeadline`) refuses
-to start under interop. Set `saga-forge.transport.modulith-interop=false` to keep Saga Forge's own message log; the
-failure analysis says so.
+Modulith's registry cannot hold a message until a due time. So when the model declares saga deadlines
+(`@StartDeadline`) and `saga-forge.transport.modulith-interop` is not set, the transport keeps Saga Forge's own message
+log beside Modulith's registry and logs `saga.transport.modulithInterop.skipped`. Module listeners still receive saga
+events with Modulith's guarantees: both logs are written in the same transaction. An explicit
+`saga-forge.transport.modulith-interop=true` with deadlines refuses to start, and the failure analysis says so.
+
+With two logs, nothing orders an event in one against an event in the other. If you send an aggregate's events on to
+a broker, send them through one of the two, keyed by the aggregate id.
 
 ### With saga deadlines
 
@@ -289,7 +313,8 @@ instance delivers.
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
-| `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events are published as Spring application events inside the unit of work. `after-delivery`: published when the transport delivers them, after the commit. `none`: not published. |
+| `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events, and events published through `EventPublisher`, are published as Spring application events inside the transaction. `after-delivery` (deprecated, refused while the inbound route is on): published when the transport delivers them, after the commit. `none`: not published. |
+| `saga-forge.application-events.inbound.enabled` | `true` | Whether events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) whose type a saga has a step for are stored for sagas, in the publishing transaction. |
 | `saga-forge.transport.workers` | `4` | Delivery threads; messages of one aggregate always use the same one. |
 | `saga-forge.transport.max-attempts` | `10` | Failed deliveries before a message is set aside for an operator. |
 | `saga-forge.transport.initial-backoff` | `1s` | Wait after a message's first failed delivery, doubled per further failure. |

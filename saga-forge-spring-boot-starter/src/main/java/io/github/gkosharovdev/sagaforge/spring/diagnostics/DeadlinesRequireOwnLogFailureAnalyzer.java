@@ -56,7 +56,9 @@ public class DeadlinesRequireOwnLogFailureAnalyzer
   }
 
   private boolean interopActive() {
-    return environment.getProperty("saga-forge.transport.modulith-interop", Boolean.class, true)
+    // 014 D9: with the property not set, a model with deadlines keeps the own log, so only an
+    // explicit true can refuse a deadline.
+    return environment.getProperty("saga-forge.transport.modulith-interop", Boolean.class, false)
         && ClassUtils.isPresent(MODULITH_REGISTRY, getClass().getClassLoader());
   }
 }

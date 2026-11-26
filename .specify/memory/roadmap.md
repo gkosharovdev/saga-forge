@@ -67,10 +67,10 @@ building on unfinished work.
 | 011 | Saga outcome events, `COMPENSATION_FAILED` rename, one unit of work (**done**, PR #18) | SF-1 | G-ADOPT-01, G-011-02 | W1, W2 | P1 |
 | 012 | Outbox command failure feedback (**done**, `specs/012-outbox-command-failure-feedback`) | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
 | 013 | Active/standby relay (**done**, `specs/013-active-standby-relay`) | SF-6 | G-007-09 | W9 | P1 |
-| 014 | Publish once: Spring events reach sagas, saga events reach Spring (**next**, rescoped 2026-11-26: two logs, no shared outbox) | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
+| 014 | Publish once: Spring events reach sagas, saga events reach Spring (**done** 2026-11-26, `specs/014-publish-once`; container suites pending, G-014-06) | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery (**done** 2026-11-26, `specs/015-saga-operations`, without retry) | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05, G-013-05 | W10 | P1 |
 | 015b | Retry a failed saga from its failed step (split from 015; after 014 and 016) | SF-5 | new G-015-01 | W10 (rest) | P1 |
-| 016 | Marker SPI and jMolecules adapter | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
+| 016 | Marker SPI and jMolecules adapter (**next**) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
 | 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
@@ -191,6 +191,9 @@ commit, or abort). Whether the Modulith interop store needs the same lease.
 twice and never reorder. Killing the active node hands over within the lease time.
 
 ### 014: Publish once: Spring events reach sagas, saga events reach Spring
+
+**Implemented** (2026-11-26, `specs/014-publish-once`), tested without containers; the container suites still have to
+run (G-014-06).
 
 **Rescoped** (user decision, 2026-11-26). booking-service needs deadlines, which Modulith's publication registry cannot
 hold (G-017-01), so it runs with `saga-forge.transport.modulith-interop=false`: Saga Forge keeps its own message log
