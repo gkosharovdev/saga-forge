@@ -1646,3 +1646,18 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   changes; an application drains before switching.
 - **Origin**: user discussion, 2026-11-26.
 - **Status**: open (document; a migration is not planned).
+
+### G-014-04: With `ImmediateDispatchOutbox`, a fanned-out event reaches its source instance as a duplicate
+- **Description**: 014's fan-out (Property 47) hands a recorded event its own instance ran in process to the outbox when
+  another saga type has a step for it. The transport delivers it with the stored `sourceSagaId`, so the source instance
+  gets no result. The hand-assembled runtime's default `ImmediateDispatchOutbox` dispatches through
+  `EventDispatcher.dispatch(event)`, which carries no source, so there the source instance reports `DUPLICATE`.
+- **Origin**: `specs/014-publish-once/research.md` R6 (planned).
+- **Status**: accepted (harmless; `EventDispatcher` not widened for an at-most-once fallback, G-ENG-07).
+
+### G-014-05: An event published in a host transaction waits for the relay's next poll
+- **Description**: `Relay.publish` signals the coordinator right after appending, but inside a joined host transaction
+  the message becomes visible only at the host's commit, so it is delivered at the next poll (up to `poll-interval`).
+  Applies to the inbound route and to `EventPublisher` alike.
+- **Origin**: `specs/014-publish-once/research.md` R9.
+- **Status**: open (a commit hook on `LocalTransaction` would signal after commit; a core SPI change of its own).
