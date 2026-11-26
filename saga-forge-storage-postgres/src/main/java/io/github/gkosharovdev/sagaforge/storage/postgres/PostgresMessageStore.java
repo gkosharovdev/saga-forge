@@ -2,9 +2,11 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DuplicateMessageException;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderElection;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeadershipLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaseLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
@@ -35,9 +37,10 @@ import java.util.stream.Collectors;
 import javax.sql.DataSource;
 
 /**
- * {@link MessageStore} over the {@code saga_message_store} and {@code saga_message_store_consumer}
+ * {@link MessageStore} over the {@code saga_message_store} and {@code saga_message_store_leader}
  * tables of {@code schema.sql} ({@code specs/007-in-memory-transport}
- * contracts/postgres-message-log.md).
+ * contracts/postgres-message-log.md, {@code specs/013-active-standby-relay}
+ * contracts/leader-election-spi.md).
  *
  * <ul>
  *   <li>Methods taking a {@link LocalTransaction} use its {@code java.sql.Connection} resource, as
@@ -49,7 +52,9 @@ import javax.sql.DataSource;
  *       configured class loader; a payload that cannot be read comes back in {@link
  *       LeasedMessages#unreadable()}.
  *   <li>Leasing is one statement: due, unleased heads of their ordering key, locked with {@code FOR
- *       UPDATE SKIP LOCKED} and leased in the same {@code UPDATE}.
+ *       UPDATE SKIP LOCKED} and leased in the same {@code UPDATE}, fenced: the same transaction
+ *       first holds the leadership row with {@code FOR SHARE} if the caller's lease is current, so
+ *       a takeover waits until the lease commits.
  * </ul>
  *
  * <p>SQL failures propagate as {@link UncheckedSqlException}. Thread-safe.
@@ -64,6 +69,7 @@ public class PostgresMessageStore implements MessageStore {
 
   private final DataSource dataSource;
   private final ClassLoader payloadClassLoader;
+  private final PostgresLeaderElection leaderElection;
 
   /**
    * @param dataSource the database holding saga state; non-null
@@ -85,6 +91,12 @@ public class PostgresMessageStore implements MessageStore {
     }
     this.dataSource = dataSource;
     this.payloadClassLoader = payloadClassLoader;
+    this.leaderElection = new PostgresLeaderElection(dataSource);
+  }
+
+  @Override
+  public LeaderElection leaderElection() {
+    return leaderElection;
   }
 
   // ----- append
@@ -236,7 +248,7 @@ public class PostgresMessageStore implements MessageStore {
   // --------------------------------------------------------------------
 
   @Override
-  public LeasedMessages lease(String consumerId, Instant now, Duration leaseDuration, int limit) {
+  public LeasedMessages lease(LeaderLease leader, Instant now, Duration leaseDuration, int limit) {
     String sql =
         "WITH due AS (SELECT m.position FROM saga_message_store m"
             + " WHERE m.status = 'UNCONSUMED' AND m.next_attempt_at <= ?"
@@ -251,11 +263,14 @@ public class PostgresMessageStore implements MessageStore {
         inOwnTransaction(
             "lease messages",
             connection -> {
+              if (!PostgresLeaderElection.holdIfCurrent(connection, leader, now)) {
+                throw new LeadershipLostException(leader);
+              }
               try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setObject(1, utc(now));
                 statement.setObject(2, utc(now));
                 statement.setInt(3, limit);
-                statement.setString(4, consumerId);
+                statement.setString(4, leader.holderId());
                 statement.setObject(5, utc(now.plus(leaseDuration)));
                 return readAll(statement, true);
               }
@@ -535,52 +550,6 @@ public class PostgresMessageStore implements MessageStore {
         });
   }
 
-  @Override
-  public void heartbeat(ConsumerHeartbeat heartbeat) {
-    inOwnTransaction(
-        "write the heartbeat of " + heartbeat.consumerId(),
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "INSERT INTO saga_message_store_consumer"
-                      + " (consumer_id, host, started_at, last_seen_at) VALUES (?, ?, ?, ?) ON CONFLICT (consumer_id)"
-                      + " DO UPDATE SET host = EXCLUDED.host, last_seen_at = EXCLUDED.last_seen_at")) {
-            statement.setString(1, heartbeat.consumerId());
-            statement.setString(2, heartbeat.host());
-            statement.setObject(3, utc(heartbeat.startedAt()));
-            statement.setObject(4, utc(heartbeat.lastSeenAt()));
-            statement.executeUpdate();
-          }
-          return null;
-        });
-  }
-
-  @Override
-  public List<ConsumerHeartbeat> liveConsumers(Instant since) {
-    return inOwnTransaction(
-        "list live consumers",
-        connection -> {
-          try (PreparedStatement statement =
-              connection.prepareStatement(
-                  "SELECT consumer_id, host, started_at,"
-                      + " last_seen_at FROM saga_message_store_consumer WHERE last_seen_at >= ? ORDER BY consumer_id")) {
-            statement.setObject(1, utc(since));
-            List<ConsumerHeartbeat> beats = new ArrayList<>();
-            try (ResultSet resultSet = statement.executeQuery()) {
-              while (resultSet.next()) {
-                beats.add(
-                    new ConsumerHeartbeat(
-                        resultSet.getString(1),
-                        resultSet.getString(2),
-                        instant(resultSet, 3),
-                        instant(resultSet, 4)));
-              }
-            }
-            return beats;
-          }
-        });
-  }
-
   // ----- helpers
   // ------------------------------------------------------------------------------------------
 
@@ -683,36 +652,8 @@ public class PostgresMessageStore implements MessageStore {
     }
   }
 
-  @FunctionalInterface
-  private interface SqlWork<T> {
-    T run(Connection connection) throws SQLException;
-  }
-
-  private <T> T inOwnTransaction(String action, SqlWork<T> work) {
-    try (Connection connection = dataSource.getConnection()) {
-      boolean autoCommit = connection.getAutoCommit();
-      connection.setAutoCommit(false);
-      try {
-        T result = work.run(connection);
-        connection.commit();
-        return result;
-      } catch (SQLException | RuntimeException | Error e) {
-        try {
-          connection.rollback();
-        } catch (SQLException rollbackFailure) {
-          e.addSuppressed(rollbackFailure);
-        }
-        throw e;
-      } finally {
-        try {
-          connection.setAutoCommit(autoCommit);
-        } catch (SQLException ignored) {
-          // The connection is closed next; a broken one is discarded by the pool.
-        }
-      }
-    } catch (SQLException e) {
-      throw new UncheckedSqlException("could not " + action, e);
-    }
+  private <T> T inOwnTransaction(String action, OwnTransaction.SqlWork<T> work) {
+    return OwnTransaction.run(dataSource, action, work);
   }
 
   private static boolean isUniqueViolation(SQLException e) {

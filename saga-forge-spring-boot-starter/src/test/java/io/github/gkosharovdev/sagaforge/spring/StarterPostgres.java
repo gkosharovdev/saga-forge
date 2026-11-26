@@ -44,7 +44,7 @@ public final class StarterPostgres {
   public static void reset() {
     execute(
         "TRUNCATE saga_instance CASCADE;"
-            + "TRUNCATE saga_message_store, saga_message_store_consumer RESTART IDENTITY;"
+            + "TRUNCATE saga_message_store, saga_message_store_leader RESTART IDENTITY;"
             + "DO $$ BEGIN IF to_regclass('event_publication') IS NOT NULL THEN"
             + " EXECUTE 'TRUNCATE event_publication'; END IF; END $$;"
             + "DO $$ BEGIN IF to_regclass('event_publication_archive') IS NOT NULL THEN"

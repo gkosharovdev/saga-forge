@@ -9,16 +9,20 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.spring.SagaForgeProperties.SchemaInitialization;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.diagnostics.SagaForgeConfigurationFailureAnalyzer;
 import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithInteropConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.modulith.ModulithMessageStore;
 import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresMessageStore;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
+import java.time.Duration;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.diagnostics.FailureAnalysis;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.modulith.events.core.EventPublicationRepository;
@@ -94,6 +98,42 @@ class InMemoryTransportConfigurationTest {
               assertThat(properties.toSettings().workers()).isEqualTo(7);
               assertThat(properties.toSettings().maxAttempts()).isEqualTo(4);
               assertThat(properties.toSettings().retention()).hasDays(3);
+            });
+  }
+
+  @Test
+  @DisplayName("leadership properties are bound (013)")
+  void leadershipProperties() {
+    withDatabase()
+        .withPropertyValues(
+            "saga-forge.transport.leadership.lease-duration=20s",
+            "saga-forge.transport.leadership.renew-interval=4s",
+            "saga-forge.transport.leadership.check-interval=2s")
+        .run(
+            context ->
+                assertThat(context.getBean(TransportProperties.class).toSettings().leadership())
+                    .isEqualTo(
+                        new LeadershipSettings(
+                            Duration.ofSeconds(20), Duration.ofSeconds(4), Duration.ofSeconds(2))));
+  }
+
+  @Test
+  @DisplayName(
+      "a renew interval not shorter than the leadership lease fails startup, naming the properties")
+  void invalidLeadership() {
+    withDatabase()
+        .withPropertyValues(
+            "saga-forge.transport.leadership.lease-duration=10s",
+            "saga-forge.transport.leadership.renew-interval=10s")
+        .run(
+            context -> {
+              FailureAnalysis analysis =
+                  new SagaForgeConfigurationFailureAnalyzer().analyze(context.getStartupFailure());
+              assertThat(analysis.getDescription())
+                  .contains("saga-forge.transport.leadership")
+                  .contains("renewInterval (PT10S)")
+                  .contains("leaseDuration (PT10S)");
+              assertThat(analysis.getAction()).contains("lease-duration");
             });
   }
 

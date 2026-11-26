@@ -1,9 +1,11 @@
 package io.github.gkosharovdev.sagaforge.transport.inmemory.support;
 
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DuplicateMessageException;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderElection;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeadershipLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaseLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
@@ -22,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,6 +42,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *       database sequence would.
  *   <li>{@code markConsumed(tx, ...)} checks the lease at the call and applies on commit.
  *   <li>Every lease invariant of data-model.md holds (head of key, lease expiry, due time).
+ *   <li>Leadership (013) is one {@link LeaderLease} field under the store's monitor, so a fenced
+ *       {@link #lease} and an acquisition never interleave.
  *   <li>Payloads are kept as the objects appended. {@link #markUnreadable(String)} makes a
  *       message's payload undecodable; {@link #failNext(Operation, RuntimeException)} injects one
  *       failure into an operation; {@link #pauseLeasing(boolean)} makes leases return nothing, like
@@ -60,7 +65,9 @@ public final class InMemoryMessageStore implements MessageStore {
   private final Map<String, StoredMessage> messages = new LinkedHashMap<>();
   private final Set<String> unreadable = ConcurrentHashMap.newKeySet();
   private final Map<Operation, RuntimeException> failures = new EnumMap<>(Operation.class);
-  private final Map<String, ConsumerHeartbeat> heartbeats = new ConcurrentHashMap<>();
+  private final LeaderElection leaderElection = new MonitorLeaderElection();
+  private LeaderLease leader;
+  private long lastFencingToken;
   private volatile boolean leasingPaused;
   private final Map<String, RuntimeException> appendFailures = new ConcurrentHashMap<>();
 
@@ -98,14 +105,24 @@ public final class InMemoryMessageStore implements MessageStore {
   }
 
   @Override
-  public LeasedMessages lease(String consumerId, Instant now, Duration leaseDuration, int limit) {
+  public LeaderElection leaderElection() {
+    return leaderElection;
+  }
+
+  @Override
+  public LeasedMessages lease(
+      LeaderLease leaderLease, Instant now, Duration leaseDuration, int limit) {
     injected(Operation.LEASE);
     if (leasingPaused) {
       return new LeasedMessages(List.of(), List.of());
     }
+    String consumerId = leaderLease.holderId();
     List<StoredMessage> readable = new ArrayList<>();
     List<UnreadableMessageException> unreadableLeases = new ArrayList<>();
     synchronized (this) {
+      if (!isCurrent(leaderLease, now)) {
+        throw new LeadershipLostException(leaderLease);
+      }
       Set<String> blockedKeys = new HashSet<>();
       for (StoredMessage message : messages.values()) {
         if (readable.size() + unreadableLeases.size() >= limit) {
@@ -373,14 +390,55 @@ public final class InMemoryMessageStore implements MessageStore {
     return purged.size();
   }
 
-  @Override
-  public void heartbeat(ConsumerHeartbeat heartbeat) {
-    heartbeats.put(heartbeat.consumerId(), heartbeat);
+  private boolean isCurrent(LeaderLease lease, Instant now) {
+    return leader != null
+        && leader.fencingToken() == lease.fencingToken()
+        && !leader.isExpiredAt(now);
   }
 
-  @Override
-  public List<ConsumerHeartbeat> liveConsumers(Instant since) {
-    return heartbeats.values().stream().filter(beat -> !beat.lastSeenAt().isBefore(since)).toList();
+  /** The store's leadership, guarded by the store's monitor (contracts/leader-election-spi.md). */
+  private final class MonitorLeaderElection implements LeaderElection {
+
+    @Override
+    public Optional<LeaderLease> tryAcquire(
+        String candidateId, String host, Instant now, Duration leaseDuration) {
+      synchronized (InMemoryMessageStore.this) {
+        if (leader != null && !leader.isExpiredAt(now)) {
+          return Optional.empty();
+        }
+        leader =
+            new LeaderLease(candidateId, host, ++lastFencingToken, now, now.plus(leaseDuration));
+        return Optional.of(leader);
+      }
+    }
+
+    @Override
+    public Optional<LeaderLease> renew(LeaderLease lease, Instant now, Duration leaseDuration) {
+      synchronized (InMemoryMessageStore.this) {
+        if (!isCurrent(lease, now)) {
+          return Optional.empty();
+        }
+        leader = leader.renewedUntil(now.plus(leaseDuration));
+        return Optional.of(leader);
+      }
+    }
+
+    @Override
+    public void release(LeaderLease lease, Instant now) {
+      synchronized (InMemoryMessageStore.this) {
+        if (leader != null && leader.fencingToken() == lease.fencingToken()) {
+          Instant end = now.isBefore(leader.acquiredAt()) ? leader.acquiredAt() : now;
+          leader = leader.renewedUntil(end.isBefore(leader.expiresAt()) ? end : leader.expiresAt());
+        }
+      }
+    }
+
+    @Override
+    public Optional<LeaderLease> current() {
+      synchronized (InMemoryMessageStore.this) {
+        return Optional.ofNullable(leader);
+      }
+    }
   }
 
   /**

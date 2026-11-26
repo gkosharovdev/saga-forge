@@ -1,4 +1,4 @@
-# Limitations to design around (0.1.0)
+# Limitations to design around (0.4.0)
 
 These are known limits of the current release, most important first for a Spring Boot monolith on Postgres and the
 in-memory transport. Each has an id in the project's gap register (`.specify/memory/memory.md`), so you can follow its
@@ -6,10 +6,10 @@ status in later releases.
 
 | # | Limitation | Design around it |
 |---|---|---|
-| 1 | **One running application instance per database** (G-007-09). The in-memory transport's relay assumes it is the only consumer of its message store; a second instance is detected and logged, not coordinated. | Run one replica, or put sagas in a single-replica deployment. Blue/green deploys must stop the old instance before the new one delivers. |
+| 1 | **One delivering instance per database** (G-013-01, G-013-02). Several instances share the message store, but only the elected relay delivers: delivery throughput is that of one instance, and a message appended on a standby waits for the leader's next poll (up to `saga-forge.transport.poll-interval`). | Size the delivering instance for the whole message rate; keep handlers short. Spread load with the Kafka transport once it exists. |
 | 2 | **No operator path out of `COMPENSATION_FAILED`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=compensation_failed}`; repair by hand. |
 | 3 | **Retry backoff is in-process** (G-005-01): capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Keep retry policies short; for a long wait use a deadline whose timeout step re-arms it, or a scheduled command (see [Deadlines](deadlines.md)). |
-| 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) and assume one running instance per message store (G-017-02). A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
+| 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
 | 5 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
 | 6 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
 | 7 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |

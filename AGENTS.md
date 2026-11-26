@@ -150,6 +150,21 @@
   `saga_forge.command.failures`, a `saga_forge.handle` span per report. Fixture: `SagaFixture.Builder.outboxCommandAttempts`
   (default 1); `saga-forge-test` has the in-memory transport as a test dependency for `OutboxCommandFailureParityTest`.
   Property 39.
+- Implemented and tested, including container suites, added by `specs/013-active-standby-relay` (closes G-007-09 and
+  G-017-02): several application instances share one message store with one active relay. Core gains
+  `core.spi.store.LeaderElection` (`tryAcquire`/`renew`/`release`/`current`), `LeaderLease` (holder, host, fencing
+  token, expiry), `LeadershipLostException`, `MessageStore.leaderElection()` and the fenced
+  `MessageStore.lease(LeaderLease, now, leaseDuration, limit)`; `ConsumerHeartbeat` and the heartbeat methods are
+  removed. The transport's `LeaderElector` (client-go shaped: `LeadershipSettings` lease 30 s, renew 10 s, check 5 s;
+  local distrust at `lastCallStart + lease - renewInterval`) drives the relay, which leases only while it leads, steps
+  down when fenced, finishes and keeps renewing its in-flight deliveries, and runs the retention sweep only as leader;
+  `InMemoryTransport.leadership()` → `LeadershipStatus` (`RelayRole` `ACTIVE`/`STANDBY`). Postgres
+  `PostgresLeaderElection` over `saga_message_store_leader` (one row, fencing token incremented per acquisition); the
+  lease transaction holds the row `FOR SHARE`, so a takeover waits for it; existing databases apply
+  `schema-upgrade-013.sql` (drops `saga_message_store_consumer`). `ModulithMessageStore` delegates the leadership to
+  its records store. Starter: `saga-forge.transport.leadership.*` (replacing `heartbeat-interval`), the `leadership`
+  object in the `sagaforge` endpoint, health `DEGRADED` while leaderless. Telemetry gauge `saga_forge.relay.active`,
+  counter `saga_forge.relay.leadership_changes`, log events `saga.transport.leadership.*`.
 - Whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on 2026-11-25 (1,881 tests, 0 failures; the release build `-P release` with Javadoc also passes).
 - Implemented and tested, added by `specs/017-saga-deadlines` (closes G-ENG-25; taken ahead of 013): saga deadlines and
   scheduled commands. Core gains `@StartDeadline(name, duration | durationFrom, cancelledBy)` (repeatable) and
@@ -324,8 +339,8 @@
 - In-memory transport (007), see memory.md G-007-01 to G-007-08: Quarkus extension and the constitution amendment
   pending (G-007-01); starter detection deferred (G-007-02); a redelivered start event does not recover a stranded
   start (G-007-03); delivery order is per aggregate, not per saga instance (G-007-04); relay logic may need a shared
-  module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); one running instance per
-  log (FR-021, G-007-09).
+  module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); several instances share a
+  log with one active relay since 013 (G-007-09 closed).
 - Spring Boot starter (008), see memory.md G-008-01 to G-008-04: Modulith event externalization and `Scenario`
   support deferred (G-008-01); the Actuator endpoint is read-only (G-008-02); events published through Spring's own
   `ApplicationEventPublisher` do not reach sagas (G-008-03); repository tests use `ApplicationContextRunner` /
@@ -352,12 +367,17 @@
   the reaction is always full compensation (G-012-03); a crash after the reaction's first commit resumes only on the
   next event (G-012-04); the fixture redelivers without backoff (G-012-05).
 
-- Saga deadlines (017), see memory.md G-017-01 to G-017-10: none with Spring Modulith interop (G-017-01); one running
-  instance per message store until 013 (G-017-02); overdue messages run in stored order (G-017-03); latency up to the
+- Saga deadlines (017), see memory.md G-017-01 to G-017-10: none with Spring Modulith interop (G-017-01); overdue messages run in stored order (G-017-03); latency up to the
   poll interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command
   is not cancelled with its saga (G-017-06); a deadline does not resume a `COMPENSATING` instance (G-017-07);
   implementation decisions (G-017-08); the fixture duplicates the scheduling (G-017-09); no Spring example or Spring
   container test for deadlines (G-017-10).
+
+- Active/standby relay (013), see memory.md G-013-01 to G-013-05: a message appended on a standby waits for the
+  leader's poll (G-013-01); delivery throughput is one relay's, no partitioned leasing (G-013-02); takeover timing, not
+  safety, depends on instance clocks (G-013-03); the redelivery-after-commit failover case is not forced in a test
+  (G-013-04); a failover between creation write and first unit of work strands the start (G-013-05, with G-ENG-05).
+  Never deliver outside `MessageStore.lease(LeaderLease, ...)`: the fencing token is the multi-instance safety.
 
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,

@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
@@ -11,6 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
@@ -23,13 +25,18 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,7 +45,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link PostgresMessageStore} against the {@link MessageStoreContract} plus Postgres-only cases
- * (specs/007 tasks.md T048): concurrent consumers and payload round trips (FR-004).
+ * (specs/007 tasks.md T048): concurrent lease calls and payload round trips (FR-004), and a
+ * takeover waiting for an open lease transaction ({@code specs/013-active-standby-relay} C12).
  */
 @Tag("container")
 class PostgresMessageStoreContainerTest extends MessageStoreContract {
@@ -138,7 +146,7 @@ class PostgresMessageStoreContainerTest extends MessageStoreContract {
                         T0))
             .toArray(NewMessage[]::new));
 
-    List<StoredMessage> leased = log.lease("c", T0, LEASE, 10).readable();
+    List<StoredMessage> leased = lease("c", T0, 10).readable();
 
     assertThat(leased).extracting(StoredMessage::payload).containsExactlyElementsOf(outcomes);
   }
@@ -179,7 +187,7 @@ class PostgresMessageStoreContainerTest extends MessageStoreContract {
         new NewMessage(
             "r", MessageKind.EVENT, Rich.class.getName(), rich, null, "k3", null, null, T0));
 
-    List<StoredMessage> leased = log.lease("c", T0, LEASE, 10).readable();
+    List<StoredMessage> leased = lease("c", T0, 10).readable();
 
     assertThat(leased)
         .extracting(StoredMessage::payload)
@@ -188,21 +196,22 @@ class PostgresMessageStoreContainerTest extends MessageStoreContract {
   }
 
   @Test
-  @DisplayName("concurrent consumers never lease the same message, and only the head of each key")
+  @DisplayName("concurrent lease calls never lease the same message, and only the head of each key")
   void concurrentConsumers() throws Exception {
     List<NewMessage> entries = new ArrayList<>();
     for (int i = 0; i < 200; i++) {
       entries.add(event("m-" + i, "k" + (i % 20)));
     }
     appendCommitted(entries.toArray(NewMessage[]::new));
+    LeaderLease leader =
+        log.leaderElection().tryAcquire("c", "host-c", T0, LEADERSHIP).orElseThrow();
     ExecutorService pool = Executors.newFixedThreadPool(4);
     try {
       List<Callable<List<String>>> consumers = new ArrayList<>();
       for (int c = 0; c < 4; c++) {
-        String consumer = "c" + c;
         consumers.add(
             () ->
-                log.lease(consumer, T0, LEASE, 50).readable().stream()
+                log.lease(leader, T0, LEASE, 50).readable().stream()
                     .map(StoredMessage::messageId)
                     .toList());
       }
@@ -217,5 +226,41 @@ class PostgresMessageStoreContainerTest extends MessageStoreContract {
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  @Test
+  @DisplayName(
+      "C12: a takeover waits for the old leader's open lease transaction; its messages keep their lease")
+  void leaseBlocksTakeover() throws Exception {
+    appendCommitted(event("m", "k"));
+    LeaderLease a = log.leaderElection().tryAcquire("A", "host-A", T0, LEADERSHIP).orElseThrow();
+    ExecutorService candidate = Executors.newSingleThreadExecutor();
+    try (Connection leasing = dataSource.getConnection()) {
+      leasing.setAutoCommit(false);
+      assertThat(PostgresLeaderElection.holdIfCurrent(leasing, a, T0.plusSeconds(1))).isTrue();
+      try (PreparedStatement statement =
+          leasing.prepareStatement(
+              "UPDATE saga_message_store SET leased_by = 'A', leased_until = ? WHERE message_id = 'm'")) {
+        statement.setObject(1, OffsetDateTime.ofInstant(T0.plus(LEASE), ZoneOffset.UTC));
+        statement.executeUpdate();
+      }
+
+      Future<Optional<LeaderLease>> takeover =
+          candidate.submit(
+              () ->
+                  log.leaderElection().tryAcquire("B", "host-B", T0.plus(LEADERSHIP), LEADERSHIP));
+      assertThatThrownBy(() -> takeover.get(500, TimeUnit.MILLISECONDS))
+          .isInstanceOf(TimeoutException.class);
+
+      leasing.commit();
+      assertThat(takeover.get(10, TimeUnit.SECONDS)).map(LeaderLease::fencingToken).contains(2L);
+    } finally {
+      candidate.shutdownNow();
+    }
+    assertThat(
+            PostgresTestSupport.queryRows(
+                "SELECT leased_by FROM saga_message_store WHERE message_id = ?", "m"))
+        .singleElement()
+        .satisfies(row -> assertThat(row.get("leased_by")).isEqualTo("A"));
   }
 }

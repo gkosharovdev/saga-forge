@@ -16,14 +16,14 @@ snippet, so you can open it for the imports and the surrounding class.
 
 | Page | Read it when you want to |
 |---|---|
-| [Getting started](getting-started.md) | add Saga Forge 0.1.0 to a Spring Boot 4.1 / Java 21 application and create the schema |
+| [Getting started](getting-started.md) | add Saga Forge 0.4.0 to a Spring Boot 4.1 / Java 21 application and create the schema |
 | [Model reference](model-reference.md) | know where each annotation goes, what it needs next to it, and its attributes |
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
 | [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
-| [Limitations](limitations.md) | know what to design around in 0.1.0 |
+| [Limitations](limitations.md) | know what to design around in 0.4.0 |
 
 API reference: the Javadoc of every published module is on
 [javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core) (`saga-forge-core`, `saga-forge-runtime`,
@@ -55,7 +55,7 @@ Saga Forge uses DDD / EventStorming terms (full glossary in
 
 # Getting started
 
-Saga Forge 0.1.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
+Saga Forge 0.4.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
 under the group `io.github.gkosharovdev`.
 
 | Artifact | Use it for | Scope |
@@ -73,12 +73,12 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -87,7 +87,7 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -96,10 +96,10 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.1.0")
-    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.1.0")
+    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.4.0")
+    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.4.0")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
-    testImplementation("io.github.gkosharovdev:saga-forge-test:0.1.0")
+    testImplementation("io.github.gkosharovdev:saga-forge-test:0.4.0")
 }
 ```
 
@@ -117,7 +117,7 @@ spring.datasource.password=orders
 ```
 
 Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_lifecycle_history`,
-`saga_message_store`, `saga_message_store_consumer`) are defined in the classpath resource
+`saga_message_store`, `saga_message_store_leader`) are defined in the classpath resource
 `io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql` inside `saga-forge-storage-postgres`.
 
 - **Development**: let the starter create them in an empty database:
@@ -126,7 +126,7 @@ Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_
   `initialize-schema=never` (the default). With `never`, startup fails if the tables are missing:
   `Saga Forge's tables [...] do not exist in the database.`
 
-A database created from the 0.1.0 `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
+A database created from the current `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
 [Operations](operations.md#schema-and-upgrades) for when they apply.
 
 ## 3. A saga
@@ -1433,6 +1433,10 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
 - Deadlines that came due while the application was down run once it is back. Each runs at most once; overdue
   messages are delivered in the order they were stored, not strictly in due order.
 - A deadline the relay has already leased when the awaited event cancels it is still delivered, and ignored.
+- With several application instances, a deadline is delivered once, by whichever instance's relay leads when it
+  comes due; one started or cancelled on any instance behaves the same. During a takeover after a crash it can run up
+  to `saga-forge.transport.leadership.lease-duration + check-interval` late (see
+  [Running several instances](operations.md#running-several-instances)).
 
 ## Testing
 
@@ -1478,7 +1482,7 @@ transport or Spring context, no JUnit extension: a failed expectation throws `Sa
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -1773,7 +1777,9 @@ with your own bean.
 | `saga-forge.transport.lease-batch-size` | `100` | Most messages leased at once. |
 | `saga-forge.transport.retention` | `7d` | How long consumed messages are kept. |
 | `saga-forge.transport.retention-sweep-interval` | `1h` | How often consumed messages older than the retention are removed. |
-| `saga-forge.transport.heartbeat-interval` | `30s` | How often this instance refreshes its heartbeat in the message store. |
+| `saga-forge.transport.leadership.lease-duration` | `30s` | How long the delivering instance's leadership lasts without renewal; after a crash a standby takes over once it expires. |
+| `saga-forge.transport.leadership.renew-interval` | `10s` | How often the delivering instance renews its leadership; shorter than the lease duration. |
+| `saga-forge.transport.leadership.check-interval` | `5s` | How often a standby instance checks whether it can take over; shorter than the lease duration. |
 | `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
 | `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
 | `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |
@@ -1787,9 +1793,9 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
-  `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
+  `saga-forge.storage.postgres.initialize-schema=always`. The current `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
   applies to in its header comment. Run each once, in one transaction, while no runtime is running. Release notes list
   any new upgrade script.
@@ -1797,6 +1803,8 @@ with your own bean.
   history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
 - `schema-upgrade-017.sql` adds the message store's due time and the `CANCELLED` status, for deadlines and scheduled
   commands.
+- `schema-upgrade-013.sql` (after `-017.sql`) creates the leadership table `saga_message_store_leader` and drops the
+  heartbeat table `saga_message_store_consumer`. Stop every instance before applying it.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -1812,11 +1820,19 @@ management.endpoints.web.exposure.include=health,sagaforge
   age of the oldest unconsumed message:
 
   ```json
-  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S",
+    "leadership": { "role": "STANDBY", "relayId": "a91e…",
+      "leader": { "holderId": "7f3c…", "holderHost": "orders-1", "fencingToken": 12,
+                  "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } } }
   ```
 
+  `role` is this instance's (`ACTIVE` or `STANDBY`); `leader` is the leadership record as last seen, absent before
+  any was seen.
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
-  delivery that failed `saga-forge.transport.max-attempts` times).
+  delivery that failed `saga-forge.transport.max-attempts` times), `DEGRADED` while no instance has led the message
+  store for longer than one leadership lease, and `UP` otherwise. Its details carry `role`, `fencingToken` and, on a
+  standby, `leader` as `holderId@holderHost`. Spring Boot leaves `DEGRADED` out of the overall health unless you add
+  it to `management.endpoint.health.status.order` (see [Running several instances](#running-several-instances)).
 - Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
 - There is no endpoint for saga instances and no write action yet; inspect `saga_instance`, `saga_context` and
   `saga_lifecycle_history` directly.
@@ -1882,6 +1898,8 @@ Metrics:
 | `saga_forge.command.failures` | counter | — | `classification` (`final`, `exhausted`): outbox commands the transport gave up on and reported to their saga |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+| `saga_forge.relay.active` | gauge | — | 1 while this instance's relay leads its message store, else 0 |
+| `saga_forge.relay.leadership_changes` | counter | — | `saga_forge.leadership.change` (`acquired`, `lost`, `released`) |
 
 A deadline delivery's `saga_forge.handle` span carries `saga_forge.deadline.name`; a delivery span of a message with a
 due time carries `saga_forge.message.not_before` on its first attempt. A deadline that arrives when its instance no
@@ -1913,6 +1931,40 @@ saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
 saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 ```
 
+
+## Running several instances
+
+Any number of instances can run over one database. Every instance accepts requests, runs units of work and appends
+messages; the transports elect one **active** relay that delivers every message, deadline and scheduled command, while
+the others are **standby**.
+
+| Event | What happens | Takeover |
+|---|---|---|
+| Graceful stop of the active instance | It finishes its in-flight deliveries and releases the leadership | within `check-interval` (5 s) |
+| Crash, network partition or long pause | Its leadership expires; a standby acquires a newer fencing token, and the store refuses the old one's leases | within `lease-duration + check-interval` (35 s) |
+| Database unreachable for the active instance | It stops leasing one `renew-interval` before its lease ends by its own clock | as for a crash |
+
+Delivery stays at least once: a message the old leader held may be delivered again by the new one, so handlers pass
+their `CommandId` on. Delivery throughput is that of one instance; partitioned delivery is not supported.
+
+Log events (logger of the transport): `saga.transport.leadership.acquired` (INFO, with `relay`, `host`,
+`fencingToken`, `previousHolder`), `saga.transport.leadership.released` (INFO), `saga.transport.leadership.lost`
+(WARNING, `cause=renewRefused`, `trustExpired` or `fenced`, and `newHolder` when known) and
+`saga.transport.leadership.checkFailed` (WARNING, the store could not be reached; the role does not change by itself).
+
+To make a leaderless store show in the overall health:
+
+```properties
+management.endpoint.health.status.order=down,out-of-service,degraded,up,unknown
+management.endpoint.health.status.http-mapping.degraded=200
+```
+
+Alert on `max(saga_forge.relay.active) == 0` across instances for longer than `lease-duration + check-interval`.
+
+**Why one active relay.** One consumer keeps per-aggregate order and due times simple, and a leadership lease with a
+fencing token keeps a paused or partitioned instance from delivering beside the new leader. The design and the prior
+art behind it (Kubernetes leases, Kafka epochs, Axon token claims and others) are in the
+[architecture notes](../architecture.md#how-other-frameworks-solved-the-same-problems).
 
 ## Outcome events
 
@@ -2004,7 +2056,7 @@ after its saga compensated runs its handler again but does not compensate twice.
 
 <!-- docs/guide/limitations.md -->
 
-# Limitations to design around (0.1.0)
+# Limitations to design around (0.4.0)
 
 These are known limits of the current release, most important first for a Spring Boot monolith on Postgres and the
 in-memory transport. Each has an id in the project's gap register (`.specify/memory/memory.md`), so you can follow its
@@ -2012,10 +2064,10 @@ status in later releases.
 
 | # | Limitation | Design around it |
 |---|---|---|
-| 1 | **One running application instance per database** (G-007-09). The in-memory transport's relay assumes it is the only consumer of its message store; a second instance is detected and logged, not coordinated. | Run one replica, or put sagas in a single-replica deployment. Blue/green deploys must stop the old instance before the new one delivers. |
+| 1 | **One delivering instance per database** (G-013-01, G-013-02). Several instances share the message store, but only the elected relay delivers: delivery throughput is that of one instance, and a message appended on a standby waits for the leader's next poll (up to `saga-forge.transport.poll-interval`). | Size the delivering instance for the whole message rate; keep handlers short. Spread load with the Kafka transport once it exists. |
 | 2 | **No operator path out of `COMPENSATION_FAILED`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=compensation_failed}`; repair by hand. |
 | 3 | **Retry backoff is in-process** (G-005-01): capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Keep retry policies short; for a long wait use a deadline whose timeout step re-arms it, or a scheduled command (see [Deadlines](deadlines.md)). |
-| 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) and assume one running instance per message store (G-017-02). A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
+| 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
 | 5 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
 | 6 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
 | 7 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |

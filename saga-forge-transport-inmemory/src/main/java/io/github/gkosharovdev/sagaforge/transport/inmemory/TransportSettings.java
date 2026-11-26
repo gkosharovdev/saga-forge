@@ -19,7 +19,8 @@ import java.time.Duration;
  * @param retention how long consumed messages are kept (FR-019)
  * @param retentionSweepInterval how often consumed messages older than {@code retention} are
  *     removed
- * @param heartbeatInterval how often this transport refreshes its heartbeat (FR-021)
+ * @param leadership the leader election timings of this transport's relay ({@code
+ *     specs/013-active-standby-relay}); non-null
  */
 public record TransportSettings(
     int workers,
@@ -31,7 +32,7 @@ public record TransportSettings(
     int leaseBatchSize,
     Duration retention,
     Duration retentionSweepInterval,
-    Duration heartbeatInterval) {
+    LeadershipSettings leadership) {
 
   public TransportSettings {
     positive(workers, "workers");
@@ -43,7 +44,9 @@ public record TransportSettings(
     positive(pollInterval, "pollInterval");
     positive(retention, "retention");
     positive(retentionSweepInterval, "retentionSweepInterval");
-    positive(heartbeatInterval, "heartbeatInterval");
+    if (leadership == null) {
+      throw new IllegalArgumentException("leadership must not be null");
+    }
     if (maxBackoff.compareTo(initialBackoff) < 0) {
       throw new IllegalArgumentException("maxBackoff must not be shorter than initialBackoff");
     }
@@ -51,7 +54,7 @@ public record TransportSettings(
 
   /**
    * @return 4 workers, 10 attempts, backoff 1 s to 1 min, 5 min lease, 500 ms poll, 100 per batch,
-   *     7 days kept
+   *     7 days kept, {@link LeadershipSettings#defaults()}
    */
   public static TransportSettings defaults() {
     return new TransportSettings(
@@ -64,7 +67,7 @@ public record TransportSettings(
         100,
         Duration.ofDays(7),
         Duration.ofHours(1),
-        Duration.ofSeconds(30));
+        LeadershipSettings.defaults());
   }
 
   /**
@@ -81,7 +84,7 @@ public record TransportSettings(
         leaseBatchSize,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -98,7 +101,7 @@ public record TransportSettings(
         leaseBatchSize,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -115,7 +118,7 @@ public record TransportSettings(
         leaseBatchSize,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -132,7 +135,7 @@ public record TransportSettings(
         leaseBatchSize,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -149,7 +152,7 @@ public record TransportSettings(
         leaseBatchSize,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -166,7 +169,7 @@ public record TransportSettings(
         value,
         retention,
         retentionSweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
@@ -183,13 +186,13 @@ public record TransportSettings(
         leaseBatchSize,
         value,
         sweepInterval,
-        heartbeatInterval);
+        leadership);
   }
 
   /**
-   * @return these settings with {@code value} as heartbeat interval
+   * @return these settings with {@code value} as leader election timings
    */
-  public TransportSettings withHeartbeatInterval(Duration value) {
+  public TransportSettings withLeadership(LeadershipSettings value) {
     return new TransportSettings(
         workers,
         maxAttempts,

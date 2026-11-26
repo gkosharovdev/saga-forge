@@ -42,8 +42,8 @@ class InMemoryMessageStoreTest extends MessageStoreContract {
     assertThatThrownBy(() -> appendCommitted(event("a", "k1"))).isSameAs(failure);
     appendCommitted(event("a", "k1"));
     log.pauseLeasing(true);
-    assertThat(log.lease("c", T0, LEASE, 10).isEmpty()).isTrue();
+    assertThat(lease("c", T0, 10).isEmpty()).isTrue();
     log.pauseLeasing(false);
-    assertThat(log.lease("c", T0, LEASE, 10).readable()).hasSize(1);
+    assertThat(lease("c", T0, 10).readable()).hasSize(1);
   }
 }

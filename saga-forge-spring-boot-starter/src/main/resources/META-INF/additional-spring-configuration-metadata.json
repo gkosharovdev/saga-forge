@@ -55,10 +55,22 @@
       "description": "How often consumed messages older than the retention are removed."
     },
     {
-      "name": "saga-forge.transport.heartbeat-interval",
+      "name": "saga-forge.transport.leadership.lease-duration",
       "type": "java.time.Duration",
       "defaultValue": "30s",
-      "description": "How often this application instance refreshes its heartbeat in the message store."
+      "description": "How long the delivering instance's leadership of the message store lasts without renewal; a standby takes over after it expires."
+    },
+    {
+      "name": "saga-forge.transport.leadership.renew-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "10s",
+      "description": "How often the delivering instance renews its leadership; shorter than the lease duration."
+    },
+    {
+      "name": "saga-forge.transport.leadership.check-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "5s",
+      "description": "How often a standby instance tries to take over the leadership; shorter than the lease duration."
     },
     {
       "name": "saga-forge.transport.modulith-interop",

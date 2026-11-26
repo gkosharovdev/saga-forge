@@ -238,15 +238,48 @@ class StoreRecordsTest {
   }
 
   @Nested
-  @DisplayName("ConsumerHeartbeat and LeasedMessages")
+  @DisplayName("LeaderLease and LeasedMessages")
   class Others {
 
     @Test
-    @DisplayName("a heartbeat cannot be last seen before it started")
-    void heartbeat() {
-      assertThatThrownBy(() -> new ConsumerHeartbeat("c", "h", NOW, NOW.minusSeconds(1)))
+    @DisplayName("a leader lease needs a holder, a positive token and an expiry not before it")
+    void leaderLeaseRules() {
+      assertThatThrownBy(() -> new LeaderLease(" ", "h", 1, NOW, NOW.plusSeconds(30)))
           .isInstanceOf(IllegalArgumentException.class);
-      assertThat(new ConsumerHeartbeat("c", "h", NOW, NOW).consumerId()).isEqualTo("c");
+      assertThatThrownBy(() -> new LeaderLease("r", " ", 1, NOW, NOW.plusSeconds(30)))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> new LeaderLease("r", "h", 0, NOW, NOW.plusSeconds(30)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("fencingToken");
+      assertThatThrownBy(() -> new LeaderLease("r", "h", 1, NOW, NOW.minusMillis(1)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("expiresAt");
+      assertThat(new LeaderLease("r", "h", 1, NOW, NOW).isExpiredAt(NOW)).isTrue();
+    }
+
+    @Test
+    @DisplayName("a leader lease expires exactly at its expiry and keeps its token when renewed")
+    void leaderLeaseExpiryAndRenewal() {
+      var lease = new LeaderLease("r", "h", 7, NOW, NOW.plusSeconds(30));
+
+      assertThat(lease.isExpiredAt(NOW.plusSeconds(29))).isFalse();
+      assertThat(lease.isExpiredAt(NOW.plusSeconds(30))).isTrue();
+      assertThat(lease.isHeldBy("r")).isTrue();
+      assertThat(lease.isHeldBy("other")).isFalse();
+      assertThat(lease.renewedUntil(NOW.plusSeconds(60)))
+          .isEqualTo(new LeaderLease("r", "h", 7, NOW, NOW.plusSeconds(60)));
+    }
+
+    @Test
+    @DisplayName("LeadershipLostException names the stale holder and token")
+    void leadershipLost() {
+      var stale = new LeaderLease("r", "h", 3, NOW, NOW.plusSeconds(30));
+
+      assertThat(new LeadershipLostException(stale))
+          .hasMessageContaining("r")
+          .hasMessageContaining("3")
+          .extracting(LeadershipLostException::staleLease)
+          .isEqualTo(stale);
     }
 
     @Test

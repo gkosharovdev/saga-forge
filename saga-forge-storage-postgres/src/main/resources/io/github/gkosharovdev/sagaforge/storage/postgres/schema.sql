@@ -112,9 +112,14 @@ CREATE INDEX IF NOT EXISTS saga_message_store_consumed
 CREATE INDEX IF NOT EXISTS saga_message_store_source
     ON saga_message_store (source_saga_type, source_saga_id);
 
-CREATE TABLE IF NOT EXISTS saga_message_store_consumer (
-    consumer_id   VARCHAR(64)  PRIMARY KEY,
-    host          VARCHAR(255) NOT NULL,
-    started_at    TIMESTAMPTZ  NOT NULL,
-    last_seen_at  TIMESTAMPTZ  NOT NULL
+-- The leadership of the store (specs/013-active-standby-relay data-model.md): one row, never deleted, so the
+-- fencing token only grows. Only the relay holding an unexpired lease with the current token leases messages.
+CREATE TABLE IF NOT EXISTS saga_message_store_leader (
+    id             SMALLINT     PRIMARY KEY CHECK (id = 1),
+    holder_id      VARCHAR(64)  NOT NULL,
+    holder_host    VARCHAR(255) NOT NULL,
+    fencing_token  BIGINT       NOT NULL CHECK (fencing_token >= 1),
+    acquired_at    TIMESTAMPTZ  NOT NULL,
+    expires_at     TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT expires_after_acquired CHECK (expires_at >= acquired_at)
 );

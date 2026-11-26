@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -75,6 +77,26 @@ final class PostgresTestSupport {
   }
 
   /**
+   * A connection pool on the shared container, as an application would pass one. {@link
+   * #newDataSource()} opens a new physical connection on every {@code getConnection()} (TCP
+   * connect, authentication, a new server process), which dominates the time of the volume tests;
+   * the harnesses that run a relay and a runtime use this instead and close it when their process
+   * stops.
+   *
+   * @param maximumSize the most connections the pool opens
+   */
+  static HikariDataSource newPooledDataSource(int maximumSize) {
+    HikariConfig config = new HikariConfig();
+    config.setJdbcUrl(POSTGRES.getJdbcUrl());
+    config.setUsername(POSTGRES.getUsername());
+    config.setPassword(POSTGRES.getPassword());
+    config.setMaximumPoolSize(maximumSize);
+    config.setMinimumIdle(0);
+    config.setPoolName("saga-forge-test");
+    return new HikariDataSource(config);
+  }
+
+  /**
    * Removes every row ({@code TRUNCATE saga_instance CASCADE} also empties the three tables
    * referencing it) and drops every fault trigger installed by {@link #failOn(String, String)}.
    */
@@ -83,8 +105,7 @@ final class PostgresTestSupport {
     try (Connection connection = newDataSource().getConnection();
         Statement statement = connection.createStatement()) {
       statement.execute("TRUNCATE saga_instance CASCADE");
-      statement.execute(
-          "TRUNCATE saga_message_store, saga_message_store_consumer RESTART IDENTITY");
+      statement.execute("TRUNCATE saga_message_store, saga_message_store_leader RESTART IDENTITY");
     } catch (SQLException e) {
       throw new IllegalStateException("could not reset the test database", e);
     }

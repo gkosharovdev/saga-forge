@@ -24,6 +24,13 @@ import java.util.Set;
  * non-null ordering key has a lower position. {@link MessageStatus#SET_ASIDE} messages do not block
  * their key.
  *
+ * <h2>Leadership</h2>
+ *
+ * <p>Several application instances may share one store, but only one relay delivers: the one
+ * holding the store's {@link LeaderLease} ({@link #leaderElection()}). {@link #lease} is fenced by
+ * that lease's token in the same transaction ({@code specs/013-active-standby-relay} FR-008). Every
+ * other method may be called by any instance, leader or not.
+ *
  * <h2>Leaseholder writes</h2>
  *
  * <p>{@code markConsumed}, {@code recordFailure} and {@code setAside} apply only if {@code
@@ -41,10 +48,23 @@ public interface MessageStore {
   void append(LocalTransaction tx, List<NewMessage> entries);
 
   /**
-   * Reserves up to {@code limit} leasable messages, in position order, for {@code consumerId} until
-   * {@code now + leaseDuration}, and counts one delivery attempt for each.
+   * The leader election of this store, whose current lease fences {@link #lease}.
+   *
+   * @return the election; the same instance on every call
    */
-  LeasedMessages lease(String consumerId, Instant now, Duration leaseDuration, int limit);
+  LeaderElection leaderElection();
+
+  /**
+   * In one transaction: checks that {@code leader} is this store's current leadership and has not
+   * expired at {@code now}, then reserves up to {@code limit} leasable messages, in position order,
+   * for {@code leader.holderId()} until {@code now + leaseDuration}, and counts one delivery
+   * attempt for each. A takeover cannot interleave with a lease: it waits for it, or the lease sees
+   * it.
+   *
+   * @throws LeadershipLostException if {@code leader} is not current at {@code now}; nothing was
+   *     leased
+   */
+  LeasedMessages lease(LeaderLease leader, Instant now, Duration leaseDuration, int limit);
 
   /**
    * Extends to {@code until} the leases {@code consumerId} still holds among {@code messageIds}.
@@ -114,14 +134,6 @@ public interface MessageStore {
    * @return the number deleted
    */
   int purgeConsumed(Instant cutoff, int batchSize);
-
-  /** Inserts or refreshes a consumer's heartbeat. */
-  void heartbeat(ConsumerHeartbeat heartbeat);
-
-  /**
-   * @return the heartbeats last seen at or after {@code since}
-   */
-  List<ConsumerHeartbeat> liveConsumers(Instant since);
 
   /**
    * Whether this store keeps a message's {@link NewMessage#notBefore()} and implements {@link

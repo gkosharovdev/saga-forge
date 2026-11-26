@@ -8,8 +8,9 @@ import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeadershipLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaseLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
@@ -17,6 +18,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.store.UnreadableMessageException;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -26,15 +28,18 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * The transport's runtime: appends outgoing messages to the {@link MessageStore} and delivers
@@ -44,6 +49,10 @@ import java.util.function.Consumer;
  * package.
  *
  * <ul>
+ *   <li>Several instances may share one store; only the relay holding the store's leadership leases
+ *       messages ({@link LeaderElector}, {@code specs/013-active-standby-relay}). A relay that
+ *       loses it leases nothing more but lets its deliveries in progress finish, renewing their
+ *       message leases, so the next leader neither redelivers nor overtakes them.
  *   <li>A coordinator thread leases due messages when signalled or every poll interval, and hands
  *       each to a keyed worker lane; the store lets only the head of each ordering key be leased,
  *       so at most one message per key is in flight.
@@ -60,8 +69,8 @@ import java.util.function.Consumer;
  *       contracts/relay-classification.md). Like Spring Kafka's {@code DefaultErrorHandler}, the
  *       relay retries with its own back-off and hands what it gives up on to a recoverer: here, the
  *       saga runtime.
- *   <li>The same thread renews the leases of deliveries still running, refreshes the heartbeat and
- *       removes consumed messages older than the retention.
+ *   <li>The same thread renews the leases of deliveries still running and, as leader, removes
+ *       consumed messages older than the retention.
  * </ul>
  */
 public final class Relay {
@@ -81,6 +90,7 @@ public final class Relay {
   private final Executor hostExecutor;
   private final TransportInstrumentation instrumentation;
   private final String consumerId = UUID.randomUUID().toString();
+  private final LeaderElector elector;
   private final Map<String, StoredMessage> inFlight = new ConcurrentHashMap<>();
   private final List<Consumer<StoredMessage>> deliveredListeners = new CopyOnWriteArrayList<>();
   private final ReentrantLock lock = new ReentrantLock();
@@ -92,8 +102,6 @@ public final class Relay {
   private CommandReceiver commands;
   private KeyedWorkers workers;
   private Thread coordinator;
-  private Instant startedAt;
-  private Instant nextHeartbeat;
   private Instant nextSweep;
   private Instant nextRenewal;
 
@@ -112,6 +120,29 @@ public final class Relay {
       Logger logger,
       Executor hostExecutor,
       TransportInstrumentation instrumentation) {
+    this(
+        messageStore,
+        transactions,
+        settings,
+        clock,
+        logger,
+        hostExecutor,
+        instrumentation,
+        LeaderElector.backgroundScheduling());
+  }
+
+  /**
+   * @param leaderScheduling the thread leadership rounds run on (013)
+   */
+  public Relay(
+      MessageStore messageStore,
+      TransactionBoundary transactions,
+      TransportSettings settings,
+      Clock clock,
+      Logger logger,
+      Executor hostExecutor,
+      TransportInstrumentation instrumentation,
+      Supplier<ScheduledExecutorService> leaderScheduling) {
     this.messageStore = messageStore;
     this.transactions = transactions;
     this.settings = settings;
@@ -119,6 +150,16 @@ public final class Relay {
     this.logger = logger;
     this.hostExecutor = hostExecutor;
     this.instrumentation = instrumentation;
+    this.elector =
+        new LeaderElector(
+            messageStore.leaderElection(),
+            settings.leadership(),
+            clock,
+            consumerId,
+            hostName(),
+            logger,
+            instrumentation,
+            leaderScheduling);
   }
 
   // ----- appending
@@ -210,10 +251,7 @@ public final class Relay {
     this.commands = commandReceiver;
     this.workers = new KeyedWorkers(settings.workers(), hostExecutor);
     Instant now = clock.instant();
-    this.startedAt = now;
-    warnAboutOtherConsumers(now);
-    beat(now);
-    this.nextHeartbeat = now.plus(settings.heartbeatInterval());
+    elector.start();
     this.nextSweep = now;
     this.nextRenewal = now.plus(settings.leaseDuration().dividedBy(2));
     state = State.RUNNING;
@@ -255,6 +293,7 @@ public final class Relay {
     } catch (RuntimeException failure) {
       logger.log(Level.WARNING, "saga.transport.releaseFailed consumer=" + consumerId, failure);
     }
+    elector.resign();
     synchronized (this) {
       state = State.STOPPED;
     }
@@ -269,6 +308,13 @@ public final class Relay {
 
   public String consumerId() {
     return consumerId;
+  }
+
+  /**
+   * @return this relay's leadership role and the store's leader as last seen (013)
+   */
+  public LeadershipStatus leadership() {
+    return elector.status();
   }
 
   public void onDelivered(Consumer<StoredMessage> listener) {
@@ -313,8 +359,18 @@ public final class Relay {
     if (room <= 0) {
       return 0;
     }
-    LeasedMessages leased =
-        messageStore.lease(consumerId, clock.instant(), settings.leaseDuration(), room);
+    Optional<LeaderLease> leadership = elector.leadership();
+    if (leadership.isEmpty()) {
+      return 0;
+    }
+    LeasedMessages leased;
+    try {
+      leased =
+          messageStore.lease(leadership.get(), clock.instant(), settings.leaseDuration(), room);
+    } catch (LeadershipLostException lost) {
+      elector.stepDown(lost.staleLease());
+      return 0;
+    }
     for (UnreadableMessageException unreadable : leased.unreadable()) {
       String reason = "UNREADABLE: " + unreadable.getMessage();
       StoredMessage message = unreadable.leased();
@@ -352,11 +408,7 @@ public final class Relay {
       renewLeases(now);
       nextRenewal = now.plus(settings.leaseDuration().dividedBy(2));
     }
-    if (!now.isBefore(nextHeartbeat)) {
-      beat(now);
-      nextHeartbeat = now.plus(settings.heartbeatInterval());
-    }
-    if (!now.isBefore(nextSweep)) {
+    if (!now.isBefore(nextSweep) && elector.isLeading()) {
       try {
         sweepRetention();
       } catch (RuntimeException failure) {
@@ -374,36 +426,6 @@ public final class Relay {
         messageStore.renew(
             consumerId, Set.copyOf(inFlight.keySet()), now.plus(settings.leaseDuration()));
     lost.forEach(id -> logger.log(Level.WARNING, () -> "saga.transport.leaseLost message=" + id));
-  }
-
-  private void beat(Instant now) {
-    try {
-      messageStore.heartbeat(new ConsumerHeartbeat(consumerId, hostName(), startedAt, now));
-    } catch (RuntimeException failure) {
-      logger.log(Level.WARNING, "saga.transport.heartbeatFailed consumer=" + consumerId, failure);
-    }
-  }
-
-  private void warnAboutOtherConsumers(Instant now) {
-    try {
-      Duration window = settings.heartbeatInterval().multipliedBy(3);
-      List<ConsumerHeartbeat> others =
-          messageStore.liveConsumers(now.minus(window)).stream()
-              .filter(beat -> !beat.consumerId().equals(consumerId))
-              .toList();
-      if (!others.isEmpty()) {
-        logger.log(
-            Level.WARNING,
-            () ->
-                "saga.transport.secondInstance consumer="
-                    + consumerId
-                    + " others="
-                    + others.stream().map(b -> b.consumerId() + "@" + b.host()).toList()
-                    + " - the in-memory transport supports one running instance per message store");
-      }
-    } catch (RuntimeException failure) {
-      logger.log(Level.WARNING, "saga.transport.heartbeatFailed consumer=" + consumerId, failure);
-    }
   }
 
   // ----- delivery

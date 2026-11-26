@@ -1,7 +1,12 @@
 package io.github.gkosharovdev.sagaforge.spring.actuator;
 
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.transport.TransportProperties;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
+import java.time.Clock;
+import java.time.Duration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.endpoint.condition.ConditionalOnAvailableEndpoint;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -14,8 +19,9 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * The {@code sagaforge} Actuator endpoint and health indicator over the in-memory transport's
- * message store ({@code specs/008-spring-boot-starter} FR-020). Registered only when Actuator is on
- * the class path; switched by Spring Boot's {@code management.endpoint.sagaforge.*}, {@code
+ * message store ({@code specs/008-spring-boot-starter} FR-020), with the relay's leadership ({@code
+ * specs/013-active-standby-relay} FR-022, FR-023). Registered only when Actuator is on the class
+ * path; switched by Spring Boot's {@code management.endpoint.sagaforge.*}, {@code
  * management.endpoints.web.exposure.*} and {@code management.health.sagaforge.enabled}.
  */
 @AutoConfiguration(after = InMemoryTransportConfiguration.class)
@@ -37,7 +43,7 @@ public class SagaForgeActuatorConfiguration {
   @ConditionalOnMissingBean
   @ConditionalOnAvailableEndpoint(endpoint = SagaForgeEndpoint.class)
   public SagaForgeEndpoint sagaForgeEndpoint(InMemoryTransport transport) {
-    return new SagaForgeEndpoint(transport.queries());
+    return new SagaForgeEndpoint(transport.queries(), transport::leadership);
   }
 
   /** The health indicator, when Spring Boot's health module is present. */
@@ -53,8 +59,20 @@ public class SagaForgeActuatorConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "sagaforgeHealthIndicator")
     @ConditionalOnEnabledHealthIndicator("sagaforge")
-    public SagaForgeHealthIndicator sagaforgeHealthIndicator(InMemoryTransport transport) {
-      return new SagaForgeHealthIndicator(transport.queries());
+    public SagaForgeHealthIndicator sagaforgeHealthIndicator(
+        InMemoryTransport transport,
+        ObjectProvider<TransportProperties> properties,
+        ObjectProvider<Clock> clock) {
+      Duration leaseDuration =
+          properties.stream()
+              .findFirst()
+              .map(p -> p.getLeadership().getLeaseDuration())
+              .orElse(LeadershipSettings.defaults().leaseDuration());
+      return new SagaForgeHealthIndicator(
+          transport.queries(),
+          transport::leadership,
+          leaseDuration,
+          clock.getIfUnique(Clock::systemUTC));
     }
   }
 }

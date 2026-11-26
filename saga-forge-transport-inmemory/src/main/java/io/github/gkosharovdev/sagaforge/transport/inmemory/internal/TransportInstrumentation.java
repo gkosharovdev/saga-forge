@@ -69,6 +69,15 @@ public final class TransportInstrumentation {
   static final AttributeKey<String> CLASSIFICATION = AttributeKey.stringKey("classification");
   static final String COMMAND_FAILURES = "saga_forge.command.failures";
 
+  /** 1 while this relay leads its message store, else 0 (013). */
+  static final String RELAY_ACTIVE = "saga_forge.relay.active";
+
+  /** Leadership changes of this relay: acquired, lost, released (013). */
+  static final String LEADERSHIP_CHANGES = "saga_forge.relay.leadership_changes";
+
+  static final AttributeKey<String> LEADERSHIP_CHANGE =
+      AttributeKey.stringKey("saga_forge.leadership.change");
+
   private static final TextMapGetter<Map<String, String>> GETTER =
       new TextMapGetter<>() {
         @Override
@@ -90,6 +99,7 @@ public final class TransportInstrumentation {
   private final Logger logger;
   private final DoubleHistogram deliveryDuration;
   private final LongCounter commandFailures;
+  private final LongCounter leadershipChanges;
   private final Set<String> failedKinds = ConcurrentHashMap.newKeySet();
 
   /**
@@ -116,6 +126,45 @@ public final class TransportInstrumentation {
     this.propagator = openTelemetry.getPropagators().getTextMapPropagator();
     this.deliveryDuration = meter.histogramBuilder(DELIVERY + ".duration").setUnit("s").build();
     this.commandFailures = meter.counterBuilder(COMMAND_FAILURES).setUnit("{command}").build();
+    this.leadershipChanges = meter.counterBuilder(LEADERSHIP_CHANGES).setUnit("{change}").build();
+  }
+
+  /** A change of this relay's leadership ({@code specs/013-active-standby-relay} R9). */
+  public enum LeadershipChange {
+    ACQUIRED,
+    LOST,
+    RELEASED;
+
+    String attribute() {
+      return name().toLowerCase(java.util.Locale.ROOT);
+    }
+  }
+
+  /** Counts one leadership change of this relay. */
+  public void leadershipChanged(LeadershipChange change) {
+    try {
+      leadershipChanges.add(1, Attributes.of(LEADERSHIP_CHANGE, change.attribute()));
+    } catch (RuntimeException failure) {
+      failed(LEADERSHIP_CHANGES, failure);
+    }
+  }
+
+  /**
+   * Registers the {@code saga_forge.relay.active} gauge over {@code leading}.
+   *
+   * @return closes the gauge
+   */
+  public AutoCloseable relayActiveGauge(java.util.function.BooleanSupplier leading) {
+    try {
+      return meter
+          .gaugeBuilder(RELAY_ACTIVE)
+          .ofLongs()
+          .setUnit("{relay}")
+          .buildWithCallback(measurement -> measurement.record(leading.getAsBoolean() ? 1 : 0));
+    } catch (RuntimeException failure) {
+      failed(RELAY_ACTIVE, failure);
+      return () -> {};
+    }
   }
 
   /**

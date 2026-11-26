@@ -24,7 +24,7 @@ Requires Java 21 and Spring Boot 4.1.
 | Domain events as Spring application events | every recorded event published inside the unit of work's transaction (`application-events.mode=in-transaction`) | set `saga-forge.application-events.mode` |
 | Lifecycle | the runtime starts after the context refreshed, then the transport; on shutdown the transport stops first | — |
 | Spring Modulith | with its event publication registry present, the transport stores its messages there: one outbox | `saga-forge.transport.modulith-interop=false` |
-| Actuator | with Actuator present, a read-only `sagaforge` endpoint and a `sagaforge` health indicator (`DOWN` while messages are set aside) | Spring Boot's `management.*` properties |
+| Actuator | with Actuator present, a read-only `sagaforge` endpoint and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
 | OpenTelemetry | the application's `OpenTelemetry` bean (Spring Boot's OpenTelemetry setup, or Micrometer Tracing's OpenTelemetry bridge) handed to the runtime and the transport: saga spans inside the request's trace, saga metrics, trace context stored with every message | `SagaForgeTelemetry`, or `saga-forge.telemetry.*` |
 
 Every bean backs off when the application defines one of the same type. Two `SagaRuntime` beans fail startup.
@@ -37,12 +37,12 @@ Every bean backs off when the application defines one of the same type. Two `Sag
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -195,11 +195,52 @@ unconsumed message. `CANCELLED` counts deadlines and scheduled commands cancelle
 `UNCONSUMED` one may be a scheduled message that is not due yet:
 
 ```json
-{ "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+{ "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S",
+  "leadership": { "role": "ACTIVE", "relayId": "7f3c…",
+    "leader": { "holderId": "7f3c…", "holderHost": "orders-1", "fencingToken": 12,
+                "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } } }
 ```
 
-The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator. Switch
-them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
+The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator,
+`DEGRADED` while no relay has led the message store for longer than one leadership lease, and `UP` otherwise. Its
+details name this instance's `role`, the `fencingToken` and, on a standby, the `leader` (`holderId@holderHost`).
+Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
+
+### Running several instances
+
+Run as many instances of the application as you like over one Postgres database: nothing to configure. Each
+instance's transport takes part in a leader election through the `saga_message_store_leader` table (in `schema.sql`;
+existing databases apply `schema-upgrade-013.sql`). One relay is **active** and delivers every message, deadline and
+scheduled command; the others are **standby** and only check whether the leadership is free. Every instance still
+accepts requests, runs its sagas' units of work and appends to the message store.
+
+- **Graceful stop** (`SIGTERM`, context close): the active relay finishes its in-flight deliveries and releases the
+  leadership, and a standby takes over within `check-interval`.
+- **Crash or network partition**: a standby takes over once the lease expires, within `lease-duration +
+  check-interval` (35 s by default). The old leader stops leasing one `renew-interval` before its lease ends by its
+  own clock, and the store refuses its leases once another relay holds a newer fencing token.
+- Delivery stays at least once: a message the old leader was handling when it lost the leadership may run again on
+  the new one, so command handlers keep passing their `CommandId` on.
+
+```properties
+# defaults; shorten for faster failover at the cost of more leadership round trips
+saga-forge.transport.leadership.lease-duration=30s
+saga-forge.transport.leadership.renew-interval=10s
+saga-forge.transport.leadership.check-interval=5s
+```
+
+`renew-interval` and `check-interval` must be shorter than `lease-duration`, or startup fails naming the properties.
+
+Spring Boot leaves a health status out of the overall `/actuator/health` unless it is in the status order. To make
+a leaderless message store show in the overall status, add `DEGRADED`:
+
+```properties
+management.endpoint.health.status.order=down,out-of-service,degraded,up,unknown
+management.endpoint.health.status.http-mapping.degraded=200
+```
+
+`GET /actuator/sagaforge` on any instance shows its `role` and the current leader, so an operator can tell which
+instance delivers.
 
 ## Properties
 
@@ -221,7 +262,9 @@ them off with `management.endpoint.sagaforge.enabled=false` and `management.heal
 | `saga-forge.transport.lease-batch-size` | `100` | Most messages leased at once. |
 | `saga-forge.transport.retention` | `7d` | How long consumed messages are kept. |
 | `saga-forge.transport.retention-sweep-interval` | `1h` | How often consumed messages older than the retention are removed. |
-| `saga-forge.transport.heartbeat-interval` | `30s` | How often this instance refreshes its heartbeat in the message store. |
+| `saga-forge.transport.leadership.lease-duration` | `30s` | How long the delivering instance's leadership of the message store lasts without renewal; a standby takes over after it expires. |
+| `saga-forge.transport.leadership.renew-interval` | `10s` | How often the delivering instance renews its leadership; shorter than the lease duration. |
+| `saga-forge.transport.leadership.check-interval` | `5s` | How often a standby instance tries to take over; shorter than the lease duration. |
 | `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
 | `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
 | `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |

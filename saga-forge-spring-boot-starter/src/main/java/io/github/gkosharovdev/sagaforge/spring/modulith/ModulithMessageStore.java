@@ -1,8 +1,9 @@
 package io.github.gkosharovdev.sagaforge.spring.modulith;
 
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
-import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderElection;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
@@ -89,9 +90,16 @@ public final class ModulithMessageStore implements MessageStore {
     }
   }
 
+  /** The leadership of the delivery records' store: one leader for both (013 research R10). */
   @Override
-  public LeasedMessages lease(String consumerId, Instant now, Duration leaseDuration, int limit) {
-    LeasedMessages leased = records.lease(consumerId, now, leaseDuration, limit);
+  public LeaderElection leaderElection() {
+    return records.leaderElection();
+  }
+
+  /** Fenced by the delivery records' store, which leases first. */
+  @Override
+  public LeasedMessages lease(LeaderLease leader, Instant now, Duration leaseDuration, int limit) {
+    LeasedMessages leased = records.lease(leader, now, leaseDuration, limit);
     if (leased.readable().isEmpty()) {
       return leased;
     }
@@ -230,16 +238,6 @@ public final class ModulithMessageStore implements MessageStore {
     int purged = records.purgeConsumed(cutoff, batchSize);
     registry.deleteCompletedPublicationsBefore(cutoff);
     return purged;
-  }
-
-  @Override
-  public void heartbeat(ConsumerHeartbeat heartbeat) {
-    records.heartbeat(heartbeat);
-  }
-
-  @Override
-  public List<ConsumerHeartbeat> liveConsumers(Instant since) {
-    return records.liveConsumers(since);
   }
 
   private String publicationOf(String messageId) {

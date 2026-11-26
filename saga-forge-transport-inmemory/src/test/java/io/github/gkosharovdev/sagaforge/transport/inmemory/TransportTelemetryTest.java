@@ -332,4 +332,33 @@ class TransportTelemetryTest {
                 Attributes.of(AttributeKey.stringKey("classification"), "final")))
         .isEqualTo(1);
   }
+
+  @Test
+  @DisplayName(
+      "013 R9: the lone relay reports saga_forge.relay.active = 1 and one acquisition; a stop counts a release")
+  void leadershipTelemetry() {
+    AttributeKey<String> change = AttributeKey.stringKey("saga_forge.leadership.change");
+
+    assertThat(telemetry.metric("saga_forge.relay.active"))
+        .hasValueSatisfying(
+            metric ->
+                assertThat(metric.getLongGaugeData().getPoints())
+                    .singleElement()
+                    .satisfies(point -> assertThat(point.getValue()).isEqualTo(1L)));
+    assertThat(
+            telemetry.counter(
+                "saga_forge.relay.leadership_changes", Attributes.of(change, "acquired")))
+        .isEqualTo(1);
+
+    transport.stop(Duration.ofSeconds(5));
+    telemetry.collectMetrics();
+
+    assertThat(
+            telemetry.counter(
+                "saga_forge.relay.leadership_changes", Attributes.of(change, "released")))
+        .isEqualTo(1);
+    assertThat(
+            telemetry.counter("saga_forge.relay.leadership_changes", Attributes.of(change, "lost")))
+        .isZero();
+  }
 }

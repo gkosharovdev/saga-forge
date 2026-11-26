@@ -370,7 +370,11 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   can each start an instance. 004 adds no storage-level uniqueness rule for it.
 - **Origin**: `specs/004-saga-engine/spec.md` FR-027, Edge Cases "Duplicate start", Assumptions "Duplicate
   starts across processes"; user decision, 2026-11-06.
-- **Status**: open until the Kafka feature's delivery and deduplication work addresses it.
+- **Status**: open until the Kafka feature's delivery and deduplication work addresses it. Narrowed 2026-11-26 by 013:
+  with the in-memory transport every start event is delivered by the one active relay, so the in-process check covers
+  concurrent starts from several instances (013 FR-017, `MultiInstanceAcceptanceTest`). Still open for the short
+  overlap where a deposed leader finishes an in-flight start while the new leader delivers another start event with
+  the same association value, and for transports without a single relay.
 
 ### G-ENG-09: JDBC transaction support lives in the Postgres module
 - **Description**: The 004 plan puts `JdbcTransactionBoundary` (a `TransactionBoundary` over a `DataSource`) and the
@@ -399,6 +403,10 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
 - **Status**: open. Implemented in 004 T074 (`FOR NO KEY UPDATE OF i` in `findByIdAndLock` and in `save`); the
   reasoning is not verified against Postgres. Container test `ConcurrencyControlTest.findByIdAndLockDoesNotBlockContextStoreWrite`
   added (T081), not yet run.
+- **Remark (013, 2026-11-26)**: with several instances this row lock, not the in-process lock, is what keeps two units
+  of work on one instance apart across JVMs. The 013 container suites (`MultiInstanceAcceptanceTest`,
+  `MultiInstanceDeadlineContainerTest`) run two runtimes over one Postgres with the lock in place and pass; they do not
+  force two instances into the same instance at the same moment, so the hold-time and timeout questions stay open.
 
 ### G-ENG-12: Entry point called inside an active host transaction
 - **Description**: Spec FR-007 covers calls from an outbox and from a running unit of work, not a call made while the
@@ -892,7 +900,9 @@ Noted only; nothing is bumped until the starter feature decides.
   (booking-service, 2026-11-12).
 - **Remark**: options are a leader election (one active relay, others standby, using the heartbeat table), partitioned
   leasing by ordering key, or the Kafka transport for multi-instance deployments.
-- **Status**: open (highest priority for adoption beyond a single instance).
+- **Status**: closed 2026-11-26 by `specs/013-active-standby-relay`: one relay leads under a fenced leader lease
+  (`saga_message_store_leader`), the others stand by; heartbeats and `saga.transport.secondInstance` are removed. What
+  remains is the throughput of one relay (G-013-02).
 
 ### In-memory transport (007), implementation notes
 - 2026-11-11: implemented from `specs/007-in-memory-transport/tasks.md` (82 tasks).
@@ -1124,7 +1134,7 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 1. ~~011 outcome events, the `COMPENSATION_FAILED` rename, one unit of work (G-ADOPT-01, G-011-02)~~ done
    2026-11-20
 2. 012 outbox command failure feedback (G-ADOPT-02) - done 2026-11-24
-3. 013 active/standby relay (G-007-09)
+3. 013 active/standby relay (G-007-09) - done 2026-11-26
 4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05)
 6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
@@ -1147,7 +1157,9 @@ Revisit the order with feedback from booking-service before each release.
 - **How**: root POM metadata (url, licenses, developers, scm, issue management) and a `release` profile (sources,
   Javadoc with `doclint all,-missing`, GPG signing with loopback pinentry, `central-publishing-maven-plugin` 0.8.0
   excluding the examples and placeholder modules); `.github/workflows/release.yml` publishes on a `vX.Y.Z` tag after
-  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`.
+  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`. The workflow does not touch master's POMs:
+  after each release, bump them to the next `-SNAPSHOT` and update the dependency snippets (decided 2026-11-26, when
+  master was found still on `0.1.0-SNAPSHOT` after 0.3.0 had shipped; set to `0.4.0-SNAPSHOT` in PR #23).
   Deployments wait for a manual "Publish" unless the repository variable `CENTRAL_AUTO_PUBLISH` is `true`.
 - **Versioning**: semver; before 1.0 a minor release may break the API, a patch release never does; `internal`
   packages carry no compatibility promise. Release notes list schema upgrade scripts.
@@ -1411,7 +1423,9 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   first committed.
 - **Origin**: `specs/017-saga-deadlines` spec (taken ahead of 013 by decision).
 - **Remark**: 013 (active/standby relay) must keep leasing due messages under its leader lease.
-- **Status**: open (with 013).
+- **Status**: closed 2026-11-26 by `specs/013-active-standby-relay`: due messages are leased by the leader only, under
+  the fencing token; `MultiInstanceDeadlineContainerTest` covers deadlines due before, during and after a handover, a
+  cancel appended on the standby and a scheduled command.
 
 ### G-017-03: Overdue messages are delivered in stored order, not due order
 - **Description**: after downtime the relay leases overdue messages by log position, so two deadlines that both came due
@@ -1474,3 +1488,53 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
 - **Origin**: `specs/017-saga-deadlines` T047 (skipped, 2026-11-25).
 - **Remark**: add it when the Spring example hosts the checkout sagas.
 - **Status**: open.
+
+## Active/standby relay (013)
+
+### G-013-01: A message appended on a standby waits for the leader's poll
+- **Description**: `Outbox.committed` wakes only the relay of the instance that committed. On a standby it wakes
+  nothing that delivers, so the leader picks the message up on its next poll, up to `saga-forge.transport.poll-interval`
+  (500 ms by default) later than a message appended on the leader itself.
+- **Origin**: `specs/013-active-standby-relay` research (no cross-instance wake-up, e.g. Postgres `LISTEN`/`NOTIFY`).
+- **Status**: accepted; revisit if latency on standbys matters to an adopter.
+
+### G-013-02: Delivery throughput of one relay; no partitioned leasing
+- **Description**: only the active relay delivers, so delivery throughput does not grow with the number of instances.
+  Partitioned leasing by ordering key (Axon-style segments, Kafka-style partitions) is not implemented.
+- **Origin**: `specs/013-active-standby-relay` spec, Out of scope; research R1.
+- **Remark**: scale-out delivery is the Kafka transport's job (Principle IV keeps the in-memory transport narrow).
+- **Status**: accepted.
+
+### G-013-03: Takeover timing depends on the instances' clocks
+- **Description**: expiry is compared with the acquiring instance's clock, and a leader distrusts its lease by its own
+  clock. Clock skew between instances shortens or lengthens takeover; it never lets two relays lease at once, because
+  the store checks the fencing token on every lease (and in Postgres holds the leader row `FOR SHARE` for the lease
+  transaction).
+- **Origin**: `specs/013-active-standby-relay` research R4, R5, FR-007.
+- **Status**: accepted; keep instance clocks synchronised (NTP) for predictable takeover.
+
+### G-013-04: The "committed on the old leader, redelivered by the new one" case is not forced in a test
+- **Description**: `MultiInstanceAcceptanceTest.crashHandover` cuts the leader's connections and checks every saga
+  completes exactly once, but does not force a message whose unit of work committed on the old leader before its
+  consumed mark to be redelivered by the new one (reported `DUPLICATE`). The single-process restart tests (007) cover
+  that path.
+- **Origin**: `specs/013-active-standby-relay` T028 (implementation, 2026-11-26).
+- **Status**: open (test gap).
+
+### G-013-05: A failover between creation write and first unit of work strands the start
+- **Description**: a leader that crashes after a saga's creation write and before its first unit of work committed
+  leaves the instance `CREATED`; the new leader redelivers the start event, which is rejected as a duplicate (G-ENG-05,
+  G-007-03). Failover makes the window reachable by a crash of one instance among several, not only by a restart.
+- **Origin**: `specs/013-active-standby-relay` T028 (flaky `crashHandover` until every saga was started before the cut).
+- **Remark**: fixed together with G-ENG-05 (roadmap 015, saga operations).
+- **Status**: open.
+
+### G-013-06: The SC-001 burst runs about 95 s per run
+- **Description**: `MultiInstanceAcceptanceTest.burstThroughBothInstances` (10,000 messages through two instances) takes
+  about 95 s per run, so it runs once by default; `-Dsaga-forge.sc001.runs=N` repeats it.
+- **Origin**: `specs/013-active-standby-relay` T024 (implementation, 2026-11-26).
+- **Status**: closed 2026-11-26. The time was the test's connections, not the relay: `PostgresTestSupport.newDataSource()`
+  is a `PGSimpleDataSource`, a new physical connection per `getConnection()`. With a Hikari pool (test scope,
+  `PostgresTestSupport.newPooledDataSource`) in `Replica`, `PostgresTransportHarness` and the 10k restart test, one run
+  takes about 9 s, `DeadlineRestartContainerTest.overdueBacklog` about 34 s instead of about 5 min, and the whole Postgres
+  container suite about 1.5 min. Volume tests over Postgres should use a pooled `DataSource`, as an application does.

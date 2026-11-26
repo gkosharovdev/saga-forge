@@ -6,9 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
-import io.github.gkosharovdev.sagaforge.core.spi.store.ConsumerHeartbeat;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DuplicateMessageException;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderElection;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeadershipLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaseLostException;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
@@ -21,6 +23,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,6 +48,9 @@ public abstract class MessageStoreContract {
 
   protected static final Instant T0 = Instant.parse("2026-11-11T10:00:00Z");
   protected static final Duration LEASE = Duration.ofMinutes(5);
+
+  /** How long a leadership taken by {@link #lease(String, Instant, int)} lasts. */
+  protected static final Duration LEADERSHIP = Duration.ofSeconds(30);
 
   /**
    * @return the store under test, empty
@@ -97,10 +107,31 @@ public abstract class MessageStoreContract {
         T0);
   }
 
+  /**
+   * Leases as {@code consumer}: takes the store's leadership for it first (013), releasing another
+   * consumer's, so the 007 and 017 cases below keep naming consumers as before.
+   */
+  protected LeasedMessages lease(String consumer, Instant now, int limit) {
+    return log().lease(leaderFor(consumer, now), now, LEASE, limit);
+  }
+
+  private LeaderLease leaderFor(String consumer, Instant now) {
+    LeaderElection election = log().leaderElection();
+    Optional<LeaderLease> current = election.current();
+    if (current.isPresent() && current.get().isHeldBy(consumer)) {
+      Optional<LeaderLease> renewed = election.renew(current.get(), now, Duration.ofDays(1));
+      if (renewed.isPresent()) {
+        return renewed.get();
+      }
+    }
+    current.ifPresent(lease -> election.release(lease, now));
+    return election
+        .tryAcquire(consumer, "host", now, Duration.ofDays(1))
+        .orElseThrow(() -> new AssertionError("could not take the leadership for " + consumer));
+  }
+
   private List<String> leaseIds(String consumer, Instant now) {
-    return log().lease(consumer, now, LEASE, 100).readable().stream()
-        .map(StoredMessage::messageId)
-        .toList();
+    return lease(consumer, now, 100).readable().stream().map(StoredMessage::messageId).toList();
   }
 
   @Test
@@ -120,7 +151,7 @@ public abstract class MessageStoreContract {
   void leaseRoundTrip() {
     appendCommitted(event("a", "k1"), command("s-9"));
 
-    LeasedMessages leased = log().lease("c", T0, LEASE, 10);
+    LeasedMessages leased = lease("c", T0, 10);
 
     assertThat(leased.readable()).hasSize(2);
     StoredMessage first = leased.readable().get(0);
@@ -153,8 +184,7 @@ public abstract class MessageStoreContract {
     assertThat(leaseIds("c1", T0)).containsExactly("a");
 
     assertThat(leaseIds("c2", T0.plusSeconds(60))).isEmpty();
-    List<StoredMessage> again =
-        log().lease("c2", T0.plus(LEASE).plusSeconds(1), LEASE, 10).readable();
+    List<StoredMessage> again = lease("c2", T0.plus(LEASE).plusSeconds(1), 10).readable();
     assertThat(again)
         .singleElement()
         .satisfies(
@@ -211,7 +241,7 @@ public abstract class MessageStoreContract {
             T0.plusSeconds(10));
 
     assertThat(leaseIds("c", T0.plusSeconds(5))).isEmpty();
-    List<StoredMessage> due = log().lease("c", T0.plusSeconds(10), LEASE, 10).readable();
+    List<StoredMessage> due = lease("c", T0.plusSeconds(10), 10).readable();
     assertThat(due)
         .singleElement()
         .satisfies(
@@ -237,7 +267,7 @@ public abstract class MessageStoreContract {
     log().markConsumed("c", "b", T0);
     assertThat(log().redeliver("a", T0.plusSeconds(1))).isTrue();
     assertThat(log().redeliver("b", T0.plusSeconds(1))).isFalse();
-    List<StoredMessage> again = log().lease("c", T0.plusSeconds(1), LEASE, 10).readable();
+    List<StoredMessage> again = lease("c", T0.plusSeconds(1), 10).readable();
     assertThat(again)
         .singleElement()
         .satisfies(
@@ -316,7 +346,7 @@ public abstract class MessageStoreContract {
     appendCommitted(event("a", "k1"), event("b", "k2"));
     makeUnreadable("a");
 
-    LeasedMessages leased = log().lease("c", T0, LEASE, 10);
+    LeasedMessages leased = lease("c", T0, 10);
 
     assertThat(leased.readable()).extracting(StoredMessage::messageId).containsExactly("b");
     assertThat(leased.unreadable())
@@ -360,7 +390,7 @@ public abstract class MessageStoreContract {
             context),
         event("u", "k2"));
 
-    LeasedMessages leased = log().lease("c", T0, LEASE, 10);
+    LeasedMessages leased = lease("c", T0, 10);
 
     assertThat(leased.readable())
         .extracting(StoredMessage::traceContext)
@@ -408,18 +438,6 @@ public abstract class MessageStoreContract {
     assertThat(log().query(MessageQuery.builder().build()))
         .extracting(StoredMessage::messageId)
         .containsExactly("c", "d");
-  }
-
-  @Test
-  @DisplayName("heartbeats are upserted and listed by last-seen time")
-  void heartbeats() {
-    log().heartbeat(new ConsumerHeartbeat("c1", "host", T0, T0));
-    log().heartbeat(new ConsumerHeartbeat("c1", "host", T0, T0.plusSeconds(30)));
-    log().heartbeat(new ConsumerHeartbeat("c2", "host", T0, T0));
-
-    assertThat(log().liveConsumers(T0.plusSeconds(10)))
-        .extracting(ConsumerHeartbeat::consumerId)
-        .containsExactly("c1");
   }
 
   private MessageStatus statusOf(String id) {
@@ -539,7 +557,7 @@ public abstract class MessageStoreContract {
         scheduled("consumed", T0),
         scheduled("aside", T0),
         scheduled("twice", T0.plusSeconds(60)));
-    log().lease("c", T0, LEASE, 100);
+    lease("c", T0, 100);
     log().markConsumed("c", "consumed", T0);
     log().setAside("c", "aside", new DeliveryFailure("x.Y", "boom", T0), "MAX_ATTEMPTS");
     cancelCommitted(T0, "twice");
@@ -554,7 +572,7 @@ public abstract class MessageStoreContract {
   @DisplayName("017: a message whose lease expired can be cancelled")
   void cancelAfterLeaseExpiry() {
     appendCommitted(scheduled("s1", T0));
-    log().lease("c", T0, LEASE, 100);
+    lease("c", T0, 100);
     assertThat(cancelCommitted(T0.plus(LEASE).plusSeconds(1), "s1")).containsExactly("s1");
   }
 
@@ -573,12 +591,171 @@ public abstract class MessageStoreContract {
       "017: leaseholder writes on a cancelled message lose the lease, and retention removes it")
   void cancelledIsTerminal() {
     appendCommitted(scheduled("s1", T0));
-    log().lease("c", T0, LEASE, 100);
+    lease("c", T0, 100);
     cancelCommitted(T0.plus(LEASE).plusSeconds(1), "s1");
 
     assertThatThrownBy(() -> log().markConsumed("c", "s1", T0))
         .isInstanceOf(LeaseLostException.class);
     assertThat(log().purgeConsumed(T0.plus(Duration.ofDays(1)), 100)).isEqualTo(1);
     assertThat(log().query(MessageQuery.builder().build())).isEmpty();
+  }
+
+  // ---- specs/013-active-standby-relay: leadership (contracts/leader-election-spi.md) ----
+
+  private Optional<LeaderLease> acquire(String candidate, Instant now) {
+    return log().leaderElection().tryAcquire(candidate, "host-" + candidate, now, LEADERSHIP);
+  }
+
+  @Test
+  @DisplayName("013 C1: the first acquisition on an empty store gets token 1 and is current")
+  void acquireOnEmpty() {
+    assertThat(log().leaderElection().current()).isEmpty();
+
+    LeaderLease lease = acquire("A", T0).orElseThrow();
+
+    assertThat(lease).isEqualTo(new LeaderLease("A", "host-A", 1, T0, T0.plus(LEADERSHIP)));
+    assertThat(log().leaderElection().current()).contains(lease);
+    assertThat(log().leaderElection()).isSameAs(log().leaderElection());
+  }
+
+  @Test
+  @DisplayName("013 C2: no one acquires an unexpired leadership, not even its holder")
+  void acquireRefusedWhileHeld() {
+    acquire("A", T0);
+
+    assertThat(acquire("B", T0.plus(LEADERSHIP).minusMillis(1))).isEmpty();
+    assertThat(acquire("A", T0.plusSeconds(1))).isEmpty();
+  }
+
+  @Test
+  @DisplayName("013 C3: an expired leadership is acquired with a higher token")
+  void acquireAfterExpiry() {
+    LeaderLease first = acquire("A", T0).orElseThrow();
+
+    LeaderLease second = acquire("B", T0.plus(LEADERSHIP)).orElseThrow();
+
+    assertThat(second.holderId()).isEqualTo("B");
+    assertThat(second.fencingToken()).isGreaterThan(first.fencingToken());
+    assertThat(log().leaderElection().current()).contains(second);
+  }
+
+  @Test
+  @DisplayName("013 C4: the holder renews with the same token")
+  void renewByHolder() {
+    LeaderLease lease = acquire("A", T0).orElseThrow();
+
+    LeaderLease renewed =
+        log().leaderElection().renew(lease, T0.plusSeconds(10), LEADERSHIP).orElseThrow();
+
+    assertThat(renewed.fencingToken()).isEqualTo(lease.fencingToken());
+    assertThat(renewed.acquiredAt()).isEqualTo(T0);
+    assertThat(renewed.expiresAt()).isEqualTo(T0.plusSeconds(10).plus(LEADERSHIP));
+    assertThat(acquire("B", T0.plus(LEADERSHIP))).isEmpty();
+  }
+
+  @Test
+  @DisplayName("013 C5: a renewal after a takeover fails and leaves the new holder current")
+  void renewAfterTakeover() {
+    LeaderLease old = acquire("A", T0).orElseThrow();
+    LeaderLease successor = acquire("B", T0.plus(LEADERSHIP)).orElseThrow();
+
+    assertThat(log().leaderElection().renew(old, T0.plus(LEADERSHIP), LEADERSHIP)).isEmpty();
+    assertThat(log().leaderElection().current()).contains(successor);
+  }
+
+  @Test
+  @DisplayName("013 C6: an expired lease is not renewed, even with nobody else holding it")
+  void renewAfterExpiry() {
+    LeaderLease lease = acquire("A", T0).orElseThrow();
+
+    assertThat(log().leaderElection().renew(lease, T0.plus(LEADERSHIP), LEADERSHIP)).isEmpty();
+    assertThat(acquire("A", T0.plus(LEADERSHIP)).orElseThrow().fencingToken())
+        .isGreaterThan(lease.fencingToken());
+  }
+
+  @Test
+  @DisplayName("013 C7: a release lets another relay acquire at once")
+  void releaseHandsOver() {
+    LeaderLease lease = acquire("A", T0).orElseThrow();
+
+    log().leaderElection().release(lease, T0.plusSeconds(3));
+
+    LeaderLease next = acquire("B", T0.plusSeconds(3)).orElseThrow();
+    assertThat(next.fencingToken()).isGreaterThan(lease.fencingToken());
+  }
+
+  @Test
+  @DisplayName("013 C8: releasing a stale lease changes nothing")
+  void releaseStale() {
+    LeaderLease old = acquire("A", T0).orElseThrow();
+    LeaderLease successor = acquire("B", T0.plus(LEADERSHIP)).orElseThrow();
+
+    log().leaderElection().release(old, T0.plus(LEADERSHIP).plusSeconds(1));
+
+    assertThat(log().leaderElection().current()).contains(successor);
+    assertThat(acquire("C", T0.plus(LEADERSHIP).plusSeconds(1))).isEmpty();
+  }
+
+  @Test
+  @DisplayName("013 C9: a lease with a stale token is refused and changes no message")
+  void leaseWithStaleToken() {
+    appendCommitted(event("a", "k1"));
+    LeaderLease old = acquire("A", T0).orElseThrow();
+    acquire("B", T0.plus(LEADERSHIP));
+
+    assertThatThrownBy(() -> log().lease(old, T0.plus(LEADERSHIP), LEASE, 10))
+        .isInstanceOf(LeadershipLostException.class)
+        .satisfies(e -> assertThat(((LeadershipLostException) e).staleLease()).isEqualTo(old));
+    assertThat(log().query(MessageQuery.builder().build()))
+        .singleElement()
+        .satisfies(
+            m -> {
+              assertThat(m.attempts()).isZero();
+              assertThat(m.leasedBy()).isNull();
+            });
+  }
+
+  @Test
+  @DisplayName("013 C10: a lease with an expired leadership is refused")
+  void leaseWithExpiredLeadership() {
+    appendCommitted(event("a", "k1"));
+    LeaderLease lease = acquire("A", T0).orElseThrow();
+
+    assertThatThrownBy(() -> log().lease(lease, T0.plus(LEADERSHIP), LEASE, 10))
+        .isInstanceOf(LeadershipLostException.class);
+    assertThat(log().lease(lease, T0.plus(LEADERSHIP).minusMillis(1), LEASE, 10).readable())
+        .extracting(StoredMessage::leasedBy)
+        .containsExactly("A");
+  }
+
+  @Test
+  @DisplayName("013 C11: of two concurrent acquisitions exactly one succeeds")
+  void concurrentAcquisition() throws Exception {
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      for (int round = 0; round < 10; round++) {
+        Instant now = T0.plus(LEADERSHIP.multipliedBy(round));
+        CountDownLatch start = new CountDownLatch(1);
+        Future<Optional<LeaderLease>> first =
+            pool.submit(
+                () -> {
+                  start.await();
+                  return acquire("A", now);
+                });
+        Future<Optional<LeaderLease>> second =
+            pool.submit(
+                () -> {
+                  start.await();
+                  return acquire("B", now);
+                });
+        start.countDown();
+
+        assertThat(first.get().isPresent() ^ second.get().isPresent())
+            .as("round %d: exactly one winner", round)
+            .isTrue();
+      }
+    } finally {
+      pool.shutdownNow();
+    }
   }
 }

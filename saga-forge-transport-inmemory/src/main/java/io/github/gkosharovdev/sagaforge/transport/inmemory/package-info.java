@@ -12,8 +12,9 @@
  *   <li><strong>Failures</strong>: retried with growing backoff, set aside after {@code
  *       maxAttempts}; set-aside messages can be redelivered through {@link
  *       io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries}.
- *   <li><strong>Scope</strong>: one running instance per message store; no framework dependency
- *       (Spring wiring lives in the starter).
+ *   <li><strong>Scope</strong>: any number of instances per message store, one of them the active
+ *       relay elected through {@code MessageStore.leaderElection()} (013), the others standby; no
+ *       framework dependency (Spring wiring lives in the starter).
  * </ul>
  *
  * <p>Assembly order: build the transport, build the engine with {@code transport.dispatcher()} and
