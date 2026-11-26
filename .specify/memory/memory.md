@@ -968,7 +968,7 @@ Noted only; nothing is bumped until the starter feature decides.
   event application code publishes through Spring's `ApplicationEventPublisher` is not routed to sagas. Sagas receive
   events through Saga Forge's `EventPublisher` or `DomainEvents.record`.
 - **Origin**: `specs/008-spring-boot-starter/research.md` §8, contracts/application-events.md.
-- **Status**: open (revisit with the Spring Modulith follow-up, G-008-01).
+- **Status**: open (roadmap 014, inbound route from Spring's publisher into Saga Forge's log).
 
 ### G-008-04: Repository tests cannot use `@SpringBootTest`
 - **Description**: the repository stays on JUnit 5 (jqwik 1.9 runs on JUnit Platform 1.x), while Spring Framework 7's
@@ -1135,15 +1135,19 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
    2026-11-20
 2. 012 outbox command failure feedback (G-ADOPT-02) - done 2026-11-24
 3. 013 active/standby relay (G-007-09) - done 2026-11-26
-4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
+4. 014 publish once: Spring events reach sagas, saga events reach Spring (G-008-03, G-ENG-24) - next; rescoped
+   2026-11-26 to two logs (Saga Forge's own, Modulith's registry), no shared outbox
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05) - done 2026-11-26 (`specs/015-saga-operations`), without retry
-   5b. 015b retry a failed saga from its failed step (G-015-01), split from 015, next after it
+   5b. 015b retry a failed saga from its failed step (G-015-01), split from 015; after 014 and 016 (2026-11-26)
 6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
 8. 018 versioned schema migrations (G-003-25)
 9. 019 process metadata (G-ADOPT-05)
 10. 020 Spring context tests without a database (G-009-01; needs a scope decision, Principle IV)
+
+Order revised 2026-11-26 (user): 014, then 016, then 015b. booking-service needs deadlines, so it runs Saga Forge's
+own log beside Modulith's registry (`modulith-interop=false`).
 
 Also open from the 2026-11-12 list: G-010-05 (saga metrics need an OpenTelemetry metric exporter in Spring Boot).
 Revisit the order with feedback from booking-service before each release.
@@ -1491,7 +1495,9 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   that declares a deadline fails startup, and `DeadlinesRequireOwnLogFailureAnalyzer` tells the user to switch interop
   off. `CommandGateway.schedule` throws `UnsupportedOperationException` there.
 - **Origin**: `specs/017-saga-deadlines` research R13, FR-006.
-- **Status**: accepted (revisit with roadmap 014, one event bus with Spring Modulith).
+- **Status**: accepted (2026-11-26, user: a common outbox with Modulith is not a goal; applications with deadlines
+  run Saga Forge's own log). Roadmap 014 makes the starter pick the own log when the model declares a deadline instead
+  of failing startup under the interop default.
 
 ### G-017-02: One running instance per message store, also for deadlines
 - **Description**: due messages are leased by the one relay, like every message (G-007-09). Two running instances may
@@ -1614,3 +1620,29 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   `PostgresTestSupport.newPooledDataSource`) in `Replica`, `PostgresTransportHarness` and the 10k restart test, one run
   takes about 9 s, `DeadlineRestartContainerTest.overdueBacklog` about 34 s instead of about 5 min, and the whole Postgres
   container suite about 1.5 min. Volume tests over Postgres should use a pooled `DataSource`, as an application does.
+
+## Publish once (014)
+
+### G-014-01: No per-aggregate order across Saga Forge's log and Modulith's registry
+- **Description**: with interop off, Saga Forge's message log orders the events it stores per aggregate
+  (`@AggregateIdentifier`), and Modulith's registry delivers its publications by its own semantics. Nothing orders an
+  event in one against an event in the other. An application that sends one aggregate's events to an external broker
+  (Kafka) must do so through exactly one of them, keyed by the aggregate id; consumers should check an aggregate version
+  rather than rely on partition order (retries and resubmission can reorder). Outcome events are ordered per saga
+  instance only (`saga:<sagaId>`), never against aggregate events.
+- **Origin**: user discussion, 2026-11-26 (booking-service's Kafka plans).
+- **Status**: accepted; state it again for the Kafka transport, per setup.
+
+### G-014-02: Whether the Kafka transport publishes integration events is undecided
+- **Description**: Saga Forge's log stores only events some saga handles. Making a Kafka transport the application's
+  publisher of all aggregate events (one ordered path per aggregate) would widen Saga Forge from a saga transport to an
+  integration-event bus. 014 must not foreclose either answer: same ordering key on every route, Spring code behind
+  `Outbox`/`MessageStore`.
+- **Origin**: user discussion, 2026-11-26.
+- **Status**: open (decide with the Kafka transport spec; scope decision, Principle IV).
+
+### G-014-03: Switching `modulith-interop` on a running system strands in-flight messages
+- **Description**: messages in Modulith's registry are not moved to Saga Forge's log, or back, when the property
+  changes; an application drains before switching.
+- **Origin**: user discussion, 2026-11-26.
+- **Status**: open (document; a migration is not planned).
