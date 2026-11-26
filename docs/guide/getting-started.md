@@ -1,6 +1,6 @@
 # Getting started
 
-Saga Forge 0.3.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
+Saga Forge 0.4.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
 under the group `io.github.gkosharovdev`.
 
 | Artifact | Use it for | Scope |
@@ -18,12 +18,12 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -32,7 +32,7 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -41,10 +41,10 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.3.0")
-    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.3.0")
+    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.4.0")
+    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.4.0")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
-    testImplementation("io.github.gkosharovdev:saga-forge-test:0.3.0")
+    testImplementation("io.github.gkosharovdev:saga-forge-test:0.4.0")
 }
 ```
 
