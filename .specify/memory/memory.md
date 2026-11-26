@@ -1157,9 +1157,15 @@ Revisit the order with feedback from booking-service before each release.
 - **How**: root POM metadata (url, licenses, developers, scm, issue management) and a `release` profile (sources,
   Javadoc with `doclint all,-missing`, GPG signing with loopback pinentry, `central-publishing-maven-plugin` 0.8.0
   excluding the examples and placeholder modules); `.github/workflows/release.yml` publishes on a `vX.Y.Z` tag after
-  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`. The workflow does not touch master's POMs:
-  after each release, bump them to the next `-SNAPSHOT` and update the dependency snippets (decided 2026-11-26, when
-  master was found still on `0.1.0-SNAPSHOT` after 0.3.0 had shipped; set to `0.4.0-SNAPSHOT` in PR #23).
+  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`. The
+  workflow never pushes to master: after the publish its `bump` job opens a pull request (`Start X.(Y+1).0-SNAPSHOT
+  after vX.Y.Z`, branch `chore/next-snapshot-X.(Y+1).0`, `GITHUB_TOKEN` with only `contents: write` and
+  `pull-requests: write`) that sets the POMs to `X.(Y+1).0-SNAPSHOT` and the Saga Forge version in the docs to `X.Y.Z`
+  (`.github/scripts/set-docs-version.sh`, then `build-llms-full.sh`). The docs always name the latest published
+  version, not master's snapshot. The maintainer reviews the proposed next version before merging: minor by default,
+  edited on the branch for a patch line. Qualified tags (`-RC1`) get no bump. History: master was found still on
+  `0.1.0-SNAPSHOT` after 0.3.0 had shipped and was set to `0.4.0-SNAPSHOT` in PR #23 (2026-11-26); the bump was
+  automated and the docs set back to 0.3.0 the same day.
   Deployments wait for a manual "Publish" unless the repository variable `CENTRAL_AUTO_PUBLISH` is `true`.
 - **Versioning**: semver; before 1.0 a minor release may break the API, a patch release never does; `internal`
   packages carry no compatibility promise. Release notes list schema upgrade scripts.

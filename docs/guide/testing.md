@@ -9,7 +9,7 @@ transport or Spring context, no JUnit extension: a failed expectation throws `Sa
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.4.0</version>
+    <version>0.3.0</version>
     <scope>test</scope>
 </dependency>
 ```
