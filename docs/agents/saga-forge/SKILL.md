@@ -5,7 +5,7 @@ description: Write, change, test and debug Saga Forge sagas (io.github.gkosharov
 
 # Saga Forge
 
-Saga Forge 0.1.0: Java 21, Spring Boot 4.1, Postgres storage, in-memory transport (no broker). Annotations are in
+Saga Forge 0.4.0: Java 21, Spring Boot 4.1, Postgres storage, in-memory transport (no broker). Annotations are in
 `io.github.gkosharovdev.sagaforge.core.annotation`; `CommandGateway`/`CommandId` in `core.command`; `DomainEvents`/
 `EventPublisher` in `core.event`; `SagaContext` in `core.lifecycle`; `CompensationTrigger` in `core.compensation`;
 `TransientFailure`/`FinalFailure` in `core.failure`; `SagaFixture` in `io.github.gkosharovdev.sagaforge.test`.

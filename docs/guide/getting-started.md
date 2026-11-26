@@ -1,6 +1,6 @@
 # Getting started
 
-Saga Forge 0.1.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
+Saga Forge 0.4.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
 under the group `io.github.gkosharovdev`.
 
 | Artifact | Use it for | Scope |
@@ -18,12 +18,12 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -32,7 +32,7 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -41,10 +41,10 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.1.0")
-    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.1.0")
+    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.4.0")
+    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.4.0")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
-    testImplementation("io.github.gkosharovdev:saga-forge-test:0.1.0")
+    testImplementation("io.github.gkosharovdev:saga-forge-test:0.4.0")
 }
 ```
 
@@ -71,7 +71,7 @@ Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_
   `initialize-schema=never` (the default). With `never`, startup fails if the tables are missing:
   `Saga Forge's tables [...] do not exist in the database.`
 
-A database created from the 0.1.0 `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
+A database created from the current `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
 [Operations](operations.md#schema-and-upgrades) for when they apply.
 
 ## 3. A saga

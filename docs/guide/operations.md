@@ -42,7 +42,7 @@ with your own bean.
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
   `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
-  `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
+  `saga-forge.storage.postgres.initialize-schema=always`. The current `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
   applies to in its header comment. Run each once, in one transaction, while no runtime is running. Release notes list
   any new upgrade script.

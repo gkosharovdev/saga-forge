@@ -1,4 +1,4 @@
-# Limitations to design around (0.1.0)
+# Limitations to design around (0.4.0)
 
 These are known limits of the current release, most important first for a Spring Boot monolith on Postgres and the
 in-memory transport. Each has an id in the project's gap register (`.specify/memory/memory.md`), so you can follow its

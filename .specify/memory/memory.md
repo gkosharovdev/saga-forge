@@ -1157,7 +1157,9 @@ Revisit the order with feedback from booking-service before each release.
 - **How**: root POM metadata (url, licenses, developers, scm, issue management) and a `release` profile (sources,
   Javadoc with `doclint all,-missing`, GPG signing with loopback pinentry, `central-publishing-maven-plugin` 0.8.0
   excluding the examples and placeholder modules); `.github/workflows/release.yml` publishes on a `vX.Y.Z` tag after
-  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`.
+  the full build with container suites, version taken from the tag (`versions:set`), master stays `-SNAPSHOT`. The workflow does not touch master's POMs:
+  after each release, bump them to the next `-SNAPSHOT` and update the dependency snippets (decided 2026-11-26, when
+  master was found still on `0.1.0-SNAPSHOT` after 0.3.0 had shipped; set to `0.4.0-SNAPSHOT` in PR #23).
   Deployments wait for a manual "Publish" unless the repository variable `CENTRAL_AUTO_PUBLISH` is `true`.
 - **Versioning**: semver; before 1.0 a minor release may break the API, a patch release never does; `internal`
   packages carry no compatibility promise. Release notes list schema upgrade scripts.

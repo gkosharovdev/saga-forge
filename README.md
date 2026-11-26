@@ -265,7 +265,7 @@ copied from compiling code in this repository. It is also published as a site at
 | [Deadlines](docs/guide/deadlines.md) | saga deadlines, timeout steps and scheduled commands |
 | [Testing](docs/guide/testing.md) | `SagaFixture` given/when/then tests, in memory |
 | [Operations](docs/guide/operations.md) | properties, Actuator, OpenTelemetry spans and metrics, schema upgrades |
-| [Limitations](docs/guide/limitations.md) | what to design around in 0.1.0 |
+| [Limitations](docs/guide/limitations.md) | what to design around in 0.4.0 |
 
 API reference: [Javadoc on javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core). Spring Boot
 details: the [starter README](saga-forge-spring-boot-starter/README.md). Design: [docs/architecture.md](docs/architecture.md),
@@ -293,7 +293,8 @@ the snippet into `AGENTS.md`.
 
 ## Status
 
-0.1.0 is the first release, in production use in one Spring Boot monolith. It ships the annotation model with startup
+0.4.0 is the coming release (0.1.0 to 0.3.0 are on Maven Central), in production use in one Spring Boot monolith.
+It ships the annotation model with startup
 validation, the saga runtime (event routing by association, the saga-scoped unit of work in your transaction, step
 retry with stable command identities, compensation, saga deadlines and scheduled commands), Postgres storage, the in-memory transport with a durable message
 store (at least once, survives restarts, no broker; several application instances share it, one relay active and the
@@ -323,12 +324,12 @@ In a Spring Boot 4.1 application on Java 21, add the starter and the Postgres st
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -420,12 +421,13 @@ compatibility promise. Each release's notes list any schema upgrade script (for 
 **To release** version X.Y.Z, push a tag from master:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 The `Release` workflow takes the version from the tag, runs the full build with the container suites, signs every
-artifact and uploads one bundle to the Sonatype Central Portal, then creates the GitHub release. Master stays on the
-next `-SNAPSHOT` version. By default the deployment waits in the portal (central.sonatype.com, Deployments) for a
+artifact and uploads one bundle to the Sonatype Central Portal, then creates the GitHub release. The POMs on master are not changed by the workflow: after each release, set them to
+the next `-SNAPSHOT` (`mvn versions:set -DnewVersion=0.5.0-SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true`)
+and update the version in the dependency snippets of the READMEs and `docs/guide/`. By default the deployment waits in the portal (central.sonatype.com, Deployments) for a
 manual **Publish**; set the repository variable `CENTRAL_AUTO_PUBLISH` to `true` to publish validated deployments
 automatically. A published version can never be changed or removed.
 
