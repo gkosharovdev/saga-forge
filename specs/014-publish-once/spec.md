@@ -77,14 +77,18 @@ module listener that wants it, exactly once each, durably, after the publishing 
 - **D10 — The ordering key does not depend on the route.** An event stored through the inbound route is keyed by its
   `@AggregateIdentifier`, exactly like an event recorded in a unit of work or published through `EventPublisher`, so a
   later transport can partition on the same key (G-014-01).
+- **D11 — The inbound route is on by default.** `saga-forge.application-events.inbound.enabled` defaults to `true`
+  (clarification, 2026-11-26). Saga Forge is 0.x and its first adopter has not gone live, so "publish once" works with
+  no configuration; the upgrade notes tell applications that publish an event both ways to drop one call.
 
 ## Clarifications
 
 ### Session 2026-11-26
 
-- Q: Is the inbound route on by default or opt-in? → A: [NEEDS CLARIFICATION: on by default (with a property to
-  switch it off), or off until the application sets a property? An existing application that today publishes the same
-  event both through Spring and through `EventPublisher` would have it stored twice once the route is on.]
+- Q: Is the inbound route on by default or opt-in? → A: On by default, switched off with
+  `saga-forge.application-events.inbound.enabled=false` (Option A). An application that today publishes the same event
+  both through Spring and through `EventPublisher` removes one of the two calls when it upgrades; the upgrade notes say
+  so (D11).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -259,8 +263,9 @@ context starts, the transport uses the own log, the startup log names the reason
   discarded on rollback), and Saga Forge MUST NOT publish it to Spring again (D3).
 - **FR-006**: Events published through Spring by Spring Data aggregates' `@DomainEvents` on save MUST be covered by
   FR-001 to FR-005.
-- **FR-007**: The inbound route's default state MUST follow the clarification above; it MUST be switchable by a
-  documented property.
+- **FR-007**: The inbound route MUST be on by default and MUST be switched off by
+  `saga-forge.application-events.inbound.enabled=false`, documented in the starter's README and configuration metadata
+  (D11).
 - **FR-008**: The stored event's ordering key MUST be its `@AggregateIdentifier` value, the same key as for events
   stored by the other routes (D10).
 
@@ -307,7 +312,8 @@ context starts, the transport uses the own log, the startup log names the reason
 - **FR-023**: The interop mode's behaviour MUST stay unchanged apart from the inbound route storing into its log (D1).
 - **FR-024**: The user guide, the starter's README (`ReadmePropertiesTest`), `docs/agents/saga-forge/SKILL.md`,
   `docs/agents/AGENTS-snippet.md` and `llms-full.txt` MUST describe the publishing routes, the deprecation and the
-  deadline default; `docs/guide/limitations.md` MUST state the ordering limits of two logs (G-014-01).
+  deadline default, with an upgrade note for applications that publish an event both through Spring and through
+  `EventPublisher` (D11); `docs/guide/limitations.md` MUST state the ordering limits of two logs (G-014-01).
 - **FR-025**: `.specify/memory/memory.md` MUST close G-008-03 and G-ENG-24 and record any gap this feature leaves.
 
 ### Key Entities

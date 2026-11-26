@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain — one open: inbound route default (FR-007)
+- [x] No [NEEDS CLARIFICATION] markers remain (inbound route default resolved 2026-11-26: on by default, D11)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (as far as a framework integration allows)
@@ -31,4 +31,4 @@
 
 ## Notes
 
-- Resolve the clarification before `/speckit-plan`.
+- All items pass; ready for `/speckit-plan`.
