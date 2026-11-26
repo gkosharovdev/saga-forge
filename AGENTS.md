@@ -207,7 +207,8 @@
   `SagaFixture.operations()`, `whenOperator(...)`, `Builder.recovery`, `Then.expectResolved`/`expectNotResolved`/
   `expectHistory`, `InstanceView.history`/`resolution`. Properties 44 to 46.
 - Implemented and tested without containers, added by `specs/014-publish-once` (closes G-008-03 and G-ENG-24; container
-  suites written but not yet run, G-014-06): publish once, with Saga Forge's own log beside Spring Modulith's registry
+  suites written but not yet run, G-014-06; `mvn verify` without containers passed on 2026-11-26 with 1,852 tests, and
+  the release build with Javadoc passed): publish once, with Saga Forge's own log beside Spring Modulith's registry
   (two logs; interop unchanged). Core's `EventReceiver` gains the default `receive(event, sourceSagaId)`; the runtime's
   `UnitOfWork` hands a recorded event its own instance ran in process to the outbox when another saga type has a step
   for it (`runtime.internal.EventSubscriptions`), and `EventRouter` gives the source instance no result when its step

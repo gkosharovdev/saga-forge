@@ -309,6 +309,9 @@ T018 FixtureParityTest            (fixture-test/)
 
 - **Baseline (T001)**: `mvn verify` without containers green on 2026-11-26, 1,819 tests, 0 failures, 1 skipped. Docker
   is not available in this session, so no `@Tag("container")` suite ran (G-014-06).
+- **Whole build (T044, partial)**: `mvn verify` without containers green on 2026-11-26, 1,852 tests, 0 failures, 1
+  skipped; `mvn -P release -Dgpg.skip -DskipTests install` (Javadoc) green. `mvn -Pcontainer-tests verify` not run (no
+  Docker, G-014-06), so T044 stays open.
 - **Design skills (T002)**: `effective-java`, `clean-code-java` and `solid-design-review` are not installed; their
   principles were applied by hand (research.md R12).
 - **Deviations**:
