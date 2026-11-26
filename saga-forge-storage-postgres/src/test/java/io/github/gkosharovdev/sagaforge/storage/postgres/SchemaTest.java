@@ -56,7 +56,7 @@ class SchemaTest {
             "saga_instance",
             "saga_lifecycle_history",
             "saga_message_store",
-            "saga_message_store_consumer");
+            "saga_message_store_leader");
     assertThat(index)
         .singleElement()
         .extracting(row -> (String) row.get("indexdef"))

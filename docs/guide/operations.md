@@ -24,7 +24,9 @@ with your own bean.
 | `saga-forge.transport.lease-batch-size` | `100` | Most messages leased at once. |
 | `saga-forge.transport.retention` | `7d` | How long consumed messages are kept. |
 | `saga-forge.transport.retention-sweep-interval` | `1h` | How often consumed messages older than the retention are removed. |
-| `saga-forge.transport.heartbeat-interval` | `30s` | How often this instance refreshes its heartbeat in the message store. |
+| `saga-forge.transport.leadership.lease-duration` | `30s` | How long the delivering instance's leadership lasts without renewal; after a crash a standby takes over once it expires. |
+| `saga-forge.transport.leadership.renew-interval` | `10s` | How often the delivering instance renews its leadership; shorter than the lease duration. |
+| `saga-forge.transport.leadership.check-interval` | `5s` | How often a standby instance checks whether it can take over; shorter than the lease duration. |
 | `saga-forge.transport.modulith-interop` | `true` | Whether the transport keeps its messages in Spring Modulith's registry when it is present. |
 | `saga-forge.telemetry.enabled` | `true` | Whether the application's OpenTelemetry instance is handed to the runtime and the transport. |
 | `saga-forge.telemetry.tracing.enabled` | `true` | Whether saga spans are recorded. |
@@ -38,7 +40,7 @@ with your own bean.
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The 0.1.0 `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
@@ -48,6 +50,8 @@ with your own bean.
   history rows of the dropped `REQUIRES_INTERVENTION` kind. Code that reads statuses by name must use the new name.
 - `schema-upgrade-017.sql` adds the message store's due time and the `CANCELLED` status, for deadlines and scheduled
   commands.
+- `schema-upgrade-013.sql` (after `-017.sql`) creates the leadership table `saga_message_store_leader` and drops the
+  heartbeat table `saga_message_store_consumer`. Stop every instance before applying it.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -63,11 +67,19 @@ management.endpoints.web.exposure.include=health,sagaforge
   age of the oldest unconsumed message:
 
   ```json
-  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S" }
+  { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S",
+    "leadership": { "role": "STANDBY", "relayId": "a91e…",
+      "leader": { "holderId": "7f3c…", "holderHost": "orders-1", "fencingToken": 12,
+                  "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } } }
   ```
 
+  `role` is this instance's (`ACTIVE` or `STANDBY`); `leader` is the leadership record as last seen, absent before
+  any was seen.
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
-  delivery that failed `saga-forge.transport.max-attempts` times).
+  delivery that failed `saga-forge.transport.max-attempts` times), `DEGRADED` while no instance has led the message
+  store for longer than one leadership lease, and `UP` otherwise. Its details carry `role`, `fencingToken` and, on a
+  standby, `leader` as `holderId@holderHost`. Spring Boot leaves `DEGRADED` out of the overall health unless you add
+  it to `management.endpoint.health.status.order` (see [Running several instances](#running-several-instances)).
 - Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
 - There is no endpoint for saga instances and no write action yet; inspect `saga_instance`, `saga_context` and
   `saga_lifecycle_history` directly.
@@ -133,6 +145,8 @@ Metrics:
 | `saga_forge.command.failures` | counter | — | `classification` (`final`, `exhausted`): outbox commands the transport gave up on and reported to their saga |
 | `saga_forge.message_store.messages` | gauge | `{message}` | `saga_forge.message.status` |
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
+| `saga_forge.relay.active` | gauge | — | 1 while this instance's relay leads its message store, else 0 |
+| `saga_forge.relay.leadership_changes` | counter | — | `saga_forge.leadership.change` (`acquired`, `lost`, `released`) |
 
 A deadline delivery's `saga_forge.handle` span carries `saga_forge.deadline.name`; a delivery span of a message with a
 due time carries `saga_forge.message.not_before` on its first attempt. A deadline that arrives when its instance no
@@ -164,6 +178,40 @@ saga_forge_message_store_messages{saga_forge_message_status="SET_ASIDE"} > 0
 saga_forge_message_store_oldest_unconsumed_age_seconds > 60
 ```
 
+
+## Running several instances
+
+Any number of instances can run over one database. Every instance accepts requests, runs units of work and appends
+messages; the transports elect one **active** relay that delivers every message, deadline and scheduled command, while
+the others are **standby**.
+
+| Event | What happens | Takeover |
+|---|---|---|
+| Graceful stop of the active instance | It finishes its in-flight deliveries and releases the leadership | within `check-interval` (5 s) |
+| Crash, network partition or long pause | Its leadership expires; a standby acquires a newer fencing token, and the store refuses the old one's leases | within `lease-duration + check-interval` (35 s) |
+| Database unreachable for the active instance | It stops leasing one `renew-interval` before its lease ends by its own clock | as for a crash |
+
+Delivery stays at least once: a message the old leader held may be delivered again by the new one, so handlers pass
+their `CommandId` on. Delivery throughput is that of one instance; partitioned delivery is not supported.
+
+Log events (logger of the transport): `saga.transport.leadership.acquired` (INFO, with `relay`, `host`,
+`fencingToken`, `previousHolder`), `saga.transport.leadership.released` (INFO), `saga.transport.leadership.lost`
+(WARNING, `cause=renewRefused`, `trustExpired` or `fenced`, and `newHolder` when known) and
+`saga.transport.leadership.checkFailed` (WARNING, the store could not be reached; the role does not change by itself).
+
+To make a leaderless store show in the overall health:
+
+```properties
+management.endpoint.health.status.order=down,out-of-service,degraded,up,unknown
+management.endpoint.health.status.http-mapping.degraded=200
+```
+
+Alert on `max(saga_forge.relay.active) == 0` across instances for longer than `lease-duration + check-interval`.
+
+**Why one active relay.** One consumer keeps per-aggregate order and due times simple, and a leadership lease with a
+fencing token keeps a paused or partitioned instance from delivering beside the new leader. The design and the prior
+art behind it (Kubernetes leases, Kafka epochs, Axon token claims and others) are in the
+[architecture notes](../architecture.md#how-other-frameworks-solved-the-same-problems).
 
 ## Outcome events
 

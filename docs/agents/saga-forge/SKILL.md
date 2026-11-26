@@ -112,6 +112,9 @@ public class OrderProcessingSaga {
   returned `ScheduledCommandId`'s `value()` in `SagaContext` and `cancel` it if it must not run: ending the saga does
   not cancel it.
 - With the starter, a saga that needs collaborators is a `@Scope("prototype")` bean; handler hosts are beans.
+- Run as many application instances as needed over one database: one elected relay delivers, the others stand by.
+  Tune takeover with `saga-forge.transport.leadership.lease-duration` / `renew-interval` / `check-interval` (30 s / 10 s
+  / 5 s); keep handlers idempotent (`CommandId`), since a takeover can redeliver.
 - Test with `SagaFixture.of(Saga.class).build().given(...).when(...).expectCommands(...)`; use `.handlers(...)` to run
   real handlers and `givenAggregates(...)` to seed aggregates.
 
@@ -134,6 +137,9 @@ public class OrderProcessingSaga {
 - Don't expect one event that continues a saga to also start a different saga type; record a separate event.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.
+- Don't expect every instance to deliver messages or run deadlines: only the active relay does, and delivery throughput
+  is that of one instance. Don't look for `saga-forge.transport.heartbeat-interval`: it was replaced by the
+  leadership properties.
 - Don't write a saga step that takes `SagaCompleted`, `SagaFailed` or `SagaCompensated`: they are not domain events and
   reach no saga. Start follow-up work from a listener.
 - Don't look for `REQUIRES_INTERVENTION`: a failed compensation ends `COMPENSATION_FAILED` (existing Postgres

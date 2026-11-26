@@ -23,7 +23,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Compensation (`@StartCompensation`, `@SagaCompensation` run by the runtime, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`COMPENSATION_FAILED`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
 | Storage providers (Postgres, MySQL, MongoDB) | Postgres implemented, tested; MySQL and MongoDB not implemented |
 | Message store (`core.spi.store.MessageStore`), outbox commands (`@Command(delivery = OUTBOX)`, `CommandReceiver`, rule R23, Property 35), `Outbox.committed` | Implemented in core and the runtime, Postgres log (`PostgresMessageStore`), tested, including container suites ([007](../specs/007-in-memory-transport/spec.md)) |
-| Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); Kafka not implemented |
+| Transports (in-memory, Kafka) | In-memory implemented with a durable message store, tested ([007](../specs/007-in-memory-transport/spec.md)); several instances share one store with one active relay elected by a fenced leader lease (`LeaderElection`, `LeaderLease`, `MessageStore.lease(LeaderLease, ...)`), tested, including container suites ([013](../specs/013-active-standby-relay/spec.md)); Kafka not implemented |
 | Spring Boot auto-configuration | Implemented, tested, including container suites ([008](../specs/008-spring-boot-starter/spec.md)): model collection, storage detection, runtime assembly and lifecycle, Spring host SPIs (saga beans, handler beans and parameters, Spring Data aggregates), failure analysis, overrides, `saga-forge.*` properties, Spring Modulith listener delivery, Actuator endpoint and health; the in-memory transport's wiring from [007](../specs/007-in-memory-transport/spec.md) |
 | Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
 | Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
@@ -224,6 +224,51 @@ sequenceDiagram
 
 A clean shutdown releases its leases at once, so the next start does not wait for them to expire.
 
+### Several application instances
+
+Any number of instances can share one message store ([013](../specs/013-active-standby-relay/spec.md)). Each accepts
+requests, runs units of work and appends to the store; only one relay delivers. The relays elect it through a one-row
+leadership record (`saga_message_store_leader`) behind `MessageStore.leaderElection()`:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Relay A (active)
+    participant L as saga_message_store_leader
+    participant Log as saga_message_store
+    participant B as Relay B (standby)
+
+    A->>L: tryAcquire: no live holder, token 1, expires now + 30 s
+    loop every renew interval (10 s)
+        A->>L: renew(token 1)
+        A->>Log: lease(token 1, ...): checks token 1 is current, then leases
+    end
+    loop every check interval (5 s)
+        B->>L: tryAcquire: refused while token 1 is live
+    end
+    Note over A: crash, or a pause longer than the lease
+    B->>L: tryAcquire after expiry: token 2
+    A->>Log: lease(token 1, ...) after waking up
+    Log-->>A: LeadershipLostException: A steps down
+```
+
+- **Takeover.** After a graceful stop the leader releases the record and a standby takes over within the check
+  interval; after a crash or a partition, within `leaseDuration + checkInterval` (35 s by default).
+- **Fencing.** Every acquisition increments the fencing token, and the store leases only for the current token. In
+  Postgres the lease transaction holds the leadership row `FOR SHARE`, so a takeover waits for a lease in progress and a
+  deposed leader's lease fails instead of overlapping the new leader's.
+- **Local distrust.** A leader trusts its record only until `start of its last successful call + leaseDuration -
+  renewInterval` by its own clock, so it stops leasing before the store would hand the leadership on. Timing depends on
+  the instances' clocks; safety does not, because the fencing token decides.
+- **A deposed leader** finishes the deliveries it already leased and keeps renewing their message leases; it leases
+  nothing new. A message it held when it crashed is leased again after its message lease expires: at least once.
+- **Across instances**, two units of work on one saga instance are kept apart by the instance row lock
+  (`StorageProvider.findByIdAndLock`), not by the in-process lock, which only covers one JVM.
+- **Leader-only work.** The retention sweep and due deadlines and scheduled commands run on the leader, like every
+  delivery.
+- **Throughput** is that of one relay. Spreading delivery over the instances (partitioned leasing) is not part of
+  this design; it is what the Kafka transport would bring.
+
 ### Message states
 
 ```mermaid
@@ -249,8 +294,11 @@ names on the left are from *Enterprise Integration Patterns* (Hohpe and Woolf) u
 | [Event Message](https://www.enterpriseintegrationpatterns.com/patterns/messaging/EventMessage.html) / [Command Message](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CommandMessage.html) | `@DomainEvent` types (published, possibly many interested sagas) and `@Command` types (exactly one `@CommandHandler`). |
 | [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html) (microservices.io), building on [Transactional Client](https://www.enterpriseintegrationpatterns.com/patterns/messaging/TransactionalClient.html) | The `IN_TRANSACTION` `Outbox`: outgoing messages are rows written in the unit of work's own transaction, so state and messages commit or roll back together. |
 | [Guaranteed Delivery](https://www.enterpriseintegrationpatterns.com/patterns/messaging/GuaranteedMessaging.html), [Message Store](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageStore.html) | `MessageStore` (`saga_message_store`): every message is stored before it is delivered, kept until consumed, then for 7 days for diagnostics. |
-| Message Relay / [Polling Publisher](https://microservices.io/patterns/data/polling-publisher.html) (microservices.io), [Polling Consumer](https://www.enterpriseintegrationpatterns.com/patterns/messaging/PollingConsumer.html) | The `Relay`: a polling loop that reads committed rows from the log and delivers them; woken early by `Outbox.committed`. |
-| Lease (Gray and Cheriton, 1989; also SQS's visibility timeout, Pub/Sub's ack deadline) | `MessageStore.lease` / `renew` / `release`: a reservation with an expiry, so a crashed process's messages become available again without cleanup. It is what would let [Competing Consumers](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CompetingConsumers.html) share a log safely, although this transport targets one running instance. |
+| Message Relay / [Polling Publisher](https://microservices.io/patterns/data/polling-publisher.html) (microservices.io), [Polling Consumer](https://www.enterpriseintegrationpatterns.com/patterns/messaging/PollingConsumer.html) | The `Relay`: a polling loop that reads committed rows from the log and delivers them; woken early by `Outbox.committed`. With several instances it runs on the elected leader only. |
+| Lease (Gray and Cheriton, 1989; also SQS's visibility timeout, Pub/Sub's ack deadline) | `MessageStore.lease` / `renew` / `release`: a reservation with an expiry, so a crashed process's messages become available again without cleanup. Message leases still protect a deposed leader's in-flight deliveries; the leadership itself is a lease too (below). |
+| Leader Election with a lease ([Leader and Followers](https://martinfowler.com/articles/patterns-of-distributed-systems/leader-follower.html), [Lease](https://martinfowler.com/articles/patterns-of-distributed-systems/lease.html), Patterns of Distributed Systems; Kubernetes [Leases](https://kubernetes.io/docs/concepts/architecture/leases/) and client-go [`leaderelection`](https://pkg.go.dev/k8s.io/client-go/tools/leaderelection); Curator [`LeaderLatch`](https://curator.apache.org/docs/recipes-leader-latch); Spring Integration [`LockRegistryLeaderInitiator`](https://docs.spring.io/spring-integration/reference/leadership-event-handling.html)) | `LeaderElection` (`tryAcquire` / `renew` / `release` / `current`) over `saga_message_store_leader`, driven by the transport's `LeaderElector`. The three timings are client-go's `LeaseDuration` / `RenewDeadline` / `RetryPeriod` as `leaseDuration` / `renewInterval` / `checkInterval`. |
+| Fencing Token (Kleppmann, [How to do distributed locking](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html), 2016; [Generation Clock](https://martinfowler.com/articles/patterns-of-distributed-systems/generation.html), also called term or epoch) | `LeaderLease.fencingToken`, incremented on every acquisition; `MessageStore.lease(LeaderLease, ...)` refuses a token that is no longer current (`LeadershipLostException`). client-go says outright that its election gives no fencing; Saga Forge adds it in the store. |
+| Active/Standby versus [Competing Consumers](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CompetingConsumers.html); [Singular Update Queue](https://martinfowler.com/articles/patterns-of-distributed-systems/singular-update-queue.html) | One active relay delivers; standbys compete only for the leadership, never for messages. One consumer keeps per-aggregate order and deadline due times simple, at the price of one relay's throughput. Competing consumers per partition is the Kafka transport's model. |
 | [Message Dispatcher](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageDispatcher.html), with ordering keys in the spirit of Kafka partition keys and JMS message groups | The keyed worker lanes: one lane per ordering key keeps an aggregate's messages in order while different aggregates are delivered in parallel. |
 | [Idempotent Receiver](https://www.enterpriseintegrationpatterns.com/patterns/messaging/IdempotentReceiver.html) / [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html) (microservices.io) | Delivery is at least once. The runtime reports a redelivered event of a completed step as `DUPLICATE`, and a handler passes `CommandId` on as the idempotency key; a outbox command is marked consumed in its handler's transaction. |
 | [Dead Letter Channel](https://www.enterpriseintegrationpatterns.com/patterns/messaging/DeadLetterChannel.html), [Invalid Message Channel](https://www.enterpriseintegrationpatterns.com/patterns/messaging/InvalidMessageChannel.html) | `SET_ASIDE` with reason `MAX_ATTEMPTS` (delivery kept failing) or `UNREADABLE` (the payload cannot be decoded), visible through `MessageStoreQueries` and redeliverable by an operator. |
@@ -258,6 +306,37 @@ names on the left are from *Enterprise Integration Patterns* (Hohpe and Woolf) u
 In a Spring application with Spring Modulith, the Message Store is Spring Modulith's event publication registry
 instead, and Saga Forge keeps only its delivery records beside it: one outbox per application, not two
 ([007](../specs/007-in-memory-transport/spec.md) FR-028).
+
+#### How other frameworks solved the same problems
+
+Checked against each vendor's documentation on 2026-11-26.
+
+| Problem | Framework | Mechanism | What Saga Forge took or rejected |
+|---|---|---|---|
+| Transactional outbox and relay | Eventuate Tram | A message table written with the business data, read by a separate [Eventuate CDC service](https://eventuate.io/docs/manual/eventuate-tram/latest/cdc-configuration.html) that tails the table or binlog | Took the table in the business transaction; rejected a separate CDC process, the relay lives in the application |
+| | Spring Modulith | [Event publication registry](https://docs.spring.io/spring-modulith/reference/events.html): entries written as part of the business transaction, incomplete ones resubmitted (`republish-outstanding-events-on-restart`), stale ones marked failed | Interop: under Spring Modulith its registry is the message store (007) |
+| | NServiceBus | [Outbox](https://docs.particular.net/nservicebus/outbox/): outgoing messages stored with the business data, incoming deduplicated by `MessageId` | Same idea; deduplication here is per step (`DUPLICATE`) and per `CommandId` |
+| | Debezium | [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html) SMT over an outbox table (`aggregatetype`, `aggregateid`, `type`, `payload`) | Ordering key per aggregate is the same choice; no log-based CDC |
+| One active relay across replicas | Eventuate CDC | ZooKeeper-based leadership election (Redis optional) so one reader runs; `eventuatelocal.cdc.leadership.lock.path` | Took the single active reader; rejected an extra coordination service, the election is a row in the same database |
+| | Axon Framework | [Streaming event processors](https://docs.axoniq.io/axon-framework-reference/4.10/events/event-processors/streaming/) (`TrackingEventProcessor`, pooled streaming): a node claims a token per segment in the `TokenStore`; an unrenewed claim is taken over after `claimTimeout` (10 s default) | The closest model: a claim with a timeout in the shared database. Took the expiring claim; rejected segments for now |
+| | Quartz | [Clustered JDBC JobStore](https://www.quartz-scheduler.org/documentation/quartz-2.3.0/configuration/ConfigJDBCJobStoreClustering.html) (`isClustered`, `clusterCheckinInterval`): a cluster-wide lock in the database; clocks must agree within a second | Took the database as the coordinator; avoided the clock requirement for safety (the fencing token decides, clocks only affect timing) |
+| | ShedLock | [Lock row](https://github.com/lukas-krecan/ShedLock) with `lockAtMostFor` / `lockAtLeastFor`: a task runs at most once at the same time; not a distributed scheduler | Same lock-with-expiry shape, but held continuously as a leadership and renewed |
+| | Spring Integration | [`LockRegistryLeaderInitiator`](https://docs.spring.io/spring-integration/reference/leadership-event-handling.html) with `OnGrantedEvent` / `OnRevokedEvent` | Roles are visible the same way, as events in the log and telemetry |
+| Fencing zombie instances | Kafka | [KIP-98](https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging): a producer with the same `transactional.id` bumps the epoch and fences the old one; [KIP-848](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol): a member epoch fences a stale consumer's offset commits (`FENCED_MEMBER_EPOCH`) | Took it: the fencing token is an epoch checked by the store on every lease |
+| Scale-out delivery (not taken) | Kafka, Axon | Partitions consumed by one member of a consumer group each (within a group, each partition is assigned to exactly one consumer); Axon's segments | Rejected for the in-memory transport: one relay. Partitioned delivery belongs to the Kafka transport |
+| Saga model | Axon Framework | [`@Saga`, `@SagaEventHandler(associationProperty = ...)`, `@StartSaga`, `@EndSaga`](https://docs.axoniq.io/axon-framework-reference/4.10/sagas/implementation/) | Took the annotation style and `associationProperty`; adds the saga-scoped unit of work and step-targeted compensation |
+| | Eventuate Tram Sagas | [Orchestration](https://eventuate.io/docs/manual/eventuate-tram/latest/getting-started-eventuate-tram-sagas.html) with a `SagaDefinition`: `step().invokeParticipant(...).withCompensation(...)` | Rejected a fluent definition in favour of annotated steps; kept compensation per step |
+| Retries and dead letters | Spring Kafka; EIP | [`DefaultErrorHandler` with `DeadLetterPublishingRecoverer`](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html); [Dead Letter Channel](https://www.enterpriseintegrationpatterns.com/patterns/messaging/DeadLetterChannel.html) | Backoff then `SET_ASIDE` in the same store instead of a separate topic |
+| Deadlines | Axon; NServiceBus | [`DeadlineManager`, `@DeadlineHandler`](https://docs.axoniq.io/axon-framework-reference/4.10/deadlines/deadline-managers/) (cancellable); [saga timeouts](https://docs.particular.net/nservicebus/sagas/timeouts) (`RequestTimeout`, `IHandleTimeouts`; cannot be revoked) | Took Axon's named, cancellable deadline; stored as a due message in the same store, delivered by the leader |
+| Idempotency | EIP; microservices.io | [Idempotent Receiver](https://www.enterpriseintegrationpatterns.com/patterns/messaging/IdempotentReceiver.html); [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html) | `DUPLICATE` for a completed step; `CommandId` as the key handlers pass on |
+
+**Recap.** Saga Forge writes messages in the same transaction as the saga state (outbox) and delivers them from a
+relay that reads the store (polling publisher). Every reservation, of a message or of the leadership, is a lease with
+an expiry, so a crashed process needs no cleanup. With several instances the relays elect one leader the way
+Kubernetes components do, but in the application's own database, and every lease call carries a fencing token, the
+idea Kafka uses to fence zombie producers. Clocks only decide how fast a takeover happens, never whether two relays
+lease at once. Delivery is at least once everywhere, so steps and handlers are idempotent. Scaling delivery out
+(partitions, segments) is left to the Kafka transport.
 
 ## Observability
 
@@ -464,8 +543,7 @@ and NServiceBus's saga timeouts, without a separate scheduler:
 - **Scheduled commands.** `CommandGateway.schedule(command, at)` stores an outbox command with a due time and returns a
   `ScheduledCommandId`; `cancel` withdraws a pending one.
 
-Known limitations: no deadlines with Spring Modulith interop (G-017-01); one running instance per message store until
-013 (G-017-02); overdue messages run in stored, not due, order (G-017-03); latency is bounded by the relay's poll
+Known limitations: no deadlines with Spring Modulith interop (G-017-01); overdue messages run in stored, not due, order (G-017-03); latency is bounded by the relay's poll
 interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command is not
 cancelled with its saga (G-017-06).
 

@@ -1,7 +1,7 @@
 name: CI
 
-# Pushes to any branch run the unit tests. Pushes to master (a merged pull request) also run the integration tests,
-# as a separate job in parallel: the Testcontainers classes tagged "container", enabled by the container-tests profile.
+# Pushes to any branch run the unit tests and, as a separate job in parallel, the integration tests: the
+# Testcontainers classes tagged "container", enabled by the container-tests profile.
 on:
   push:
     branches: ["**"]
@@ -70,7 +70,6 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

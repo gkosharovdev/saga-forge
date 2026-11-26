@@ -143,6 +143,10 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
 - Deadlines that came due while the application was down run once it is back. Each runs at most once; overdue
   messages are delivered in the order they were stored, not strictly in due order.
 - A deadline the relay has already leased when the awaited event cancels it is still delivered, and ignored.
+- With several application instances, a deadline is delivered once, by whichever instance's relay leads when it
+  comes due; one started or cancelled on any instance behaves the same. During a takeover after a crash it can run up
+  to `saga-forge.transport.leadership.lease-duration + check-interval` late (see
+  [Running several instances](operations.md#running-several-instances)).
 
 ## Testing
 

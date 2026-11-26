@@ -10,6 +10,7 @@ import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.TransportSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.CardService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
@@ -27,14 +28,19 @@ import java.util.function.BooleanSupplier;
  */
 public final class TransportHarness implements AutoCloseable {
 
-  /** Fast settings for tests: 2 workers, 10 ms backoff, 1 s lease, 50 ms poll. */
+  /**
+   * Fast settings for tests: 2 workers, 10 ms backoff, 1 s lease, 50 ms poll, a 600 ms leadership
+   * renewed every 200 ms and checked every 100 ms (013), so a crashed relay is replaced quickly.
+   */
   public static final TransportSettings FAST =
       TransportSettings.defaults()
           .withWorkers(2)
           .withBackoff(Duration.ofMillis(10), Duration.ofMillis(40))
           .withLeaseDuration(Duration.ofSeconds(1))
           .withPollInterval(Duration.ofMillis(50))
-          .withHeartbeatInterval(Duration.ofSeconds(1));
+          .withLeadership(
+              new LeadershipSettings(
+                  Duration.ofMillis(600), Duration.ofMillis(200), Duration.ofMillis(100)));
 
   public final InMemoryTransactionBoundary boundary = new InMemoryTransactionBoundary();
   public final TransactionalInMemoryStorageProvider storage =

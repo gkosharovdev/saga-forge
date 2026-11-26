@@ -62,7 +62,7 @@ spring.datasource.password=orders
 ```
 
 Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_lifecycle_history`,
-`saga_message_store`, `saga_message_store_consumer`) are defined in the classpath resource
+`saga_message_store`, `saga_message_store_leader`) are defined in the classpath resource
 `io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql` inside `saga-forge-storage-postgres`.
 
 - **Development**: let the starter create them in an empty database:

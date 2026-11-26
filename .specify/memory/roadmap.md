@@ -64,7 +64,7 @@ building on unfinished work.
 |---|---|---|---|---|---|
 | 011 | Saga outcome events, `COMPENSATION_FAILED` rename, one unit of work (**done**, PR #18) | SF-1 | G-ADOPT-01, G-011-02 | W1, W2 | P1 |
 | 012 | Outbox command failure feedback (**done**, `specs/012-outbox-command-failure-feedback`) | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
-| 013 | Active/standby relay | SF-6 | G-007-09 | W9 | P1 |
+| 013 | Active/standby relay (**done**, `specs/013-active-standby-relay`) | SF-6 | G-007-09 | W9 | P1 |
 | 014 | One event bus with Spring Modulith | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05 | W10 | P1 |
 | 016 | Marker SPI and jMolecules adapter | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
@@ -160,6 +160,11 @@ events that continue the same instance run in the same unit of work; `CommandGat
 rollback-only before rethrowing; an outbox command's failure is not reported to the saga yet.
 
 ### 013: Active/standby relay
+
+**Status (2026-11-26).** Done by `specs/013-active-standby-relay`: a fenced leader lease in the message store
+(`LeaderElection`, `LeaderLease`, `MessageStore.lease(LeaderLease, ...)`, Postgres `saga_message_store_leader`), one
+active relay and standbys, roles in Actuator, health (`DEGRADED`) and telemetry; the Modulith interop store shares the
+same leadership. Deadlines work with several instances (G-017-02 closed). Gaps G-013-01 to G-013-06 in memory.md.
 
 **Problem.** The in-memory transport's relay assumes one consumer per message store (007 FR-021). A second replica is
 detected and logged, not coordinated. Applications must pin one replica and avoid deploy overlap.
@@ -273,8 +278,7 @@ end, events harvested from aggregates.
 ### 017: Durable scheduling: deadlines, scheduled commands, durable backoff
 
 **Status (2026-11-25).** Deadlines and scheduled commands are implemented by `specs/017-saga-deadlines`, ahead of 013 by
-decision: they work with one running instance per message store, and 013 must keep due messages working under its
-leader lease (G-017-02). Durable `@RetryPolicy` backoff was left out and stays open (G-005-01, G-005-02). Gaps
+decision; 013 then made them work under its leader lease (G-017-02, closed 2026-11-26). Durable `@RetryPolicy` backoff was left out and stays open (G-005-01, G-005-02). Gaps
 G-017-01 to G-017-10 in memory.md.
 
 **Problem.** Nothing in Saga Forge can wait in time. A saga waits for its next event forever (G-ENG-25). Retry backoff

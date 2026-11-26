@@ -296,7 +296,8 @@ the snippet into `AGENTS.md`.
 0.1.0 is the first release, in production use in one Spring Boot monolith. It ships the annotation model with startup
 validation, the saga runtime (event routing by association, the saga-scoped unit of work in your transaction, step
 retry with stable command identities, compensation, saga deadlines and scheduled commands), Postgres storage, the in-memory transport with a durable message
-store (at least once, survives restarts, no broker), the Spring Boot starter (Spring Modulith and Actuator support),
+store (at least once, survives restarts, no broker; several application instances share it, one relay active and the
+others on standby), the Spring Boot starter (Spring Modulith and Actuator support),
 OpenTelemetry instrumentation and the `SagaFixture` test fixture. Not available yet: the Kafka transport, MySQL and
 MongoDB storage, a Quarkus extension. See [Limitations](docs/guide/limitations.md) for what to design around.
 
@@ -308,7 +309,7 @@ MongoDB storage, a Quarkus extension. See [Limitations](docs/guide/limitations.m
 | `saga-forge-runtime` | The saga runtime (`SagaRuntime`): routing, units of work, retry, compensation. |
 | `saga-forge-spring-boot-starter` | Auto-configuration for Spring Boot 4.1; see [its README](saga-forge-spring-boot-starter/README.md). |
 | `saga-forge-storage-postgres` | Postgres storage for saga instances, `SagaContext` values and the message store. |
-| `saga-forge-transport-inmemory` | In-process transport over a durable message store (transactional outbox and relay). |
+| `saga-forge-transport-inmemory` | In-process transport over a durable message store (transactional outbox and relay); with several instances one relay delivers, the others stand by. |
 | `saga-forge-test` | `SagaFixture`, for tests; see [its README](saga-forge-test/README.md). |
 | `saga-forge-example`, `saga-forge-example-spring` | The canonical order saga, in plain Java and as a Spring Boot application (not published). |
 
@@ -361,6 +362,32 @@ A command type can opt into the log, so it is handled after the sending step com
 @Command(delivery = CommandDelivery.OUTBOX)
 public record ChargeCard(@AggregateIdentifier String invoiceId) { }
 ```
+
+## Running several instances
+
+Run as many replicas of the application as you need over one database; there is nothing to configure. Every
+instance accepts requests, runs its sagas' units of work and appends their messages to the shared message store. The
+relays of the instances elect one leader through the `saga_message_store_leader` table: the **active** relay delivers
+every message, deadline and scheduled command, and the **standby** relays wait to take over.
+
+- After a graceful stop a standby takes over within the check interval (5 s by default); after a crash or a
+  partition, within the lease plus the check interval (35 s).
+- A deposed leader is fenced: the store refuses its leases once another relay holds a newer fencing token, and the old
+  leader stops leasing before its lease ends by its own clock. Delivery stays at least once, so command handlers keep
+  passing their `CommandId` on.
+- Not supported: spreading delivery over the instances. Delivery throughput is that of one relay; partitioned delivery
+  is the Kafka transport's job (not available yet).
+
+```properties
+saga-forge.transport.leadership.lease-duration=30s
+saga-forge.transport.leadership.renew-interval=10s
+saga-forge.transport.leadership.check-interval=5s
+```
+
+Each instance shows its role in the Actuator `sagaforge` endpoint and health (`DEGRADED` while no relay leads) and in
+the `saga_forge.relay.active` gauge. Without Spring, pass `TransportSettings` with `LeadershipSettings` to
+`InMemoryTransport.builder().settings(...)`. See [Operations](docs/guide/operations.md#running-several-instances) and
+the [patterns behind the design](docs/architecture.md#patterns-behind-the-design).
 
 
 ## Observability

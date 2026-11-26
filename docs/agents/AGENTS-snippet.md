@@ -34,5 +34,7 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - Time limits are deadlines: `@StartDeadline(name, duration | durationFrom, cancelledBy)` on a step and one
   `@StartCompensation @DeadlineExpired(name) @SagaStep` timeout step (no `associationProperty`). They need the in-memory
   transport's outbox and `saga-forge.transport.modulith-interop=false`. Test with `whenTimeElapses(...)`.
+- Several application instances may share the database: one elected relay delivers messages and deadlines, the others
+  stand by (`saga-forge.transport.leadership.*`). Don't expect delivery on every node; a takeover can redeliver.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

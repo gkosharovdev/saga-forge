@@ -68,7 +68,7 @@ class SchemaInitializerContainerTest {
   void existingUntouched() {
     new SchemaInitializer(dataSource, SchemaInitialization.ALWAYS).initialize();
     JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-    jdbc.execute("ALTER TABLE saga_message_store_consumer ADD COLUMN marker TEXT DEFAULT 'kept'");
+    jdbc.execute("ALTER TABLE saga_message_store_leader ADD COLUMN marker TEXT DEFAULT 'kept'");
 
     new SchemaInitializer(dataSource, SchemaInitialization.ALWAYS).initialize();
     new SchemaInitializer(dataSource, SchemaInitialization.NEVER).initialize();
@@ -76,7 +76,7 @@ class SchemaInitializerContainerTest {
     assertThat(
             jdbc.queryForList(
                 "SELECT column_name FROM information_schema.columns WHERE table_schema = ?"
-                    + " AND table_name = 'saga_message_store_consumer'",
+                    + " AND table_name = 'saga_message_store_leader'",
                 String.class,
                 schema))
         .contains("marker");
@@ -86,10 +86,10 @@ class SchemaInitializerContainerTest {
   @DisplayName("always, on a partial schema: fails naming the missing tables")
   void partialFails() {
     new SchemaInitializer(dataSource, SchemaInitialization.ALWAYS).initialize();
-    new JdbcTemplate(dataSource).execute("DROP TABLE saga_message_store_consumer");
+    new JdbcTemplate(dataSource).execute("DROP TABLE saga_message_store_leader");
     assertThatThrownBy(
             () -> new SchemaInitializer(dataSource, SchemaInitialization.ALWAYS).initialize())
         .isInstanceOf(SagaForgeConfigurationException.class)
-        .hasMessageContaining("saga_message_store_consumer");
+        .hasMessageContaining("saga_message_store_leader");
   }
 }

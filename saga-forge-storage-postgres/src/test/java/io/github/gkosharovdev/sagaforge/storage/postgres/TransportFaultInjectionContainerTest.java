@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
+import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BillingSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.BookShipment;
@@ -97,7 +98,14 @@ class TransportFaultInjectionContainerTest {
       "stop after a lease, before delivery: once the dead lease expires, the next process delivers it")
   void stopAfterLease() {
     harness.publish(new OrderPlaced("o-1"));
-    harness.log().lease("dead-process", Instant.now(), Duration.ofSeconds(1), 10);
+    Instant now = Instant.now();
+    LeaderLease dead =
+        harness
+            .log()
+            .leaderElection()
+            .tryAcquire("dead-process", "dead-host", now, Duration.ofSeconds(1))
+            .orElseThrow();
+    harness.log().lease(dead, now, Duration.ofSeconds(1), 10);
 
     harness.start();
 

@@ -32,7 +32,7 @@ public class SchemaInitializer {
           "saga_context",
           "saga_lifecycle_history",
           "saga_message_store",
-          "saga_message_store_consumer");
+          "saga_message_store_leader");
 
   private final DataSource dataSource;
   private final SchemaInitialization policy;

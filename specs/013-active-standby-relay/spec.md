@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-25
 
-**Status**: Draft
+**Status**: Implemented (2026-11-26)
 
 **Input**: User description: "013 multi-consumer support with the message store (several running instances sharing one message store), taking into account the saga deadlines from 017" — roadmap feature 013, `.specify/memory/roadmap.md` "### 013: Active/standby relay"; closes G-007-09 and G-017-02; booking-service feedback SF-6, workaround W9.
 
@@ -70,6 +70,25 @@ These settle the questions in the roadmap brief; each is reflected in the requir
 - **D9 — Explicitly single-node remains possible.** Leadership is on by default whenever the relay runs. A host that
   runs one instance sees no behavioural change apart from the role reports; it is always `ACTIVE` after startup
   (within one standby check when an expired lease of a previous run is still recorded).
+
+### Decisions taken during implementation (2026-11-26)
+
+- **I1 — Heartbeats removed.** The leadership record replaces the consumer heartbeats: `ConsumerHeartbeat`,
+  `MessageStore.heartbeat`/`liveConsumers`, `saga-forge.transport.heartbeat-interval` and the
+  `saga_message_store_consumer` table are gone (`schema-upgrade-013.sql` drops it). D1 and D7's mentions of heartbeats
+  describe the starting point.
+- **I2 — The lease transaction holds the leader row (Postgres).** `PostgresMessageStore.lease` first reads the leader
+  row `FOR SHARE` for the given fencing token, so a takeover (`UPDATE ... WHERE expires_at <= now`) waits until a lease
+  in progress committed; the deposed leader's next lease then fails with `LeadershipLostException` (contract C12).
+- **I3 — Expired trust triggers an immediate round.** When a leader's local trust runs out, `LeaderElector` gives up the
+  role and schedules its next round at once instead of after `checkInterval`, so a lone instance whose clock jumped
+  leads again without waiting.
+- **I4 — `DEGRADED` is outside Spring Boot's default status order.** The health contributor reports it; the overall
+  health includes it only when the application adds it to `management.endpoint.health.status.order` (starter README,
+  operations guide).
+- **I5 — Test-only gaps.** The redelivery-after-commit failover case is not forced (G-013-04); acceptance tests start
+  every saga before cutting the leader, because a failover between creation write and first unit of work strands the
+  start (G-013-05, G-ENG-05).
 
 ## User Scenarios & Testing *(mandatory)*
 

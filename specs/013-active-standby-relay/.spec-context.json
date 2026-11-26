@@ -2,8 +2,8 @@
   "workflow": "speckit",
   "specName": "Active/Standby Relay",
   "branch": "chore/spotless-google-java-format",
-  "currentStep": "tasks",
-  "status": "ready-to-implement",
+  "currentStep": "implement",
+  "status": "implemented",
   "history": [
     {
       "step": "specify",
@@ -46,6 +46,20 @@
       "kind": "complete",
       "by": "extension",
       "at": "2026-11-25T22:45:02.373Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-25T22:54:40.899Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-25T23:49:12.176Z"
     }
   ],
   "workingBranch": "013-active-standby-relay"

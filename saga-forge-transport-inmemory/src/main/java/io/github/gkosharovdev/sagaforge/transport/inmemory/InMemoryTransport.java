@@ -41,8 +41,10 @@ import java.util.function.Consumer;
  *
  * <p>Delivery is at least once: a message is marked consumed only after its consumer returned. A
  * redelivered event finds its step already completed (the engine reports it as a duplicate); a
- * outbox command is marked consumed in the handler's own transaction. For one running instance per
- * message store (FR-021).
+ * outbox command is marked consumed in the handler's own transaction. Several application instances
+ * may share one message store: one relay is active and delivers, the others are standby and take
+ * over when it stops or its leadership expires ({@code specs/013-active-standby-relay}, {@link
+ * #leadership()}).
  *
  * <p>Thread-safe.
  */
@@ -155,6 +157,14 @@ public final class InMemoryTransport {
    */
   public boolean isRunning() {
     return relay.isRunning();
+  }
+
+  /**
+   * @return this transport's relay role ({@link RelayRole#ACTIVE} or {@link RelayRole#STANDBY}) and
+   *     the store's leader as last seen ({@code specs/013-active-standby-relay} FR-022)
+   */
+  public LeadershipStatus leadership() {
+    return relay.leadership();
   }
 
   /**

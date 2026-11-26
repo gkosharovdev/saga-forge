@@ -83,8 +83,7 @@ final class PostgresTestSupport {
     try (Connection connection = newDataSource().getConnection();
         Statement statement = connection.createStatement()) {
       statement.execute("TRUNCATE saga_instance CASCADE");
-      statement.execute(
-          "TRUNCATE saga_message_store, saga_message_store_consumer RESTART IDENTITY");
+      statement.execute("TRUNCATE saga_message_store, saga_message_store_leader RESTART IDENTITY");
     } catch (SQLException e) {
       throw new IllegalStateException("could not reset the test database", e);
     }
