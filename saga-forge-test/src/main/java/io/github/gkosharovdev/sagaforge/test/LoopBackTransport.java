@@ -108,6 +108,8 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       for (Object event : batch.events()) {
         if (event instanceof SagaOutcome outcome) {
           outcomes.add(outcome);
+        } else if (batch.sagaId() != null) {
+          queue.add(new SourcedEvent(event, batch.sagaId()));
         } else {
           queue.add(event);
         }
@@ -148,6 +150,9 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       }
       if (next instanceof OutgoingCommand command) {
         deliverCommand(runtime, interceptor, command, commandFailures);
+      } else if (next instanceof SourcedEvent sourced) {
+        // 014: delivered with the instance that recorded it, as the in-memory transport does.
+        reports.accept(runtime.receive(sourced.event(), sourced.sourceSagaId()));
       } else {
         reports.accept(runtime.receive(next));
       }
@@ -244,6 +249,9 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       interceptor.deliveringOutbox(false);
     }
   }
+
+  /** An event recorded in a unit of work, queued with the instance that recorded it (014). */
+  private record SourcedEvent(Object event, String sourceSagaId) {}
 
   private synchronized Object poll() {
     return queue.poll();

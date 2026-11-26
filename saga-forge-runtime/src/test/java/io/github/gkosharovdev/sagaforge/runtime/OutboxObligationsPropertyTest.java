@@ -224,13 +224,13 @@ class OutboxObligationsPropertyTest {
     }
 
     /**
-     * What an {@code AuditSaga} unit of work leaves unrun: everything but the {@code CaseClosed}
-     * that ends it.
+     * What an {@code AuditSaga} unit of work hands on: what it leaves unrun, and the {@code
+     * CaseClosed} that ends it, because {@code ReviewSaga} has a step for it too (014 Property 47).
      */
     private static List<Object> auditBuffered(AddNote.Mode mode, String caseId) {
       return switch (mode) {
         case NOTE -> List.of(new CaseNoted(caseId));
-        case CLOSE_THEN_ESCALATE -> List.of(new CaseEscalated(caseId));
+        case CLOSE_THEN_ESCALATE -> List.of(new CaseClosed(caseId), new CaseEscalated(caseId));
       };
     }
   }

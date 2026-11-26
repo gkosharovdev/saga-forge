@@ -87,4 +87,32 @@ public interface EventReceiver {
    *     instance
    */
   HandlingReport receive(Object domainEvent);
+
+  /**
+   * Routes {@code domainEvent}, recorded by the unit of work of the saga instance {@code
+   * sourceSagaId}, like {@link #receive(Object)} ({@code specs/014-publish-once}
+   * contracts/event-receiver-source.md). A transport calls this when the message it delivers names
+   * the instance that recorded it ({@code StoredMessage.sourceSagaId}), and {@link
+   * #receive(Object)} otherwise.
+   *
+   * <p>The source lets the engine leave out the instance that already ran the event in process:
+   * that instance gets no result when its step for the event's class has completed (Property 47).
+   * Every other saga type and instance is handled exactly as by {@link #receive(Object)}. This
+   * default ignores the source.
+   *
+   * @param domainEvent the domain event delivered by the transport; must not be {@code null}
+   * @param sourceSagaId the id of the saga instance whose unit of work recorded the event;
+   *     non-blank
+   * @return the report of what happened; never {@code null}
+   * @throws IllegalArgumentException if {@code sourceSagaId} is {@code null} or blank, or for any
+   *     reason {@link #receive(Object)} gives
+   * @throws IllegalStateException for any reason {@link #receive(Object)} gives
+   * @throws EventHandlingException for any reason {@link #receive(Object)} gives
+   */
+  default HandlingReport receive(Object domainEvent, String sourceSagaId) {
+    if (sourceSagaId == null || sourceSagaId.isBlank()) {
+      throw new IllegalArgumentException("sourceSagaId must not be null or blank");
+    }
+    return receive(domainEvent);
+  }
 }

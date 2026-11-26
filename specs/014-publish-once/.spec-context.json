@@ -2,8 +2,8 @@
   "workflow": "speckit",
   "specName": "Publish Once: Spring Events Reach Sagas, Saga Events Reach Spring",
   "branch": "claude/confident-brahmagupta-lcx2qb",
-  "currentStep": "tasks",
-  "status": "ready-to-implement",
+  "currentStep": "implement",
+  "status": "implementing",
   "history": [
     {
       "step": "specify",
@@ -46,6 +46,13 @@
       "kind": "complete",
       "by": "extension",
       "at": "2026-11-26T22:17:53.078Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "kind": "start",
+      "by": "extension",
+      "at": "2026-11-26T22:19:57.302Z"
     }
   ]
 }

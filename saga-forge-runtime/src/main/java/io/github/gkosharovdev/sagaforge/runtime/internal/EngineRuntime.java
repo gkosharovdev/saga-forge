@@ -17,6 +17,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -93,7 +94,12 @@ public final class EngineRuntime {
     EngineCommandGateway gateway =
         EngineCommandGateway.of(registered, access, settings, diagnostics);
     UnitOfWork.Collaborators with =
-        new UnitOfWork.Collaborators(settings, gateway, diagnostics, gateway.instrumentation());
+        new UnitOfWork.Collaborators(
+            settings,
+            gateway,
+            diagnostics,
+            gateway.instrumentation(),
+            EventSubscriptions.of(registered));
     InstanceLocks instanceLocks = new InstanceLocks();
     return new EngineRuntime(
         sagas,
@@ -134,7 +140,15 @@ public final class EngineRuntime {
 
   /** Handles one inbound domain event (contracts/event-receiver.md). */
   public HandlingReport receive(Object domainEvent) {
-    return router.receive(domainEvent);
+    return router.receive(domainEvent, Optional.empty());
+  }
+
+  /**
+   * Handles one inbound domain event recorded by the unit of work of {@code sourceSagaId} ({@code
+   * specs/014-publish-once} contracts/event-receiver-source.md).
+   */
+  public HandlingReport receive(Object domainEvent, String sourceSagaId) {
+    return router.receive(domainEvent, Optional.of(sourceSagaId));
   }
 
   /** The engine's command gateway, also the one injected into saga objects. */

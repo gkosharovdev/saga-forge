@@ -123,8 +123,11 @@ class OutboxObligationsTest {
         .singleElement()
         .satisfies(
             batch -> {
-              assertThat(batch.events()).hasSize(2).first().isEqualTo(new CaseEscalated(CASE));
-              assertThat(batch.events().get(1)).isInstanceOf(SagaCompleted.class);
+              // 014 Property 47: CaseClosed ran in process; ReviewSaga has a step for it too.
+              assertThat(batch.events())
+                  .hasSize(3)
+                  .startsWith(new CaseClosed(CASE), new CaseEscalated(CASE));
+              assertThat(batch.events().get(2)).isInstanceOf(SagaCompleted.class);
               assertThat(batch.unitOfWorkId()).isEqualTo(result.unitOfWorkId());
               assertThat(batch.sagaType()).isEqualTo(AuditSaga.class.getName());
               assertThat(batch.sagaId()).isEqualTo(result.sagaId());

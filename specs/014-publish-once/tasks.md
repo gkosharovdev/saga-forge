@@ -56,19 +56,19 @@ Other paths are relative to the repository root. Short prefixes:
 
 ## Phase 1: Setup
 
-- [ ] T001 Run `mvn -q verify` from the repository root (no container suites) and record the baseline test count in the
+- [X] T001 Run `mvn -q verify` from the repository root (no container suites) and record the baseline test count in the
   progress note at the end of this file; stop and report if it is not green.
-- [ ] T002 Before the first class, propose loading the `effective-java`, `clean-code-java` and `solid-design-review`
+- [X] T002 Before the first class, propose loading the `effective-java`, `clean-code-java` and `solid-design-review`
   skills (AGENTS.md); if they are not installed, apply research.md R12 by hand and note it in the progress note.
 
 ---
 
 ## Phase 2: Foundational (blocking)
 
-- [ ] T003 [P] Add `SagaRuntimeEventTypesTest` in `rt-test/SagaRuntimeEventTypesTest.java`: two registered sagas →
+- [X] T003 [P] Add `SagaRuntimeEventTypesTest` in `rt-test/SagaRuntimeEventTypesTest.java`: two registered sagas →
   `eventTypes()` is the union of their step event classes, excludes `@DeadlineExpired` steps and outcome events, is the
   same before and after `start()`, and is unmodifiable (data-model.md "Saga event types").
-- [ ] T004 Implement `public Set<Class<?>> eventTypes()` in `rt/SagaRuntime.java`, computed in `build()` from the
+- [X] T004 Implement `public Set<Class<?>> eventTypes()` in `rt/SagaRuntime.java`, computed in `build()` from the
   registered classes' `@SagaStep` event parameters with the router's exact-class rule (reuse `internal/SagaModel` via a
   package-private factory in `internal/EngineRuntime.java` if needed); Javadoc without `<h3>`.
 - [ ] T005 [P] Add `Inbound` (field `enabled`, default `true`) to `SagaForgeProperties.ApplicationEvents` in
@@ -135,38 +135,38 @@ a step for it; the source instance gets no result for it.
 
 ### Tests
 
-- [ ] T015 [P] [US2] Add `RecordedEventFanOutTest` in `rt-test/RecordedEventFanOutTest.java` over the runtime's
+- [X] T015 [P] [US2] Add `RecordedEventFanOutTest` in `rt-test/RecordedEventFanOutTest.java` over the runtime's
   in-memory doubles (`TestTransport`, `TransactionalInMemoryStorageProvider`): FO1 (type B gets E once after commit, A's
   step once), FO2 (unchanged), FO3 (rollback → nothing), no other type → no stored message; a property-style case over
   generated pairs of saga types (jqwik if the module uses it, else parameterised).
-- [ ] T016 [P] [US2] Add `EventRouterSourceTest` in `rt-test/EventRouterSourceTest.java`: SR2 (source with `COMPLETED`
+- [X] T016 [P] [US2] Add `EventRouterSourceTest` in `rt-test/EventRouterSourceTest.java`: SR2 (source with `COMPLETED`
   step → no result, no `saga.event.duplicate` log), SR3 (source `COMPENSATING` → compensation resumes; source terminal →
   `UNEXPECTED` as before; other instance unaffected), ER1 (blank source → `IllegalArgumentException`).
-- [ ] T017 [P] [US2] Add a fan-out scenario to `tr-test/support/TransportAcceptanceSuite.java` (runs on the in-memory
+- [X] T017 [P] [US2] Add a fan-out scenario to `tr-test/support/TransportAcceptanceSuite.java` (runs on the in-memory
   store, Postgres and Modulith interop): two saga types on one recorded event, a first delivery attempt to B that fails
   transiently → B has one instance, A unaffected.
-- [ ] T018 [P] [US2] Add the fan-out case to `fixture-test/FixtureParityTest.java` and a fixture test with two saga
+- [X] T018 [P] [US2] Add the fan-out case to `fixture-test/FixtureParityTest.java` and a fixture test with two saga
   types on one event in `fixture-test/RecordedEventFanOutFixtureTest.java`.
 
 ### Implementation
 
-- [ ] T019 [US2] Add the default method `receive(Object domainEvent, String sourceSagaId)` to `spi/EventReceiver.java`
+- [X] T019 [US2] Add the default method `receive(Object domainEvent, String sourceSagaId)` to `spi/EventReceiver.java`
   (ER1, ER2; Javadoc on the source's meaning, no `@throws` misuse).
-- [ ] T020 [US2] Create `EventSubscriptions` (package-private, immutable; `otherSagaTypesHandle(Class<?>, String)`) in
+- [X] T020 [US2] Create `EventSubscriptions` (package-private, immutable; `otherSagaTypesHandle(Class<?>, String)`) in
   `internal/EventSubscriptions.java`, built from the registered `SagaModel`s in `internal/EngineRuntime.java`, with
   `rt-test/internal/EventSubscriptionsTest.java` if the runtime's tests reach package-private types, else covered by T015.
-- [ ] T021 [US2] Change `buffered()` in `internal/UnitOfWork.java` per data-model.md "Hand-on rule" (FO1, FO4), passing
+- [X] T021 [US2] Change `buffered()` in `internal/UnitOfWork.java` per data-model.md "Hand-on rule" (FO1, FO4), passing
   `EventSubscriptions` through the existing settings/collaborators; keep recording order; `UnitOfWorkBoundaryTest`
   stays green.
-- [ ] T022 [US2] Implement the source rule in `internal/EventRouter.java` (SR1 to SR3): carry `sourceSagaId` in the
+- [X] T022 [US2] Implement the source rule in `internal/EventRouter.java` (SR1 to SR3): carry `sourceSagaId` in the
   reaction; for the correlated source instance read its `StepRecord` for the reacting step and skip it when `COMPLETED`;
   override `receive(Object, String)` in `rt/SagaRuntime.java` and route through `internal/EngineRuntime.java`.
-- [ ] T023 [P] [US2] Deliver with the source in `relay/Relay.java` (`receive(payload, sourceSagaId)` when
+- [X] T023 [P] [US2] Deliver with the source in `relay/Relay.java` (`receive(payload, sourceSagaId)` when
   `StoredMessage.sourceSagaId()` is non-null) and in the runtime test-jar's `TestTransport`
   (`saga-forge-runtime/…test/runtime/TestTransport.java` or its actual location).
-- [ ] T024 [P] [US2] Keep the batch's `sagaId` with each queued event in `fixture/LoopBackTransport.java` and deliver
+- [X] T024 [P] [US2] Keep the batch's `sagaId` with each queued event in `fixture/LoopBackTransport.java` and deliver
   with it.
-- [ ] T025 [US2] Make T015 to T018 pass; add Property 47 to `.kiro/specs/saga-forge-framework/design.md` (text from
+- [X] T025 [US2] Make T015 to T018 pass; add Property 47 to `.kiro/specs/saga-forge-framework/design.md` (text from
   contracts/event-receiver-source.md) and reference it from the tests' Javadoc.
 
 **Checkpoint**: `mvn -q -pl saga-forge-core,saga-forge-runtime,saga-forge-transport-inmemory,saga-forge-test -am verify`

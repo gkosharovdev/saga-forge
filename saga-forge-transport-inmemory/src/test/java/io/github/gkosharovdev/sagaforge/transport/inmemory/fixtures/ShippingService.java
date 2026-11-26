@@ -16,6 +16,12 @@ public final class ShippingService {
     DomainEvents.record(new ShipmentBooked(command.orderId()));
   }
 
+  /** Records {@link ParcelPacked} in the sending saga's unit of work (014 fan-out fixture). */
+  @CommandHandler
+  public void handle(PackParcel command) {
+    DomainEvents.record(new ParcelPacked(command.orderId()));
+  }
+
   public List<String> booked() {
     return List.copyOf(booked);
   }

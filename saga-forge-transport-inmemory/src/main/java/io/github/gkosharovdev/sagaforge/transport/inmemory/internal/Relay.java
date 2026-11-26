@@ -446,7 +446,14 @@ public final class Relay {
     TransportInstrumentation.Delivery span = instrumentation.startDelivery(message);
     try {
       if (message.kind() == MessageKind.EVENT) {
-        events.receive(message.payload());
+        // 014: an event recorded in a unit of work names its source instance, which the runtime
+        // leaves out when it ran the event in process (Property 47).
+        String source = message.sourceSagaId();
+        if (source == null) {
+          events.receive(message.payload());
+        } else {
+          events.receive(message.payload(), source);
+        }
         messageStore.markConsumed(consumerId, message.messageId(), clock.instant());
         notifyDelivered(message);
       } else {

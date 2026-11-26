@@ -34,6 +34,7 @@ import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineSettings;
+import io.github.gkosharovdev.sagaforge.runtime.internal.EventSubscriptions;
 import io.github.gkosharovdev.sagaforge.runtime.internal.RetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.internal.TimeAndIdentity;
 import io.opentelemetry.api.OpenTelemetry;
@@ -98,6 +99,7 @@ public final class SagaRuntime implements EventReceiver {
   private final EngineSettings settings;
   private final Diagnostics diagnostics;
   private final RecoverySettings recovery;
+  private final EventSubscriptions subscriptions;
   private final CommandGateway commandGateway =
       new CommandGateway() {
         @Override
@@ -195,6 +197,7 @@ public final class SagaRuntime implements EventReceiver {
     this.registered = List.copyOf(registered);
     this.settings = settings;
     this.diagnostics = diagnostics;
+    this.subscriptions = EventSubscriptions.of(this.registered);
   }
 
   /** A new builder. */
@@ -248,6 +251,36 @@ public final class SagaRuntime implements EventReceiver {
   @Override
   public HandlingReport receive(Object domainEvent) {
     return started().receive(domainEvent);
+  }
+
+  /**
+   * Handles one inbound domain event recorded by the unit of work of {@code sourceSagaId}: as
+   * {@link #receive(Object)}, except that the source instance gets no result when its step for the
+   * event's class has completed, because it ran the event in process ({@code
+   * specs/014-publish-once} contracts/event-receiver-source.md SR2, Property 47).
+   *
+   * @throws IllegalArgumentException if {@code sourceSagaId} is {@code null} or blank, or for any
+   *     reason {@link #receive(Object)} gives
+   * @throws IllegalStateException unless the engine is {@code STARTED}
+   */
+  @Override
+  public HandlingReport receive(Object domainEvent, String sourceSagaId) {
+    if (sourceSagaId == null || sourceSagaId.isBlank()) {
+      throw new IllegalArgumentException("sourceSagaId must not be null or blank");
+    }
+    return started().receive(domainEvent, sourceSagaId);
+  }
+
+  /**
+   * The domain event classes some registered saga type has a {@code @SagaStep} for, matched by
+   * exact class as the engine routes events ({@code specs/014-publish-once} research R4). Fixed
+   * when the engine is built, so it can be read before {@link #start()}. Framework events (outcome
+   * events, deadlines) are not in it.
+   *
+   * @return the event classes; unmodifiable, never {@code null}
+   */
+  public Set<Class<?>> eventTypes() {
+    return subscriptions.eventTypes();
   }
 
   /**
