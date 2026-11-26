@@ -4,6 +4,10 @@ name: Release
 # (README "Releasing"). The version comes from the tag; master stays on X.Y.Z-SNAPSHOT. The full build, container
 # suites included, runs before anything is uploaded.
 #
+# After the publish, the bump job opens a pull request against master (never a direct push) that sets the POMs to
+# X.(Y+1).0-SNAPSHOT and the Saga Forge version in the docs to X.Y.Z. Review the proposed version before merging: minor
+# by default, edit it for a patch. A tag with a qualifier (vX.Y.Z-RC1) gets no bump pull request.
+#
 # Secrets: CENTRAL_TOKEN_USERNAME / CENTRAL_TOKEN_PASSWORD (a Central Portal user token), GPG_PRIVATE_KEY (armored)
 # and GPG_PASSPHRASE. Repository variable CENTRAL_AUTO_PUBLISH: "true" publishes a validated deployment without the
 # manual "Publish" step in the portal (default "false").
@@ -23,6 +27,8 @@ jobs:
     name: Publish to Maven Central
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -73,3 +79,76 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --title "Saga Forge ${{ steps.version.outputs.version }}" --generate-notes --verify-tag
+
+  bump:
+    name: Open the next-snapshot pull request
+    needs: publish
+    if: ${{ !contains(needs.publish.outputs.version, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Work out the next development version
+        id: next
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          LINE="$MAJOR.$((MINOR + 1)).0"
+          echo "snapshot=$LINE-SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo "branch=chore/next-snapshot-$LINE" >> "$GITHUB_OUTPUT"
+
+      - name: Set the POMs to the next snapshot and the docs to the released version
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+          SNAPSHOT: ${{ steps.next.outputs.snapshot }}
+          BRANCH: ${{ steps.next.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "Branch $BRANCH already exists; delete it or open the pull request by hand" >&2
+            exit 1
+          fi
+          git switch -c "$BRANCH"
+          mvn -B -ntp versions:set -DnewVersion="$SNAPSHOT" -DgenerateBackupPoms=false -DprocessAllModules=true
+          .github/scripts/set-docs-version.sh "$VERSION"
+          docs/guide/build-llms-full.sh
+
+      - name: Commit, push and open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          SNAPSHOT: ${{ steps.next.outputs.snapshot }}
+          BRANCH: ${{ steps.next.outputs.branch }}
+        run: |
+          if git diff --quiet; then
+            echo "Nothing to change: master already on $SNAPSHOT with the docs on $VERSION"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Start $SNAPSHOT after v$VERSION"
+          git push origin "$BRANCH"
+          gh pr create --base master --head "$BRANCH" \
+            --title "Start $SNAPSHOT after v$VERSION" \
+            --body "Opened by the Release workflow after v$VERSION was published.
+
+          - POMs: \`$SNAPSHOT\` (\`mvn versions:set\`, all modules)
+          - Docs: the Saga Forge version in the dependency snippets and \"Saga Forge N.N.N\" mentions set to \`$VERSION\`, \`llms-full.txt\` regenerated
+
+          The next version defaults to a minor bump. For a patch line, change it before merging:
+          \`mvn versions:set -DnewVersion=X.Y.(Z+1)-SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true\`.
+
+          Pull requests opened with GITHUB_TOKEN do not start CI: close and reopen this one (or push a commit) to run it."
