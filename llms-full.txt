@@ -16,14 +16,14 @@ snippet, so you can open it for the imports and the surrounding class.
 
 | Page | Read it when you want to |
 |---|---|
-| [Getting started](getting-started.md) | add Saga Forge 0.3.0 to a Spring Boot 4.1 / Java 21 application and create the schema |
+| [Getting started](getting-started.md) | add Saga Forge 0.4.0 to a Spring Boot 4.1 / Java 21 application and create the schema |
 | [Model reference](model-reference.md) | know where each annotation goes, what it needs next to it, and its attributes |
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
 | [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
-| [Limitations](limitations.md) | know what to design around in 0.3.0 |
+| [Limitations](limitations.md) | know what to design around in 0.4.0 |
 
 API reference: the Javadoc of every published module is on
 [javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core) (`saga-forge-core`, `saga-forge-runtime`,
@@ -55,7 +55,7 @@ Saga Forge uses DDD / EventStorming terms (full glossary in
 
 # Getting started
 
-Saga Forge 0.3.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
+Saga Forge 0.4.0 requires **Java 21** and, with the starter, **Spring Boot 4.1**. All artifacts are on Maven Central
 under the group `io.github.gkosharovdev`.
 
 | Artifact | Use it for | Scope |
@@ -73,12 +73,12 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>org.springframework.boot</groupId>
@@ -87,7 +87,7 @@ Maven:
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -96,10 +96,10 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.3.0")
-    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.3.0")
+    implementation("io.github.gkosharovdev:saga-forge-spring-boot-starter:0.4.0")
+    implementation("io.github.gkosharovdev:saga-forge-storage-postgres:0.4.0")
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
-    testImplementation("io.github.gkosharovdev:saga-forge-test:0.3.0")
+    testImplementation("io.github.gkosharovdev:saga-forge-test:0.4.0")
 }
 ```
 
@@ -1482,7 +1482,7 @@ transport or Spring context, no JUnit extension: a failed expectation throws `Sa
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -2056,7 +2056,7 @@ after its saga compensated runs its handler again but does not compensate twice.
 
 <!-- docs/guide/limitations.md -->
 
-# Limitations to design around (0.3.0)
+# Limitations to design around (0.4.0)
 
 These are known limits of the current release, most important first for a Spring Boot monolith on Postgres and the
 in-memory transport. Each has an id in the project's gap register (`.specify/memory/memory.md`), so you can follow its

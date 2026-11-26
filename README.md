@@ -265,7 +265,7 @@ copied from compiling code in this repository. It is also published as a site at
 | [Deadlines](docs/guide/deadlines.md) | saga deadlines, timeout steps and scheduled commands |
 | [Testing](docs/guide/testing.md) | `SagaFixture` given/when/then tests, in memory |
 | [Operations](docs/guide/operations.md) | properties, Actuator, OpenTelemetry spans and metrics, schema upgrades |
-| [Limitations](docs/guide/limitations.md) | what to design around in 0.3.0 |
+| [Limitations](docs/guide/limitations.md) | what to design around in 0.4.0 |
 
 API reference: [Javadoc on javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core). Spring Boot
 details: the [starter README](saga-forge-spring-boot-starter/README.md). Design: [docs/architecture.md](docs/architecture.md),
@@ -293,7 +293,7 @@ the snippet into `AGENTS.md`.
 
 ## Status
 
-Saga Forge 0.3.0 is the latest release on Maven Central (master builds the next one), in production use in one Spring
+Saga Forge 0.4.0 is the latest release on Maven Central (master builds the next one), in production use in one Spring
 Boot monolith.
 It ships the annotation model with startup
 validation, the saga runtime (event routing by association, the saga-scoped unit of work in your transaction, step
@@ -325,12 +325,12 @@ In a Spring Boot 4.1 application on Java 21, add the starter and the Postgres st
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-spring-boot-starter</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-storage-postgres</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 

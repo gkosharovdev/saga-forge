@@ -10,7 +10,7 @@ context, and no JUnit extension: a failed expectation throws a `SagaExpectationE
 <dependency>
     <groupId>io.github.gkosharovdev</groupId>
     <artifactId>saga-forge-test</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <scope>test</scope>
 </dependency>
 ```
