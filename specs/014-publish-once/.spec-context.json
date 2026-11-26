@@ -3,7 +3,7 @@
   "specName": "Publish Once: Spring Events Reach Sagas, Saga Events Reach Spring",
   "branch": "claude/confident-brahmagupta-lcx2qb",
   "currentStep": "implement",
-  "status": "implementing",
+  "status": "implemented",
   "history": [
     {
       "step": "specify",
@@ -404,7 +404,15 @@
       "kind": "complete",
       "by": "extension",
       "at": "2026-11-26T22:43:47.109Z"
+    },
+    {
+      "step": "implement",
+      "substep": null,
+      "task": "T044",
+      "kind": "complete",
+      "by": "extension",
+      "at": "2026-11-26T23:20:33.074Z"
     }
   ],
-  "currentTask": "T044"
+  "currentTask": "T043"
 }

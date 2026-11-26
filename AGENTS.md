@@ -206,9 +206,10 @@
   `management.endpoint.sagas.access=unrestricted`; needs a principal), health details for unresolved counts. Fixture:
   `SagaFixture.operations()`, `whenOperator(...)`, `Builder.recovery`, `Then.expectResolved`/`expectNotResolved`/
   `expectHistory`, `InstanceView.history`/`resolution`. Properties 44 to 46.
-- Implemented and tested without containers, added by `specs/014-publish-once` (closes G-008-03 and G-ENG-24; container
-  suites written but not yet run, G-014-06; `mvn verify` without containers passed on 2026-11-26 with 1,852 tests, and
-  the release build with Javadoc passed): publish once, with Saga Forge's own log beside Spring Modulith's registry
+- Implemented and tested, including container suites, added by `specs/014-publish-once` (closes G-008-03 and G-ENG-24;
+  CI run 45909269287 on 2026-11-26 green: unit tests on JDK 21 and 25, integration job with Postgres 192, starter 55
+  (5 Modulith scheduling skips, G-017-01) and Spring example 7 container tests; locally `mvn verify` 1,852 tests and the
+  release build with Javadoc): publish once, with Saga Forge's own log beside Spring Modulith's registry
   (two logs; interop unchanged). Core's `EventReceiver` gains the default `receive(event, sourceSagaId)`; the runtime's
   `UnitOfWork` hands a recorded event its own instance ran in process to the outbox when another saga type has a step
   for it (`runtime.internal.EventSubscriptions`), and `EventRouter` gives the source instance no result when its step
@@ -389,7 +390,7 @@
   (G-014-01); whether a Kafka transport publishes integration events is undecided (G-014-02); switching
   `modulith-interop` strands in-flight messages (G-014-03); with `ImmediateDispatchOutbox` or a decorator that drops the
   source, the source instance reports `DUPLICATE` on a fanned-out event (G-014-04); an event published in a host
-  transaction waits for the relay's next poll (G-014-05); the container suites have not run yet (G-014-06). An
+  transaction waits for the relay's next poll (G-014-05); three planned tests were not built (G-014-06); the inbound listener resolves the runtime lazily (G-014-07). An
   `EventReceiver` decorator forwards `receive(event, sourceSagaId)`.
 - Postgres storage (003), see memory.md for detail: concurrency is a row lock plus a forward-transition check,
   with no version field (G-003-02, -03, -13, -19 to -22; G-003-01/-02 explicitly deferred); steps completed in one

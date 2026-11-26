@@ -1690,7 +1690,11 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   through Spring in `PublishOnceTest`), a restart between publication and delivery for the Spring route (T007), and the
   Actuator endpoint naming the store chosen for a deadline model (DI4).
 - **Origin**: `specs/014-publish-once` implementation, 2026-11-26.
-- **Status**: open: run `mvn -Pcontainer-tests verify` and record the result in AGENTS.md.
+- **Status**: partly closed, 2026-11-26: CI run 45909269287 (commit `0a25f48`) ran the integration job with the
+  container suites green: Postgres storage 192 tests, starter 55 (5 skipped, the Modulith scheduling cases, G-017-01),
+  among them `PublishOnceContainerTest` (4) and both Spring acceptance setups with `recordedEventFansOut`, and the Spring
+  example's 7. The first run (45908109841) had failed on G-014-07. Still open: the three tests not built (a real Spring
+  Data `@DomainEvents` save inside a handler, a restart for the Spring route, DI4).
 
 ### G-014-07: The inbound listener must not resolve the runtime when Spring creates it
 - **Description**: Spring creates every `ApplicationListener` bean as soon as the first event is multicast, which Spring

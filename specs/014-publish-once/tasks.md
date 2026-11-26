@@ -266,7 +266,7 @@ unit of work are not published to Spring again; `after-delivery` refused with th
 - [X] T043 Update `.specify/memory/memory.md`: close G-008-03 and G-ENG-24 (with the tests that prove them), update
   G-017-01 (implicit default done), revise G-014-04/G-014-05 to their final wording, record any new gap found; update
   `.specify/memory/roadmap.md` (014 done) and AGENTS.md "Current Status" (014 entry, test count).
-- [ ] T044 Run `mvn spotless:apply`, then `mvn -Pcontainer-tests verify` from the repository root and
+- [X] T044 Run `mvn spotless:apply`, then `mvn -Pcontainer-tests verify` from the repository root and
   `mvn -P release -Dgpg.skip -DskipTests install`; record the test count in AGENTS.md and the progress note; fix any
   failure before marking done.
 
@@ -311,7 +311,8 @@ T018 FixtureParityTest            (fixture-test/)
   is not available in this session, so no `@Tag("container")` suite ran (G-014-06).
 - **Whole build (T044, partial)**: `mvn verify` without containers green on 2026-11-26, 1,852 tests, 0 failures, 1
   skipped; `mvn -P release -Dgpg.skip -DskipTests install` (Javadoc) green. `mvn -Pcontainer-tests verify` not run (no
-  Docker, G-014-06), so T044 stays open.
+  Docker, G-014-06) locally; CI run 45909269287 ran it green (container suites: Postgres 192, starter 55 with 5
+  Modulith scheduling skips, Spring example 7), after fixing G-014-07, which run 45908109841 found.
 - **Design skills (T002)**: `effective-java`, `clean-code-java` and `solid-design-review` are not installed; their
   principles were applied by hand (research.md R12).
 - **Deviations**:
