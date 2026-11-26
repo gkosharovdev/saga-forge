@@ -86,7 +86,10 @@ jobs:
     if: ${{ !contains(needs.publish.outputs.version, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # actions: write lets the job start CI on the new branch: pushes made with GITHUB_TOKEN start no workflow, but a
+    # workflow_dispatch does.
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -126,7 +129,7 @@ jobs:
           .github/scripts/set-docs-version.sh "$VERSION"
           docs/guide/build-llms-full.sh
 
-      - name: Commit, push and open the pull request
+      - name: Commit, push, open the pull request and start CI
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.publish.outputs.version }}
@@ -149,6 +152,5 @@ jobs:
           - Docs: the Saga Forge version in the dependency snippets and \"Saga Forge N.N.N\" mentions set to \`$VERSION\`, \`llms-full.txt\` regenerated
 
           The next version defaults to a minor bump. For a patch line, change it before merging:
-          \`mvn versions:set -DnewVersion=X.Y.(Z+1)-SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true\`.
-
-          Pull requests opened with GITHUB_TOKEN do not start CI: close and reopen this one (or push a commit) to run it."
+          \`mvn versions:set -DnewVersion=X.Y.(Z+1)-SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true\`."
+          gh workflow run ci.yml --ref "$BRANCH"

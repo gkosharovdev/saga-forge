@@ -437,9 +437,9 @@ branch `chore/next-snapshot-X.(Y+1).0`; it never pushes to master. The pull requ
 docs always name the latest published version, and regenerates `llms-full.txt`. Review the proposed next version before
 merging: it is the next minor by default; for a patch line, change it on the branch with
 `mvn versions:set -DnewVersion=X.Y.(Z+1)-SNAPSHOT -DgenerateBackupPoms=false -DprocessAllModules=true`. A tag with a
-qualifier (`v1.0.0-RC1`) gets no pull request. A pull request opened with `GITHUB_TOKEN` starts no CI run: close and
-reopen it to run the checks. The job needs the repository setting "Allow GitHub Actions to create and approve pull
-requests" (Settings, Actions, General).
+qualifier (`v1.0.0-RC1`) gets no pull request. A push made with `GITHUB_TOKEN` starts no workflow, so the job starts
+CI on the branch itself (`gh workflow run ci.yml`); its result shows on the pull request. The job needs the repository
+setting "Allow GitHub Actions to create and approve pull requests" (Settings, Actions, General).
 
 The workflow needs four repository secrets: `CENTRAL_TOKEN_USERNAME` and `CENTRAL_TOKEN_PASSWORD` (a Central Portal
 user token), `GPG_PRIVATE_KEY` (the armored private key, whose public half is on `keyserver.ubuntu.com`) and
