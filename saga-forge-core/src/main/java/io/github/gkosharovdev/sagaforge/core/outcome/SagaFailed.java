@@ -106,8 +106,37 @@ public record SagaFailed(
       String causeType,
       int attempts,
       OutcomeTrigger compensationTrigger) {
+    return inCompensation(
+        sagaType,
+        sagaId,
+        associations,
+        occurredAt,
+        failedStep,
+        classification,
+        causeType,
+        attempts,
+        compensationTrigger,
+        0);
+  }
+
+  /**
+   * A compensation failure of {@code sagaId} in compensation round {@code compensationRound}:
+   * {@code eventId} {@code sagaId:COMPENSATION_FAILED}, with {@code :r<round>} appended from round
+   * 1 on.
+   */
+  public static SagaFailed inCompensation(
+      String sagaType,
+      String sagaId,
+      Map<String, String> associations,
+      Instant occurredAt,
+      String failedStep,
+      FailureClassification classification,
+      String causeType,
+      int attempts,
+      OutcomeTrigger compensationTrigger,
+      int compensationRound) {
     return new SagaFailed(
-        Values.eventId(sagaId, "COMPENSATION_FAILED"),
+        Values.eventId(sagaId, "COMPENSATION_FAILED", compensationRound),
         sagaType,
         sagaId,
         associations,

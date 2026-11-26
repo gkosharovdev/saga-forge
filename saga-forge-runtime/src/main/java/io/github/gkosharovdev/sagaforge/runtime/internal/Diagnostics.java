@@ -359,6 +359,75 @@ public final class Diagnostics {
    * {@code saga.compensation.notRecorded}: a compensation outcome could not be written; it
    * propagates.
    */
+  /**
+   * {@code saga.start.recovered}: a redelivered start event adopted an instance stranded in {@code
+   * CREATED} ({@code specs/015-saga-operations} FR-021).
+   */
+  void startRecovered(Correlation about) {
+    logger.log(Level.INFO, Line.of("saga.start.recovered").saga(about).instance(about).toString());
+  }
+
+  /** {@code saga.operation.applied}: an operator repair changed an instance (015 R13). */
+  void operationApplied(Correlation about, String action, String operator, String status) {
+    logger.log(
+        Level.INFO,
+        Line.of("saga.operation.applied")
+            .saga(about)
+            .instance(about)
+            .with("action", action)
+            .with("operator", operator)
+            .with("status", status)
+            .toString());
+  }
+
+  /** {@code saga.operation.notApplied}: an operator repair was rejected (015 R13). */
+  void operationNotApplied(String sagaId, String action, String operator, String reason) {
+    logger.log(
+        Level.INFO,
+        Line.of("saga.operation.notApplied")
+            .with("sagaId", sagaId)
+            .with("action", action)
+            .with("operator", operator)
+            .with("reason", reason)
+            .toString());
+  }
+
+  /** {@code saga.recovery.compensationResumed}: a sweep resumed a stalled compensation. */
+  void recoveryCompensationResumed(Correlation about, String status) {
+    logger.log(
+        Level.WARNING,
+        Line.of("saga.recovery.compensationResumed")
+            .saga(about)
+            .instance(about)
+            .with("status", status)
+            .toString());
+  }
+
+  /** {@code saga.recovery.startAbandoned}: a sweep found an abandoned start (policy REPORT). */
+  void recoveryStartAbandoned(Correlation about, java.time.Instant createdAt) {
+    logger.log(
+        Level.WARNING,
+        Line.of("saga.recovery.startAbandoned")
+            .saga(about)
+            .instance(about)
+            .with("createdAt", createdAt)
+            .toString());
+  }
+
+  /** {@code saga.recovery.startFailed}: a sweep ended an abandoned start (policy FAIL). */
+  void recoveryStartFailed(Correlation about) {
+    logger.log(
+        Level.WARNING, Line.of("saga.recovery.startFailed").saga(about).instance(about).toString());
+  }
+
+  /** {@code saga.recovery.failed}: a sweep could not handle one instance and went on. */
+  void recoveryFailed(Correlation about, Throwable cause) {
+    logger.log(
+        Level.ERROR,
+        Line.of("saga.recovery.failed").saga(about).instance(about).cause(cause).toString(),
+        cause);
+  }
+
   void compensationNotRecorded(Correlation about, Throwable cause) {
     logger.log(
         Level.ERROR,

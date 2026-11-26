@@ -49,6 +49,8 @@ public final class ParcelFixture {
   private final TestTransport transport = new TestTransport();
   private final InMemorySagaContextStore contexts = new InMemorySagaContextStore();
   private final OpenTelemetry openTelemetry;
+  private io.github.gkosharovdev.sagaforge.runtime.RecoverySettings recovery =
+      io.github.gkosharovdev.sagaforge.runtime.RecoverySettings.defaults();
   private SagaRuntime engine;
 
   public ParcelFixture() {
@@ -74,6 +76,7 @@ public final class ParcelFixture {
             .outbox(outbox)
             .handlerInstances(new MapHandlerInstanceProvider().register(new ParcelService()))
             .logger(logger)
+            .recovery(recovery)
             .build();
     built.start();
     transport.connect(built).connectCommands(built.commandReceiver());
@@ -88,6 +91,15 @@ public final class ParcelFixture {
     CompensationFaults faults = new CompensationFaults(storage);
     engine = build(faults);
     return faults;
+  }
+
+  /** Rebuilds the runtime over the plain stores with {@code settings} (015). */
+  public ParcelFixture withRecovery(
+      io.github.gkosharovdev.sagaforge.runtime.RecoverySettings settings) {
+    engine.stop();
+    recovery = settings;
+    engine = build(storage);
+    return this;
   }
 
   /** Rebuilds the runtime over the plain stores, as a process restart would. */

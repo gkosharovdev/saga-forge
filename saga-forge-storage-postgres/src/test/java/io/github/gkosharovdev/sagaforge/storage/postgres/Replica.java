@@ -2,8 +2,10 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 
 import com.zaxxer.hikari.HikariDataSource;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
+import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.support.RecordingLogger;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
@@ -44,6 +46,17 @@ final class Replica {
    * @param properties resolves {@code ${key:default}} deadline durations
    */
   Replica(TransportSettings settings, Map<String, String> properties, Class<?>... model) {
+    this(settings, properties, RecoverySettings.defaults(), model);
+  }
+
+  /**
+   * @param recovery the runtime's recovery settings (015)
+   */
+  Replica(
+      TransportSettings settings,
+      Map<String, String> properties,
+      RecoverySettings recovery,
+      Class<?>... model) {
     JdbcTransactionBoundary boundary = new JdbcTransactionBoundary(dataSource);
     transport =
         InMemoryTransport.builder()
@@ -62,6 +75,7 @@ final class Replica {
             .handlerInstances(new MapHandlerInstanceProvider().register(cards))
             .propertyResolver(key -> Optional.ofNullable(properties.get(key)))
             .logger(runtimeLog)
+            .recovery(recovery)
             .build();
     runtime.start();
     transport.start(
@@ -109,6 +123,11 @@ final class Replica {
    */
   <T> List<T> delivered(Class<T> type) {
     return delivered.stream().filter(type::isInstance).map(type::cast).toList();
+  }
+
+  /** This instance's runtime operations (015). */
+  SagaOperations operations() {
+    return runtime.operations();
   }
 
   RelayRole role() {

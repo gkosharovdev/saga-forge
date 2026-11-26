@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -35,8 +36,14 @@ final class ForwardTransition {
    * 012: a compensation also moves {@code COMPENSATED -> FAILED}, but only when the same save moves
    * the instance {@code COMPENSATING -> COMPENSATION_FAILED}: a command that compensation sent
    * failed for good ({@code specs/012-outbox-command-failure-feedback} data-model.md). A previously
-   * completed step missing from {@code incoming} is a violation; a previously {@code NOT_RUN} step
-   * may be missing, and anything else may differ ({@code .specify/memory/memory.md} G-003-15).
+   * Since 015 ({@code specs/015-saga-operations} research.md R12): {@code COMPENSATION_FAILED ->
+   * COMPENSATING} is allowed only when {@code compensationRound} grows by exactly 1 in the same
+   * save, and then a compensation may move {@code FAILED -> NOT_ATTEMPTED}; {@code FAILED ->
+   * COMPENSATING} is allowed only with a new {@code OPERATOR_REQUEST} trigger where none was
+   * recorded; a {@code resolution} may be set once and never changes or disappears after that; and
+   * {@code compensationRound} never decreases. A previously completed step missing from {@code
+   * incoming} is a violation; a previously {@code NOT_RUN} step may be missing, and anything else
+   * may differ ({@code .specify/memory/memory.md} G-003-15).
    *
    * <p>Not checked, as specified: {@code state}, {@code associations} (G-003-02), {@code sagaType}
    * and {@code createdAt} (G-003-13), the {@code outcome}/{@code failure} of an unchanged terminal
@@ -51,6 +58,17 @@ final class ForwardTransition {
     boolean compensationFailing =
         previous.status() == SagaStatus.COMPENSATING
             && incoming.status() == SagaStatus.COMPENSATION_FAILED;
+    boolean resuming =
+        previous.status() == SagaStatus.COMPENSATION_FAILED
+            && incoming.status() == SagaStatus.COMPENSATING
+            && incoming.compensationRound() == previous.compensationRound() + 1;
+    boolean compensatingByOperator =
+        previous.status() == SagaStatus.FAILED
+            && incoming.status() == SagaStatus.COMPENSATING
+            && previous.compensationTrigger() == null
+            && incoming.compensationTrigger() != null
+            && incoming.compensationTrigger().kind() == CompensationTriggerKind.OPERATOR_REQUEST;
+    requireOperatorFieldsForward(previous, incoming);
     for (Map.Entry<String, StepRecord> step : new TreeMap<>(previous.steps()).entrySet()) {
       StepRecord before = step.getValue();
       if (before.status() != StepStatus.COMPLETED) {
@@ -106,7 +124,7 @@ final class ForwardTransition {
                 + now.completionSequence());
       }
       if (!compensationMovesForward(
-          before.compensation(), now.compensation(), compensationFailing)) {
+          before.compensation(), now.compensation(), compensationFailing, resuming)) {
         throw new ConcurrentSagaUpdateException(
             sagaId,
             "completed step "
@@ -132,7 +150,7 @@ final class ForwardTransition {
             || previousStatus == SagaStatus.FAILED
             || previousStatus == SagaStatus.COMPENSATED
             || previousStatus == SagaStatus.COMPENSATION_FAILED;
-    if (terminal && incoming.status() != previousStatus) {
+    if (terminal && incoming.status() != previousStatus && !resuming && !compensatingByOperator) {
       throw new ConcurrentSagaUpdateException(
           sagaId,
           "status is terminal "
@@ -147,8 +165,38 @@ final class ForwardTransition {
     }
   }
 
+  private static void requireOperatorFieldsForward(SagaInstance previous, SagaInstance incoming) {
+    String sagaId = incoming.sagaId();
+    if (incoming.compensationRound() < previous.compensationRound()) {
+      throw new ConcurrentSagaUpdateException(
+          sagaId,
+          "compensationRound is "
+              + previous.compensationRound()
+              + " but the incoming snapshot has "
+              + incoming.compensationRound());
+    }
+    if (previous.resolution() != null && !previous.resolution().equals(incoming.resolution())) {
+      throw new ConcurrentSagaUpdateException(
+          sagaId,
+          "resolution "
+              + previous.resolution()
+              + " is recorded but the incoming snapshot has "
+              + incoming.resolution());
+    }
+  }
+
   private static boolean compensationMovesForward(
-      StepCompensation before, StepCompensation now, boolean compensationFailing) {
+      StepCompensation before,
+      StepCompensation now,
+      boolean compensationFailing,
+      boolean resuming) {
+    if (resuming
+        && before != null
+        && before.status() == CompensationStatus.FAILED
+        && now != null
+        && now.status() == CompensationStatus.NOT_ATTEMPTED) {
+      return true;
+    }
     if (before == null) {
       return now == null
           || now.status() == CompensationStatus.NOT_ATTEMPTED

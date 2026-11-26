@@ -166,7 +166,7 @@ public final class DeliveryFixture {
 
   /** The kinds of the instance's persisted lifecycle entries, in order. */
   public List<SagaLifecycleEventKind> historyKinds(String sagaId) {
-    return storage.history(sagaId).stream().map(stored -> stored.entry().kind()).toList();
+    return storage.storedHistory(sagaId).stream().map(stored -> stored.entry().kind()).toList();
   }
 
   public Journal journal() {

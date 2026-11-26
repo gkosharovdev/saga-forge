@@ -38,7 +38,7 @@ class FailureClassificationTest {
     assertThat(instance.failure()).isEqualTo(result.failure());
     assertThat(instance.pendingRetry()).isNull();
     SagaLifecycleEntry last =
-        fixture.storage().history(result.sagaId()).stream()
+        fixture.storage().storedHistory(result.sagaId()).stream()
             .map(StoredEntry::entry)
             .reduce((first, second) -> second)
             .orElseThrow();

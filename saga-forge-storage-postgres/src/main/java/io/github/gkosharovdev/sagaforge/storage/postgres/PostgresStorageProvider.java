@@ -1,8 +1,13 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.PageCursor;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import java.sql.Connection;
@@ -10,9 +15,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 
@@ -60,7 +67,7 @@ public final class PostgresStorageProvider implements StorageProvider {
       "INSERT INTO saga_instance ("
           + String.join(", ", SagaInstanceRows.COLUMNS)
           + ") "
-          + "VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb) "
+          + "VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?) "
           + "ON CONFLICT (saga_id) DO UPDATE SET "
           + SagaInstanceRows.COLUMNS.stream()
               .filter(column -> !column.equals("saga_id"))
@@ -107,6 +114,20 @@ public final class PostgresStorageProvider implements StorageProvider {
 
   private static final String NEXT_SEQUENCE_NUMBER =
       "SELECT COALESCE(MAX(sequence_number) + 1, 0) FROM saga_lifecycle_history WHERE saga_id = ?";
+
+  /** One page of {@link #find}: every filter is a parameter, so the statement text is fixed. */
+  private static final String FIND_PAGE =
+      SELECT_INSTANCE
+          + "WHERE (i.status = ANY(?::text[]) OR ?) "
+          + "AND (i.saga_type = ANY(?::text[]) OR ?) "
+          + "AND (?::timestamptz IS NULL OR i.last_modified_at < ?) "
+          + "AND (?::timestamptz IS NULL OR i.last_modified_at > ?) "
+          + "AND (?::timestamptz IS NULL OR (i.last_modified_at, i.saga_id) > (?, ?)) "
+          + "ORDER BY i.last_modified_at, i.saga_id LIMIT ?";
+
+  private static final String COUNT_BY_STATUS =
+      "SELECT status, resolution IS NULL AS unresolved, count(*) AS instances FROM saga_instance "
+          + "WHERE saga_type = ANY(?::text[]) OR ? GROUP BY status, resolution IS NULL";
 
   private static final String DELETE_INSTANCE = "DELETE FROM saga_instance WHERE saga_id = ?";
 
@@ -273,6 +294,116 @@ public final class PostgresStorageProvider implements StorageProvider {
         "find saga instances by " + associationProperty + "=" + associationValue,
         connection ->
             select(connection, FIND_BY_ASSOCIATION, associationProperty, associationValue));
+  }
+
+  /**
+   * Lists instances by keyset paging over {@code (last_modified_at, saga_id)}, served by the index
+   * {@code saga_instance_status_modified}. Bounds are exclusive; the statement reads {@code limit +
+   * 1} rows to learn whether a next page exists. Joins the active transaction, else runs on a
+   * connection of its own.
+   *
+   * @throws IllegalArgumentException if {@code query} is {@code null}
+   * @throws UncheckedSqlException if the database fails
+   */
+  @Override
+  public SagaInstancePage find(SagaInstanceQuery query) {
+    if (query == null) {
+      throw new IllegalArgumentException("query must not be null");
+    }
+    return onJoinedOrOwnConnection(
+        "list saga instances",
+        connection -> {
+          try (PreparedStatement statement = connection.prepareStatement(FIND_PAGE)) {
+            bindQuery(connection, statement, query);
+            List<SagaInstance> probe = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+              while (rows.next()) {
+                probe.add(
+                    SagaInstanceRows.fromRow(
+                        rows, decodeAssociations(rows.getString("associations"))));
+              }
+            }
+            return SagaInstancePage.of(probe, query.limit());
+          }
+        });
+  }
+
+  /**
+   * Counts instances by status in one {@code GROUP BY status, resolution IS NULL}.
+   *
+   * @throws IllegalArgumentException if {@code sagaTypes} is {@code null}
+   * @throws UncheckedSqlException if the database fails
+   */
+  @Override
+  public InstanceCounts countByStatus(Set<String> sagaTypes) {
+    if (sagaTypes == null) {
+      throw new IllegalArgumentException("sagaTypes must not be null");
+    }
+    return onJoinedOrOwnConnection(
+        "count saga instances",
+        connection -> {
+          try (PreparedStatement statement = connection.prepareStatement(COUNT_BY_STATUS)) {
+            statement.setArray(
+                1, connection.createArrayOf("text", sagaTypes.toArray(String[]::new)));
+            statement.setBoolean(2, sagaTypes.isEmpty());
+            Map<SagaStatus, Long> byStatus = new EnumMap<>(SagaStatus.class);
+            long compensationFailedUnresolved = 0;
+            long failedUnresolved = 0;
+            try (ResultSet rows = statement.executeQuery()) {
+              while (rows.next()) {
+                SagaStatus status = SagaStatus.valueOf(rows.getString("status"));
+                long count = rows.getLong("instances");
+                byStatus.merge(status, count, Long::sum);
+                if (rows.getBoolean("unresolved")) {
+                  if (status == SagaStatus.COMPENSATION_FAILED) {
+                    compensationFailedUnresolved += count;
+                  } else if (status == SagaStatus.FAILED) {
+                    failedUnresolved += count;
+                  }
+                }
+              }
+            }
+            return new InstanceCounts(byStatus, compensationFailedUnresolved, failedUnresolved);
+          }
+        });
+  }
+
+  /**
+   * Reads the instance's lifecycle history, {@code ORDER BY sequence_number}.
+   *
+   * @throws IllegalArgumentException if {@code sagaId} is {@code null}
+   * @throws UncheckedSqlException if the database fails
+   */
+  @Override
+  public List<SagaLifecycleEntry> history(String sagaId) {
+    if (sagaId == null) {
+      throw new IllegalArgumentException("sagaId must not be null");
+    }
+    return onJoinedOrOwnConnection(
+        "read the history of saga instance " + sagaId,
+        connection -> LifecycleEntryRows.selectAll(connection, sagaId));
+  }
+
+  private static void bindQuery(
+      Connection connection, PreparedStatement statement, SagaInstanceQuery query)
+      throws SQLException {
+    statement.setArray(
+        1,
+        connection.createArrayOf(
+            "text", query.statuses().stream().map(Enum::name).toArray(String[]::new)));
+    statement.setBoolean(2, query.statuses().isEmpty());
+    statement.setArray(
+        3, connection.createArrayOf("text", query.sagaTypes().toArray(String[]::new)));
+    statement.setBoolean(4, query.sagaTypes().isEmpty());
+    SagaInstanceRows.setInstant(statement, 5, query.modifiedBefore());
+    SagaInstanceRows.setInstant(statement, 6, query.modifiedBefore());
+    SagaInstanceRows.setInstant(statement, 7, query.modifiedAfter());
+    SagaInstanceRows.setInstant(statement, 8, query.modifiedAfter());
+    PageCursor after = query.after();
+    SagaInstanceRows.setInstant(statement, 9, after == null ? null : after.lastModifiedAt());
+    SagaInstanceRows.setInstant(statement, 10, after == null ? null : after.lastModifiedAt());
+    statement.setString(11, after == null ? null : after.sagaId());
+    statement.setInt(12, query.limit() + 1);
   }
 
   /**

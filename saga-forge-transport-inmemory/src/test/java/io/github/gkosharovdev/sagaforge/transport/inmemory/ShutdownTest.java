@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory;
 
 import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness.await;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
@@ -81,6 +82,35 @@ class ShutdownTest {
           "the next transport to deliver it");
     } finally {
       next.close();
+    }
+  }
+
+  @Test
+  @DisplayName("a stopped transport starts again, leads again and delivers what was appended")
+  void restartAfterStop() {
+    TransportUnderTest t =
+        new TransportUnderTest(SETTINGS, event -> new HandlingReport(event, List.of())).start();
+    try {
+      t.publish(new Unrouted("o-1"));
+      await(
+          () -> t.log.all().get(0).status() == MessageStatus.CONSUMED,
+          Duration.ofSeconds(5),
+          "the first delivery");
+      t.transport.stop(Duration.ofSeconds(2));
+      t.publish(new Unrouted("o-2"));
+      assertThat(t.transport.leadership().role()).isEqualTo(RelayRole.STANDBY);
+
+      t.start();
+
+      assertThat(t.transport.isRunning()).isTrue();
+      await(
+          () -> t.log.all().stream().allMatch(m -> m.status() == MessageStatus.CONSUMED),
+          Duration.ofSeconds(5),
+          "the delivery after the restart");
+      assertThat(t.transport.leadership().role()).isEqualTo(RelayRole.ACTIVE);
+      assertThatThrownBy(t::start).isInstanceOf(IllegalStateException.class);
+    } finally {
+      t.close();
     }
   }
 

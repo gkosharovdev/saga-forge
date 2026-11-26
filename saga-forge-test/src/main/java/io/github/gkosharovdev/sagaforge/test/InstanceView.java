@@ -2,10 +2,13 @@ package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -15,14 +18,27 @@ import java.util.Optional;
  *
  * @param stored the stored instance
  * @param context its {@code SagaContext} values; empty if it has none
+ * @param history its lifecycle history in stored order ({@code specs/015-saga-operations})
  */
-public record InstanceView(SagaInstance stored, Map<String, Object> context) {
+public record InstanceView(
+    SagaInstance stored, Map<String, Object> context, List<SagaLifecycleEntry> history) {
 
   public InstanceView {
     if (stored == null) {
       throw new IllegalArgumentException("stored must not be null");
     }
     context = Map.copyOf(context);
+    history = history == null ? List.of() : List.copyOf(history);
+  }
+
+  /** A view with no history, as before 015. */
+  public InstanceView(SagaInstance stored, Map<String, Object> context) {
+    this(stored, context, List.of());
+  }
+
+  /** The operator's resolution, if the instance was marked resolved ({@code 015}). */
+  public Optional<SagaResolution> resolution() {
+    return Optional.ofNullable(stored.resolution());
   }
 
   /** Fully qualified class name of the saga. */

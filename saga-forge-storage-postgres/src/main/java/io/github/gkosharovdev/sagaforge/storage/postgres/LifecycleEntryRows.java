@@ -1,8 +1,11 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,8 +22,15 @@ final class LifecycleEntryRows {
       "INSERT INTO saga_lifecycle_history (saga_id, sequence_number, "
           + "kind, step_name, touched_aggregates, outcome_step, failure_step_name, failure_cause_type, "
           + "failure_message, failure_failed_at, failure_classification, failure_attempts, occurred_at, "
-          + "compensation_trigger) "
-          + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";
+          + "compensation_trigger, operator, operator_reason) "
+          + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)";
+
+  /** An instance's history in stored order ({@code specs/015-saga-operations}). */
+  static final String SELECT_HISTORY =
+      "SELECT kind, step_name, touched_aggregates, outcome_step, failure_step_name, "
+          + "failure_cause_type, failure_message, failure_failed_at, failure_classification, "
+          + "failure_attempts, occurred_at, compensation_trigger, operator, operator_reason "
+          + "FROM saga_lifecycle_history WHERE saga_id = ? ORDER BY sequence_number";
 
   private static final String TRIGGER_FIELD = "saga_lifecycle_history.compensation_trigger";
 
@@ -92,5 +102,48 @@ final class LifecycleEntryRows {
     SagaInstanceRows.bindFailure(insert, 7, entry.failure());
     SagaInstanceRows.setInstant(insert, 13, entry.occurredAt());
     insert.setString(14, SagaInstanceRows.encodeTrigger(TRIGGER_FIELD, entry.trigger()));
+    OperatorRequest operator = entry.operator();
+    insert.setString(15, operator == null ? null : operator.operator());
+    insert.setString(16, operator == null ? null : operator.reason());
+  }
+
+  /**
+   * Reads every history row of {@code sagaId}, in stored order.
+   *
+   * @param connection the connection to read on
+   * @param sagaId the instance
+   * @return the entries; empty for an unknown instance
+   * @throws SQLException if the database fails
+   * @throws IllegalStateException if a stored value cannot be decoded
+   */
+  static List<SagaLifecycleEntry> selectAll(Connection connection, String sagaId)
+      throws SQLException {
+    try (PreparedStatement select = connection.prepareStatement(SELECT_HISTORY)) {
+      select.setString(1, sagaId);
+      List<SagaLifecycleEntry> entries = new ArrayList<>();
+      try (ResultSet row = select.executeQuery()) {
+        while (row.next()) {
+          entries.add(fromRow(sagaId, row));
+        }
+      }
+      return List.copyOf(entries);
+    }
+  }
+
+  private static SagaLifecycleEntry fromRow(String sagaId, ResultSet row) throws SQLException {
+    String operator = row.getString("operator");
+    String touched = row.getString("touched_aggregates");
+    return new SagaLifecycleEntry(
+        sagaId,
+        SagaLifecycleEventKind.valueOf(row.getString("kind")),
+        row.getString("step_name"),
+        touched == null
+            ? List.of()
+            : SagaInstanceRows.decodeTouchedAggregates(TOUCHED_AGGREGATES_FIELD, touched),
+        row.getString("outcome_step"),
+        SagaInstanceRows.failureFromRow(row),
+        SagaInstanceRows.getInstant(row, "occurred_at"),
+        SagaInstanceRows.decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
+        operator == null ? null : new OperatorRequest(operator, row.getString("operator_reason")));
   }
 }

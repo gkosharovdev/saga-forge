@@ -41,7 +41,7 @@ class StepRetryTest {
   private final SagaRuntime engine = fixture.engine(pause);
 
   private List<SagaLifecycleEntry> history(String sagaId) {
-    return fixture.storage().history(sagaId).stream().map(StoredEntry::entry).toList();
+    return fixture.storage().storedHistory(sagaId).stream().map(StoredEntry::entry).toList();
   }
 
   @Test

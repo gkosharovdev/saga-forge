@@ -124,6 +124,7 @@ public class SagaRuntimeConfiguration {
             .dispatcher(eventDispatcher)
             .maxTotalRetryBackoff(properties.getRuntime().getMaxTotalRetryBackoff())
             .outcomeEvents(properties.getOutcomeEvents().isEnabled())
+            .recovery(properties.recoverySettings())
             .clock(clock.getIfUnique(Clock::systemUTC))
             .propertyResolver(key -> Optional.ofNullable(environment.getProperty(key)));
     outbox.ifAvailable(builder::outbox);

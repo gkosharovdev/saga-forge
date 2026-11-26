@@ -36,6 +36,20 @@ final class Values {
   }
 
   static String eventId(String sagaId, String status) {
-    return sagaId + ":" + status;
+    return eventId(sagaId, status, 0);
+  }
+
+  /**
+   * {@code sagaId:STATUS} in compensation round 0, else {@code sagaId:STATUS:r<round>}, so every
+   * terminal write of one instance has its own id ({@code specs/015-saga-operations} research R11).
+   */
+  static String eventId(String sagaId, String status, int compensationRound) {
+    if (compensationRound < 0) {
+      throw new IllegalArgumentException(
+          "compensationRound must not be negative, but is " + compensationRound);
+    }
+    return compensationRound == 0
+        ? sagaId + ":" + status
+        : sagaId + ":" + status + ":r" + compensationRound;
   }
 }

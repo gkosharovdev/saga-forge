@@ -206,6 +206,43 @@ The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any 
 details name this instance's `role`, the `fencingToken` and, on a standby, the `leader` (`holderId@holderHost`).
 Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
 
+### Operating sagas: the `sagas` endpoint and recovery
+
+With Actuator present the starter also registers the `sagas` endpoint over the runtime's operations, with or without
+a transport. Reads are on by default; expose them like any endpoint:
+
+```properties
+management.endpoints.web.exposure.include=health,sagaforge,sagas
+```
+
+- `GET /actuator/sagas?status=FAILED&status=COMPENSATION_FAILED&type=…&modifiedBefore=…&modifiedAfter=…&limit=50&cursor=…`
+  returns one page of instances (oldest modified first), the `next` cursor and the counts per status. A bad parameter
+  is a 400.
+- `GET /actuator/sagas/{sagaId}` returns the instance and its lifecycle history; 404 if unknown. The saga's business
+  state is never shown, and its context values only with `saga-forge.operations.expose-context-values=true`.
+- `POST /actuator/sagas/{sagaId}/{action}` with `{"reason": "…"}` repairs one instance: `resume-compensation`
+  (a `COMPENSATION_FAILED` or stalled `COMPENSATING` saga), `compensate` (a `CREATED`, `RUNNING` or `FAILED` saga) or
+  `resolve` (marks a `FAILED` or `COMPENSATION_FAILED` saga as handled by hand). The authenticated principal's name is
+  recorded as the operator; without one the answer is 401. A repair that does not apply is a 409 naming the reason
+  (`WRONG_STATUS`, `ALREADY_RESOLVED`, `NOT_FOUND`) and the status.
+
+The write operation is off until you allow it, and you should only allow it behind Spring Security with a role for
+operators:
+
+```properties
+management.endpoint.sagas.access=unrestricted
+```
+
+The `sagaforge` health contributor adds the details `instances.compensationFailed` and `instances.failedUnresolved`
+(sagas no operator has resolved yet); they never change its status.
+
+Recovery sweeps run by default once a minute on every instance: a saga `COMPENSATING` and untouched for
+`stall-age` resumes its compensation, and a saga still `CREATED` with no completed step after `abandonment-age` (its
+first unit of work never committed) is reported in the log (`saga.recovery.startAbandoned`) or, with
+`abandoned-start-policy=fail`, ended `FAILED`. Concurrent sweeps on several instances are safe: each repair re-checks
+the instance under its lock. `report` is the default because a start ended `FAILED` no longer blocks its start event,
+so a redelivery would start a second saga; a redelivered start event adopts a stranded `CREATED` instance instead.
+
 ### Running several instances
 
 Run as many instances of the application as you like over one Postgres database: nothing to configure. Each
@@ -272,6 +309,14 @@ instance delivers.
 | `saga-forge.telemetry.record-association-values` | `false` | Record association values (an order id, say) on spans. |
 | `saga-forge.telemetry.record-contents` | `false` | Record saga event and command contents (`toString`, at most 1,000 characters) on spans. |
 | `saga-forge.telemetry.record-failure-messages` | `false` | Record failure messages and exception events on spans; the failure's type is always recorded. |
+| `saga-forge.telemetry.instance-count-interval` | `30s` | How often the `saga_forge.instances` gauge recounts the sagas by status. |
+| `saga-forge.recovery.enabled` | `true` | Whether the runtime runs recovery sweeps on its own. |
+| `saga-forge.recovery.interval` | `1m` | The time between two sweeps. |
+| `saga-forge.recovery.stall-age` | `5m` | How long a compensating saga stays untouched before a sweep resumes it. |
+| `saga-forge.recovery.batch-size` | `100` | Most sagas of each kind one sweep handles (1 to 1,000). |
+| `saga-forge.recovery.abandonment-age` | `15m` | How long a created saga with no completed step waits before a sweep handles it. |
+| `saga-forge.recovery.abandoned-start-policy` | `report` | `report` logs and counts an abandoned start; `fail` ends it `FAILED`. |
+| `saga-forge.operations.expose-context-values` | `false` | Whether the `sagas` endpoint shows a saga's context values; they may hold personal data. |
 
 Your IDE completes all of them from the starter's configuration metadata.
 

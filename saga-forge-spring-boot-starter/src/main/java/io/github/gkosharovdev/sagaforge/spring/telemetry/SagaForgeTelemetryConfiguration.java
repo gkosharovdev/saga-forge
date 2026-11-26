@@ -49,7 +49,8 @@ public class SagaForgeTelemetryConfiguration {
                     .withMetrics(telemetry.getMetrics().isEnabled())
                     .withRecordAssociationValues(telemetry.isRecordAssociationValues())
                     .withRecordContents(telemetry.isRecordContents())
-                    .withRecordFailureMessages(telemetry.isRecordFailureMessages()));
+                    .withRecordFailureMessages(telemetry.isRecordFailureMessages())
+                    .withInstanceCountInterval(telemetry.getInstanceCountInterval()));
     return new SagaForgeTelemetry(openTelemetry.getIfUnique(OpenTelemetry::noop), resolved);
   }
 }

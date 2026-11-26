@@ -51,7 +51,7 @@ public final class SignalWorld {
 
   /** The committed history entries of {@code sagaId}, in stored order. */
   public List<SagaLifecycleEntry> history(String sagaId) {
-    return storage.history(sagaId).stream().map(StoredEntry::entry).toList();
+    return storage.storedHistory(sagaId).stream().map(StoredEntry::entry).toList();
   }
 
   public TransactionalInMemoryStorageProvider storage() {

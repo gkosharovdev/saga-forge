@@ -33,5 +33,10 @@ public enum CompensationTriggerKind {
    * A {@code @StartCompensation} step that handles a deadline's expiry ({@code @DeadlineExpired})
    * ran and its unit of work committed ({@code specs/017-saga-deadlines} FR-015).
    */
-  DEADLINE_EXPIRED
+  DEADLINE_EXPIRED,
+  /**
+   * An operator asked the runtime to compensate a {@code RUNNING} or {@code FAILED} instance
+   * ({@code specs/015-saga-operations} FR-013); the trigger carries the {@code OperatorRequest}.
+   */
+  OPERATOR_REQUEST
 }

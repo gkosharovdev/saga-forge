@@ -3,6 +3,13 @@ package io.github.gkosharovdev.sagaforge.runtime;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.ScheduledCommandId;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
+import io.github.gkosharovdev.sagaforge.core.operations.RecoveryReport;
+import io.github.gkosharovdev.sagaforge.core.operations.RepairResult;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner;
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
@@ -18,6 +25,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
@@ -34,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -80,12 +90,14 @@ public final class SagaRuntime implements EventReceiver {
   private enum State {
     BUILT,
     STARTED,
-    REFUSED
+    REFUSED,
+    STOPPED
   }
 
   private final List<Class<?>> registered;
   private final EngineSettings settings;
   private final Diagnostics diagnostics;
+  private final RecoverySettings recovery;
   private final CommandGateway commandGateway =
       new CommandGateway() {
         @Override
@@ -118,11 +130,68 @@ public final class SagaRuntime implements EventReceiver {
           started().receiveCommandFailure(failure, inTransaction);
         }
       };
+  private final SagaOperations operations =
+      new SagaOperations() {
+        @Override
+        public Optional<SagaInstance> find(String sagaId) {
+          return started().operations().find(sagaId);
+        }
+
+        @Override
+        public List<SagaInstance> findByAssociation(String property, String value) {
+          return started().operations().findByAssociation(property, value);
+        }
+
+        @Override
+        public SagaInstancePage list(SagaInstanceQuery query) {
+          return started().operations().list(query);
+        }
+
+        @Override
+        public InstanceCounts count(Set<String> sagaTypes) {
+          return started().operations().count(sagaTypes);
+        }
+
+        @Override
+        public List<SagaLifecycleEntry> history(String sagaId) {
+          return started().operations().history(sagaId);
+        }
+
+        @Override
+        public Map<String, Object> context(String sagaId) {
+          return started().operations().context(sagaId);
+        }
+
+        @Override
+        public RepairResult resumeCompensation(String sagaId, OperatorRequest request) {
+          return started().operations().resumeCompensation(sagaId, request);
+        }
+
+        @Override
+        public RepairResult compensate(String sagaId, OperatorRequest request) {
+          return started().operations().compensate(sagaId, request);
+        }
+
+        @Override
+        public RepairResult markResolved(String sagaId, OperatorRequest request) {
+          return started().operations().markResolved(sagaId, request);
+        }
+
+        @Override
+        public RecoveryReport recover() {
+          return started().operations().recover();
+        }
+      };
   private final Object startLock = new Object();
   private volatile State state = State.BUILT;
   private volatile EngineRuntime runtime;
 
-  private SagaRuntime(List<Class<?>> registered, EngineSettings settings, Diagnostics diagnostics) {
+  private SagaRuntime(
+      List<Class<?>> registered,
+      EngineSettings settings,
+      Diagnostics diagnostics,
+      RecoverySettings recovery) {
+    this.recovery = recovery;
     this.registered = List.copyOf(registered);
     this.settings = settings;
     this.diagnostics = diagnostics;
@@ -140,12 +209,23 @@ public final class SagaRuntime implements EventReceiver {
    * command routes, registers every {@code @Saga} class with the {@link EventDispatcher} in
    * registration order, and starts accepting events (FR-034 to FR-036).
    *
+   * <p>After {@link #stop()}, {@code start()} starts the engine again: it resumes the recovery
+   * sweeps and the instances gauge and accepts work, without validating or registering the model a
+   * second time.
+   *
    * @throws SagaRuntimeStartupException if the model or plug-ins are not runnable or the dispatcher
    *     rejects a saga type; the engine is then refused for good and processes nothing
-   * @throws IllegalStateException if {@code start()} was called before
+   * @throws IllegalStateException if the engine is already started, was refused, or was stopped
+   *     before it ever started
    */
   public void start() {
     synchronized (startLock) {
+      if (state == State.STOPPED && runtime != null) {
+        state = State.STARTED;
+        runtime.startBackground();
+        diagnostics.startupStarted(runtime.sagaTypes().stream().map(Class::getName).toList());
+        return;
+      }
       if (state != State.BUILT) {
         throw new IllegalStateException("start() was already called; the saga engine is " + state);
       }
@@ -196,6 +276,34 @@ public final class SagaRuntime implements EventReceiver {
     return eventPublisher;
   }
 
+  /**
+   * The operations API ({@code specs/015-saga-operations}): find and list saga instances, read
+   * their history and context, repair them and run a recovery sweep. Its calls throw {@link
+   * IllegalStateException} after {@link #stop()}.
+   *
+   * @throws IllegalStateException unless the engine is {@code STARTED}
+   */
+  public SagaOperations operations() {
+    started();
+    return operations;
+  }
+
+  /**
+   * Stops the engine: ends the scheduled recovery sweeps, waiting for a running one, and the
+   * instances gauge. Afterwards every call that needs a started engine throws {@link
+   * IllegalStateException} until {@link #start()} starts it again. Idempotent; does nothing before
+   * a successful {@link #start()} except refuse a later one.
+   */
+  public void stop() {
+    synchronized (startLock) {
+      State before = state;
+      state = State.STOPPED;
+      if (before == State.STARTED) {
+        runtime.stop();
+      }
+    }
+  }
+
   /** {@code true} once {@link #start()} succeeded. */
   public boolean isStarted() {
     return state == State.STARTED;
@@ -216,10 +324,11 @@ public final class SagaRuntime implements EventReceiver {
   }
 
   private void startAccepting(ValidationReport validation) {
-    EngineRuntime assembled = EngineRuntime.assemble(registered, settings, diagnostics);
+    EngineRuntime assembled = EngineRuntime.assemble(registered, settings, diagnostics, recovery);
     assembled.sagaTypes().forEach(sagaType -> registerWithDispatcher(sagaType, validation));
     runtime = assembled;
     state = State.STARTED;
+    assembled.startBackground();
     diagnostics.startupStarted(assembled.sagaTypes().stream().map(Class::getName).toList());
   }
 
@@ -280,6 +389,7 @@ public final class SagaRuntime implements EventReceiver {
     private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
     private boolean outcomeEvents = true;
     private Function<String, Optional<String>> propertyResolver = key -> Optional.empty();
+    private RecoverySettings recovery = RecoverySettings.defaults();
 
     private Builder() {}
 
@@ -470,6 +580,18 @@ public final class SagaRuntime implements EventReceiver {
       return this;
     }
 
+    /**
+     * Optional: how the runtime recovers stalled compensations and abandoned starts ({@code
+     * specs/015-saga-operations}). Default {@link RecoverySettings#defaults()}: no scheduled
+     * sweeps; {@code operations().recover()} runs one with the default ages.
+     *
+     * @throws IllegalArgumentException if {@code recovery} is {@code null}
+     */
+    public Builder recovery(RecoverySettings recovery) {
+      this.recovery = requireNonNull(recovery, "recovery");
+      return this;
+    }
+
     /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
     public Builder logger(System.Logger logger) {
       this.logger = requireNonNull(logger, "logger");
@@ -496,7 +618,8 @@ public final class SagaRuntime implements EventReceiver {
             "A registered class hosts a service @CommandHandler, an"
                 + " @AggregateLoader or an @AggregateSaver, but no handlerInstances(...) was given");
       }
-      return new SagaRuntime(List.copyOf(registered), settings(), new Diagnostics(logger));
+      return new SagaRuntime(
+          List.copyOf(registered), settings(), new Diagnostics(logger), recovery);
     }
 
     private EngineSettings settings() {

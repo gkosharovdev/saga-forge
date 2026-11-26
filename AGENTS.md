@@ -166,6 +166,7 @@
   object in the `sagaforge` endpoint, health `DEGRADED` while leaderless. Telemetry gauge `saga_forge.relay.active`,
   counter `saga_forge.relay.leadership_changes`, log events `saga.transport.leadership.*`.
 - Whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on 2026-11-25 (1,881 tests, 0 failures; the release build `-P release` with Javadoc also passes).
+- With 015 (saga operations) the whole build, container suites included, passed on 2026-11-26 (2,080 tests, 0 failures; 6 skipped: `TelemetryOverheadTest` and the five scheduling cases of `TransportAcceptanceSuite` under Modulith interop, G-017-01).
 - Implemented and tested, added by `specs/017-saga-deadlines` (closes G-ENG-25; taken ahead of 013): saga deadlines and
   scheduled commands. Core gains `@StartDeadline(name, duration | durationFrom, cancelledBy)` (repeatable) and
   `@DeadlineExpired(name)` on a `@SagaStep` with no `associationProperty`, taking nothing or `core.deadline.DeadlineReached`
@@ -184,6 +185,27 @@
   `expectDeadlineExpired`/`expectDeadlineIgnored`, `InstanceView.openDeadlines`, `Builder.property`. Telemetry counter
   `saga_forge.deadlines`. Examples: `CheckoutSaga`'s payment window and `FulfilmentSaga`'s courier assignment. Durable
   retry backoff (G-005-01/-02) is not part of it.
+- Implemented and tested, including container suites, added by `specs/015-saga-operations` (closes G-006-03, G-006-05,
+  G-008-02, G-ENG-05, G-013-05 and G-003-24; without retry, G-015-01 / roadmap 015b): saga operations. Core gains
+  `core.operations`: `SagaOperations` (`list(SagaInstanceQuery)` with a keyset `PageCursor` → `SagaInstancePage`,
+  `find`, `findByAssociation`, `history`, `context`, `count` → `InstanceCounts`; repairs `resumeCompensation`,
+  `compensate`, `markResolved`, each taking an `OperatorRequest` and returning `RepairResult.Applied`/`NotApplied`
+  (`NOT_FOUND`, `WRONG_STATUS`, `ALREADY_RESOLVED`); `recover()` → `RecoveryReport`), `SagaResolution`;
+  `SagaInstance.resolution`/`compensationRound`, `CompensationTriggerKind.OPERATOR_REQUEST` with
+  `CompensationTrigger.operatorRequest`, lifecycle kinds `COMPENSATION_RESUMED`, `RESOLVED`, `START_RECOVERED` (entries
+  carry the operator), and the `StorageProvider` queries (`list`, `count`, `history`, stalled and abandoned instances).
+  The runtime's `SagaRuntime.operations()` runs each repair as a `UnitOfWork` work admitted under the instance lock
+  after a re-read (`ResumeCompensation`, `CompensateByOperator`, `MarkResolved`, `FailAbandonedStart`); a resume opens a
+  new compensation round and outcome ids gain `:r<round>` (Property 38 revised). `RecoverySweeper` (`RecoverySettings`,
+  off by default for a hand-assembled runtime, `AbandonedStartPolicy` `REPORT` default or `FAIL`) runs on every
+  instance; the router adopts a stranded `CREATED` start on a redelivered start event; `SagaRuntime.stop()`. Telemetry:
+  span `saga_forge.operation`, counters `saga_forge.operations`/`saga_forge.recovery`, gauge `saga_forge.instances`.
+  Postgres implements the queries and persists the new fields (existing databases apply `schema-upgrade-015.sql`). The
+  starter: `saga-forge.recovery.*` (sweeps on by default), `saga-forge.operations.expose-context-values`,
+  `saga-forge.telemetry.instance-count-interval`, the `sagas` Actuator endpoint (write access off unless
+  `management.endpoint.sagas.access=unrestricted`; needs a principal), health details for unresolved counts. Fixture:
+  `SagaFixture.operations()`, `whenOperator(...)`, `Builder.recovery`, `Then.expectResolved`/`expectNotResolved`/
+  `expectHistory`, `InstanceView.history`/`resolution`. Properties 44 to 46.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -197,10 +219,12 @@
 - `saga-forge-core` — annotations (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`,
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
-  `DomainEvents`/`EventPublisher`, SPI. Zero dependencies.
+  `DomainEvents`/`EventPublisher`, `core.operations` (`SagaOperations`, `SagaInstanceQuery`/`PageCursor`/
+  `SagaInstancePage`, `OperatorRequest`, `RepairResult`, `SagaResolution`, `InstanceCounts`, `RecoveryReport`), SPI.
+  Zero dependencies.
 - `saga-forge-runtime` — the saga runtime; depends on the JDK, `saga-forge-core` and `opentelemetry-api` (010) only. Public surface:
-  `SagaRuntime` with its host-facing builder, `StartupReport`, `SagaRuntimeStartupException`,
-  `ImmediateDispatchOutbox`; everything else is package-private in `runtime.internal`, where every write goes through
+  `SagaRuntime` with its host-facing builder (`operations()`, `stop()`, `Builder.recovery`), `StartupReport`,
+  `SagaRuntimeStartupException`, `ImmediateDispatchOutbox`, `RecoverySettings`, `AbandonedStartPolicy`; everything else is package-private in `runtime.internal`, where every write goes through
   `UnitOfWork` (ArchUnit test scope only, `UnitOfWorkBoundaryTest`). Every contract it needs lives
   in `core.spi` (`EventReceiver`, `TransactionBoundary`, `Outbox`, `HandlerParameterResolver`,
   `SagaObjectProvider`, ...). Its test-jar ships the in-memory doubles (`InMemoryTransactionBoundary`,
@@ -208,7 +232,7 @@
 - `saga-forge-spring-boot-starter` — auto-configuration (008), see its `README.md`: `SagaRuntimeConfiguration`
   (`SagaModelCollector`, the runtime, `CommandGateway`/`EventPublisher` beans, `SagaRuntimeLifecycle`),
   `SpringTransactionConfiguration`, `PostgresStorageConfiguration` (`SchemaInitializer`), `SpringHostConfiguration`,
-  `ApplicationEventsConfiguration`, `SagaForgeActuatorConfiguration`, the failure analyzers, `SagaForgeProperties`;
+  `ApplicationEventsConfiguration`, `SagaForgeActuatorConfiguration`, `SagasEndpointConfiguration` (`SagasEndpoint`, 015), the failure analyzers, `SagaForgeProperties`;
   plus 007's transport wiring (`InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`,
   `ApplicationEventBridge`, `ModulithInteropConfiguration`/`ModulithMessageStore`). No `SagaRuntimeConfig` for users
   to hand-assemble. Spring code stays in this module and `saga-forge-example-spring`.
@@ -310,16 +334,16 @@
   the identity on (G-005-03); the triggering request is not deduplicated before a saga exists (G-005-04); a crash
   during a fresh event's first attempt is not counted (G-005-05); a retry of a start unit of work does not resume
   after a crash (G-005-06).
-- Compensation limitations, see memory.md G-006-02 to G-006-09: no confirmation wait for an undo (G-006-02); no
-  operator path out of `COMPENSATION_FAILED` (G-006-03); no "irreversible step" marker (G-006-04); a `COMPENSATING`
-  instance with no further event never resumes (G-006-05); a compensation sees the trigger's event type, not the
+- Compensation limitations, see memory.md G-006-02 to G-006-09: no confirmation wait for an undo (G-006-02); an
+  operator resumes `COMPENSATION_FAILED` since 015 (G-006-03 closed); no "irreversible step" marker (G-006-04); a stalled
+  `COMPENSATING` instance resumes through a recovery sweep since 015 (G-006-05 closed); a compensation sees the trigger's event type, not the
   event (G-006-06); upgraded instances may get a name-ordered `completionSequence` (G-006-07); compensations block the
-  caller and hold the instance (G-006-08); a failed compensation is never retried (G-006-09). A compensation
+  caller and hold the instance (G-006-08); a failed compensation is not retried on its own, only by an operator's resume (G-006-09). A compensation
   interrupted before its commit runs again on resume, so its commands must be idempotent (pass `CommandId` on).
 - `SagaContext` values are a separate `SagaContextRecord` behind `SagaContextStore`; the runtime leaves
   `SagaInstance.state` empty and treats other saga fields as dependencies (G-ENG-06, use-or-drop still open).
 - Engine limitations, see memory.md G-ENG-05 to G-ENG-13: a crash between the creation write and the first unit of
-  work strands a `CREATED` instance (G-ENG-05); the default `ImmediateDispatchOutbox` is at most once, an outbox needs
+  work strands a `CREATED` instance until its start event is redelivered and adopts it (G-ENG-05 closed by 015); the default `ImmediateDispatchOutbox` is at most once, an outbox needs
   `IN_TRANSACTION` (G-ENG-07); duplicate starts are caught across processes only after the creation write committed
   (G-ENG-08); the `FAILED` write can mark an instance another process moved on (G-ENG-10); the Postgres
   `FOR NO KEY UPDATE` reasoning is unverified against a database (G-ENG-11); `begin()` suspending vs. rejecting a
@@ -342,7 +366,7 @@
   module for Kafka (G-007-06); interop leasing reads all incomplete publications (G-007-07); several instances share a
   log with one active relay since 013 (G-007-09 closed).
 - Spring Boot starter (008), see memory.md G-008-01 to G-008-04: Modulith event externalization and `Scenario`
-  support deferred (G-008-01); the Actuator endpoint is read-only (G-008-02); events published through Spring's own
+  support deferred (G-008-01); the `sagaforge` endpoint is read-only, repairs go through 015's `sagas` endpoint (G-008-02 closed); events published through Spring's own
   `ApplicationEventPublisher` do not reach sagas (G-008-03); repository tests use `ApplicationContextRunner` /
   `SpringApplicationBuilder`, not `@SpringBootTest` (G-008-04). An event a step of its own instance runs is not handed
   to other saga types (G-ENG-24).
@@ -376,8 +400,15 @@
 - Active/standby relay (013), see memory.md G-013-01 to G-013-05: a message appended on a standby waits for the
   leader's poll (G-013-01); delivery throughput is one relay's, no partitioned leasing (G-013-02); takeover timing, not
   safety, depends on instance clocks (G-013-03); the redelivery-after-commit failover case is not forced in a test
-  (G-013-04); a failover between creation write and first unit of work strands the start (G-013-05, with G-ENG-05).
+  (G-013-04); a failover between creation write and first unit of work is recovered by the start event's redelivery since 015 (G-013-05 closed).
   Never deliver outside `MessageStore.lease(LeaderLease, ...)`: the fencing token is the multi-instance safety.
+
+- Saga operations (015), see memory.md G-015-01 to G-015-09: no retry of a failed step, roadmap 015b next (G-015-01);
+  sweeps run on every instance, safe by the instance lock, never by leadership (G-015-02); a resume keeps only the
+  latest round's compensation failure (G-015-03); repairs run compensations in the caller's thread (G-015-04); no bulk
+  repair (G-015-05); listings are not snapshot-consistent (G-015-06); the abandoned-start report is deduplicated per
+  process (G-015-07); a stopped runtime and transport start again since G-015-08 closed; uncovered contract cases (G-015-09). Every repair
+  is a `UnitOfWork` work whose admission re-reads the instance under its lock; keep it that way.
 
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,

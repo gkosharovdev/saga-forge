@@ -17,7 +17,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | `SagaInstance` step records (`StepRecord`: `NOT_RUN`/`COMPLETED` + touched aggregates), `outcome`, `failure` (`SagaFailure`) | Contracts defined; behavior specified by [contracts/saga-unit-of-work.md](../specs/002-transactional-step-sequence/contracts/saga-unit-of-work.md) and proven by a test-only harness; implemented by the runtime (004), tested |
 | SPI (`StorageProvider`, `EventDispatcher`) | Defined; Postgres implements `StorageProvider` and `SagaContextStore` ([003](../specs/003-postgres-saga-persistence/spec.md)) and joins the runtime's transaction (004); the in-memory transport implements `EventDispatcher` (007) |
 | SPI added by 004 (`EventReceiver`/`HandlingReport`, `TransactionBoundary`/`LocalTransaction`, `Outbox`/`OutgoingMessages` (named `EventHandoff`/`HandedOffEvents` until 007), `HandlerParameterResolver`, `SagaObjectProvider`, `SagaConcurrencyConflictException`, `StorageProvider.findByIdAndLock`) | Defined; used by the runtime, tested; `JdbcTransactionBoundary` in the Postgres module |
-| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the runtime, persisted by storage in hand-over order through `save(instance, entries)`; no query API |
+| `SagaLifecycleEntry` / `SagaLifecycleEventKind` (storage-agnostic lifecycle history) | Defined, tested; produced by the runtime, persisted by storage in hand-over order through `save(instance, entries)`; read through `StorageProvider.history` and `SagaOperations.history` (015) |
 | Saga runtime (`saga-forge-runtime`: event routing, saga-scoped unit of work, one unit of work per instance, outbox SPI, startup validation) | Implemented, unit-tested over in-memory doubles ([004](../specs/004-saga-engine/spec.md)); not yet run against Postgres |
 | Step retry and idempotent command processing (`@SagaStep(retry = @RetryPolicy(...))`, `core.failure` markers and `FailureClassification`, `CommandId`, `HandlingOutcome.DUPLICATE`, `SagaInstance.pendingRetry`, `StepRecord.attempts`/`handledCommands`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([005](../specs/005-step-retry/spec.md)) |
 | Compensation (`@StartCompensation`, `@SagaCompensation` run by the runtime, `CompensationTrigger`, `SagaStatus.COMPENSATED`/`COMPENSATION_FAILED`, `StepRecord.completionSequence`/`compensation`) | Implemented in core and the runtime, persisted by Postgres, tested, including the Postgres container suites ([006](../specs/006-saga-compensation/spec.md)) |
@@ -28,6 +28,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Saga test fixture (`saga-forge-test`: `SagaFixture` given/when/then, record-and-answer or handler mode, failure rules, `FixtureClock`, durable `SagaContext` value check) and the `CommandInterceptor` SPI (Property 36) | Implemented, tested, with a parity suite against a hand-assembled runtime ([009](../specs/009-saga-test-fixture/spec.md)) |
 | Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
 | Saga deadlines and scheduled commands (`@StartDeadline`/`@DeadlineExpired`, `DeadlineReached`, trigger kind `DEADLINE_EXPIRED`, `SagaInstance.openDeadlines`, `CommandGateway.schedule`/`cancel`, `MessageStore` due times and `cancel`, status `CANCELLED`, rules R24 to R29, Properties 40 to 43) | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites ([017](../specs/017-saga-deadlines/spec.md)); not with Spring Modulith interop (G-017-01) |
+| Saga operations (`SagaRuntime.operations()`: instance queries, `resumeCompensation`/`compensate`/`markResolved` with `OperatorRequest`, `recover()`; recovery sweeps with `RecoverySettings`/`AbandonedStartPolicy`; stranded-start adoption; `SagaResolution`, `compensationRound`; the starter's `sagas` Actuator endpoint) | Implemented in core, the runtime, Postgres, the starter and the fixture, tested, including container suites ([015](../specs/015-saga-operations/spec.md)); no retry of a failed step (G-015-01) |
 
 ## Module responsibilities
 
@@ -375,6 +376,43 @@ rollback.
 This comes from production experience: a step recorded as completed
 despite its business effect being rolled back is a worse failure mode than the step simply failing, because it
 silently breaks the saga's ability to resume or retry correctly.
+
+## Operations and recovery
+
+[015](../specs/015-saga-operations/spec.md) gives every runtime an operations API, `SagaRuntime.operations()`
+(`core.operations.SagaOperations`): queries over instances (`list` with a keyset `PageCursor`, `find`,
+`findByAssociation`, `history`, `context`, `count`), three repairs and `recover()`. The storage half is
+`StorageProvider.list`/`count`/`history` and the stall and abandonment queries; Postgres answers them from indexes in
+`schema-upgrade-015.sql`.
+
+**Repairs** are writes like any other: each runs through the runtime's one `UnitOfWork` under the instance's lock, and
+its admission re-reads the instance before it acts, so a repair whose instance moved on is `NotApplied`
+(`WRONG_STATUS`, `ALREADY_RESOLVED`, `NOT_FOUND`) and never half-applied. The operator transitions are:
+
+| Repair | From | To |
+|---|---|---|
+| `resumeCompensation` | `COMPENSATION_FAILED`, `COMPENSATING` | `COMPENSATING`, round + 1; failed compensations reset to `NOT_ATTEMPTED`; then `COMPENSATED` or `COMPENSATION_FAILED` |
+| `compensate` | `CREATED`, `RUNNING`, `FAILED` | `COMPENSATING` with an `OPERATOR_REQUEST` trigger; then as for any compensation |
+| `markResolved` | `FAILED`, `COMPENSATION_FAILED` (not yet resolved) | the same status, with a `SagaResolution` |
+
+Each writes a lifecycle entry carrying the `OperatorRequest`. Within one round a compensation runs at most once; a
+resume opens a new round, and the outcome event of a terminal write in round *n* > 0 has the id
+`sagaId:STATUS:r<n>`, so every outcome event of one instance has an id of its own.
+
+**Recovery** (`RecoverySweeper`, `RecoverySettings`) runs on every application instance, not only on the relay's
+leader: it is safe by the instance lock and the admission re-read, not by leadership, and it does not depend on a
+transport. A sweep resumes `COMPENSATING` instances untouched for `stallAge` and handles `CREATED` instances with no
+completed step after `abandonmentAge` by `AbandonedStartPolicy` (`REPORT`, the default, logs once per process; `FAIL`
+ends them `FAILED`). `REPORT` is the default because a start ended `FAILED` no longer blocks its start event: the
+start event's redelivery is the better recovery. The router adopts such a **stranded start**: when a start event meets
+a duplicate start whose instance is still `CREATED` with no completed step, it takes that instance's lock, re-reads it
+and runs the start step on it (`START_RECOVERED`) instead of rejecting the event, so a redelivery never creates a
+second instance. `SagaRuntime.stop()` ends the sweeps and the instance gauge; a later `start()` resumes them.
+
+**The `sagas` endpoint** (starter) maps the API to Actuator: reads are on by default, the write operation is off until
+`management.endpoint.sagas.access=unrestricted`, and it needs an authenticated principal, whose name is the operator.
+Saga Forge does not authorise; the application secures the endpoint with Spring Security. Business state is never
+rendered, context values only on request (`saga-forge.operations.expose-context-values`).
 
 ## Feature gaps
 

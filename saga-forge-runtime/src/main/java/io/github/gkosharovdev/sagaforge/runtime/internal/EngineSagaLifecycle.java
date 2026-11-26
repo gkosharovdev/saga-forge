@@ -8,6 +8,8 @@ import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaLifecycle;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import io.github.gkosharovdev.sagaforge.core.outcome.OutcomeTrigger;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
@@ -350,6 +352,142 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     if (current.status() == SagaStatus.COMPENSATING) {
       throw InvalidSagaTransitionException.terminal(sagaId, "startCompensation", current.status());
     }
+    return enterCompensation(current, trigger);
+  }
+
+  /**
+   * Enters {@code COMPENSATING} with an {@code OPERATOR_REQUEST} trigger, from {@code CREATED},
+   * {@code RUNNING} or {@code FAILED} ({@code specs/015-saga-operations} research R5); otherwise as
+   * {@link #startCompensation}. Leaving {@code FAILED} clears the recorded failure, which the
+   * trigger carries.
+   *
+   * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's, or it is
+   *     neither {@code CREATED}, {@code RUNNING} nor {@code FAILED}
+   * @throws IllegalArgumentException if {@code trigger} is not an operator's
+   */
+  SagaInstance startOperatorCompensation(String sagaId, CompensationTrigger trigger) {
+    requireNonNull(trigger, "trigger");
+    if (trigger.kind() != CompensationTriggerKind.OPERATOR_REQUEST) {
+      throw new IllegalArgumentException(
+          "trigger must be an OPERATOR_REQUEST, not " + trigger.kind());
+    }
+    requireNonNull(sagaId, "sagaId");
+    requireHeld(sagaId, "startOperatorCompensation");
+    SagaStatus status = workingCopy.status();
+    if (status != SagaStatus.CREATED
+        && status != SagaStatus.RUNNING
+        && status != SagaStatus.FAILED) {
+      throw InvalidSagaTransitionException.terminal(sagaId, "startOperatorCompensation", status);
+    }
+    return enterCompensation(workingCopy, trigger);
+  }
+
+  /**
+   * Moves a {@code COMPENSATION_FAILED} or stalled {@code COMPENSATING} instance on ({@code
+   * specs/015-saga-operations} research R4). From {@code COMPENSATION_FAILED}: {@code
+   * COMPENSATING}, every {@code FAILED} step compensation back to {@code NOT_ATTEMPTED}, and the
+   * compensation round one higher. From {@code COMPENSATING}: only {@code lastModifiedAt} changes.
+   * Both produce one {@code COMPENSATION_RESUMED} entry naming {@code request}.
+   *
+   * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's, or it is
+   *     neither {@code COMPENSATION_FAILED} nor {@code COMPENSATING}
+   */
+  SagaInstance resumeCompensation(String sagaId, OperatorRequest request) {
+    requireNonNull(request, "request");
+    requireNonNull(sagaId, "sagaId");
+    requireHeld(sagaId, "resumeCompensation");
+    SagaStatus status = workingCopy.status();
+    Instant now = sources.now();
+    Map<String, StepRecord> steps = new HashMap<>(workingCopy.steps());
+    if (status == SagaStatus.COMPENSATION_FAILED) {
+      workingCopy
+          .steps()
+          .forEach(
+              (name, step) -> {
+                if (step.compensation() != null
+                    && step.compensation().status() == CompensationStatus.FAILED) {
+                  steps.put(name, step.withCompensation(StepCompensation.notAttempted()));
+                }
+              });
+      SagaInstance failed = workingCopy;
+      workingCopy =
+          new SagaInstance(
+              failed.sagaId(),
+              failed.sagaType(),
+              Map.of(),
+              failed.associations(),
+              SagaStatus.COMPENSATING,
+              failed.createdAt(),
+              now,
+              steps,
+              null,
+              null,
+              null,
+              failed.compensationTrigger(),
+              Map.of(),
+              null,
+              failed.compensationRound() + 1);
+    } else if (status == SagaStatus.COMPENSATING) {
+      replace(status, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
+    } else {
+      throw InvalidSagaTransitionException.terminal(sagaId, "resumeCompensation", status);
+    }
+    pending.add(entry(SagaLifecycleEventKind.COMPENSATION_RESUMED, now).operator(request).build());
+    endCompensatedIfDone(now);
+    return workingCopy;
+  }
+
+  /**
+   * Attaches an operator's resolution to a {@code FAILED} or {@code COMPENSATION_FAILED} instance
+   * and produces a {@code RESOLVED} entry; the status, steps and failure stay, and no outcome event
+   * is produced ({@code specs/015-saga-operations} FR-016).
+   *
+   * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's, or it is
+   *     neither {@code FAILED} nor {@code COMPENSATION_FAILED}
+   * @throws IllegalStateException if it is already resolved
+   */
+  SagaInstance resolve(String sagaId, OperatorRequest request) {
+    requireNonNull(request, "request");
+    requireNonNull(sagaId, "sagaId");
+    requireHeld(sagaId, "resolve");
+    SagaStatus status = workingCopy.status();
+    if (status != SagaStatus.FAILED && status != SagaStatus.COMPENSATION_FAILED) {
+      throw InvalidSagaTransitionException.terminal(sagaId, "resolve", status);
+    }
+    if (workingCopy.isResolved()) {
+      throw new IllegalStateException("Saga instance " + sagaId + " is already resolved");
+    }
+    Instant now = sources.now();
+    replace(
+        status,
+        workingCopy.steps(),
+        new Ending(null, workingCopy.failure()),
+        workingCopy.compensationTrigger(),
+        now);
+    workingCopy = workingCopy.withResolution(SagaResolution.of(request, now));
+    pending.add(entry(SagaLifecycleEventKind.RESOLVED, now).operator(request).build());
+    return workingCopy;
+  }
+
+  /**
+   * Records that a redelivered start event adopted this {@code CREATED} instance, stranded between
+   * its creation write and its first unit of work ({@code START_RECOVERED} entry; {@code
+   * specs/015-saga-operations} research R10). Changes nothing else.
+   *
+   * @throws InvalidSagaTransitionException if {@code sagaId} is not the working copy's, or it is
+   *     not {@code CREATED}
+   */
+  void recordStartRecovered(String sagaId) {
+    requireNonNull(sagaId, "sagaId");
+    requireHeld(sagaId, "recordStartRecovered");
+    if (workingCopy.status() != SagaStatus.CREATED) {
+      throw InvalidSagaTransitionException.terminal(
+          sagaId, "recordStartRecovered", workingCopy.status());
+    }
+    pending.add(entry(SagaLifecycleEventKind.START_RECOVERED, sources.now()).build());
+  }
+
+  private SagaInstance enterCompensation(SagaInstance current, CompensationTrigger trigger) {
     Instant now = trigger.at();
     Map<String, StepRecord> steps = new HashMap<>(current.steps());
     current
@@ -463,7 +601,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
             classified(failure),
             failure.causeType(),
             failure.attempts(),
-            OutcomeTrigger.of(workingCopy.compensationTrigger()));
+            OutcomeTrigger.of(workingCopy.compensationTrigger()),
+            workingCopy.compensationRound());
     return workingCopy;
   }
 
@@ -560,7 +699,8 @@ final class EngineSagaLifecycle implements SagaLifecycle {
               workingCopy.sagaId(),
               workingCopy.associations(),
               now,
-              OutcomeTrigger.of(workingCopy.compensationTrigger()));
+              OutcomeTrigger.of(workingCopy.compensationTrigger()),
+              workingCopy.compensationRound());
     }
   }
 
@@ -667,6 +807,7 @@ final class EngineSagaLifecycle implements SagaLifecycle {
       Instant now) {
     boolean active = status == SagaStatus.CREATED || status == SagaStatus.RUNNING;
     PendingRetry retry = active ? workingCopy.pendingRetry() : null;
+    SagaResolution resolution = status == workingCopy.status() ? workingCopy.resolution() : null;
     if (!active) {
       List.copyOf(workingCopy.openDeadlines().keySet()).forEach(this::cancelDeadline);
     }
@@ -684,7 +825,9 @@ final class EngineSagaLifecycle implements SagaLifecycle {
             ending.failure(),
             retry,
             trigger,
-            workingCopy.openDeadlines());
+            workingCopy.openDeadlines(),
+            resolution,
+            workingCopy.compensationRound());
   }
 
   private Map<String, StepRecord> notRunSteps() {
@@ -739,6 +882,7 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     private String outcomeStep;
     private SagaFailure failure;
     private CompensationTrigger trigger;
+    private OperatorRequest operator;
 
     private EntryBuilder(String sagaId, SagaLifecycleEventKind kind, Instant occurredAt) {
       this.sagaId = sagaId;
@@ -772,9 +916,22 @@ final class EngineSagaLifecycle implements SagaLifecycle {
       return this;
     }
 
+    EntryBuilder operator(OperatorRequest request) {
+      this.operator = request;
+      return this;
+    }
+
     SagaLifecycleEntry build() {
       return new SagaLifecycleEntry(
-          sagaId, kind, stepName, touchedAggregates, outcomeStep, failure, occurredAt, trigger);
+          sagaId,
+          kind,
+          stepName,
+          touchedAggregates,
+          outcomeStep,
+          failure,
+          occurredAt,
+          trigger,
+          operator);
     }
   }
 }

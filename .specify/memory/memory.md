@@ -246,7 +246,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   method returns `SagaLifecycleEntry` values, so history is readable only by inspecting the data store directly
   (FR-012). A programmatic query API belongs to a future observability feature.
 - **Origin**: `specs/003-postgres-saga-persistence/spec.md` FR-012; plan.md "Carried forward".
-- **Status**: open (deferred by design).
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26): `StorageProvider.history(sagaId)` reads the lifecycle history, exposed as `SagaOperations.history` and in the `sagas` endpoint. Was: open (deferred by design).
 
 ### G-003-25: The host applies the schema; no migration tool
 - **Description**: `saga-forge-storage-postgres` ships `schema.sql` as a classpath resource but neither creates
@@ -335,7 +335,7 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   recovery rule (for example resuming a `CREATED` instance whose first unit of work never committed), which
   overlaps with the idempotency work of the Kafka feature.
 - **Origin**: `specs/004-saga-engine/spec.md` FR-012, Edge Cases.
-- **Status**: open (not addressed by 004). The 004 plan adds a consequence (`specs/004-saga-engine/research.md` §3,
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26): a redelivered start event adopts a stranded `CREATED` instance (`START_RECOVERED`), and a sweep reports it after `abandonmentAge` or, with `AbandonedStartPolicy.FAIL`, ends it `FAILED`. Without a redelivery the instance stays `CREATED` and is reported (G-015-07). Was: open (not addressed by 004). The 004 plan adds a consequence (`specs/004-saga-engine/research.md` §3,
   §6): an event for a non-start step that reaches a still-`CREATED` instance is reported `NOT_HANDLED` (so a
   non-start step never runs before the start step in the cross-process window), which means every later event for a
   stranded instance is `NOT_HANDLED` too.
@@ -750,7 +750,7 @@ Noted only; nothing is bumped until the starter feature decides.
 - **Description**: A saga whose compensation failed ends "requires intervention"; resuming compensation or
   marking it resolved by hand is out of scope (FR-021).
 - **Origin**: `specs/006-saga-compensation/spec.md` FR-016, FR-021.
-- **Status**: open (deferred).
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26): `SagaOperations.resumeCompensation` runs the failed compensations again in a new round, and `markResolved` records a by-hand fix. Was: open (deferred).
 
 ### G-006-04: No way to mark a step irreversible
 - **Description**: A committed step without `@SagaCompensation` is treated as "nothing to compensate". A step
@@ -763,7 +763,7 @@ Noted only; nothing is bumped until the starter feature decides.
   `COMPENSATING`; the next event routed to it resumes the remaining compensations, but nothing resumes an instance
   that receives no further event (no sweeper; compare G-ENG-05).
 - **Origin**: `specs/006-saga-compensation/research.md` §10, spec Assumptions.
-- **Status**: open (deferred).
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26): a recovery sweep resumes a `COMPENSATING` instance untouched for `stallAge`, and an operator can resume it at once. Was: open (deferred).
 
 ### G-006-06: A compensation sees the trigger's event type, not the event
 - **Description**: `CompensationTrigger` carries the triggering event's class name, not the event, because events are
@@ -961,7 +961,7 @@ Noted only; nothing is bumped until the starter feature decides.
   should travel through the message store.
 - **Update (010)**: metrics and trace context through the message store are covered by `specs/010-otel-observability`
   (the gauges read `MessageStoreQueries`, the endpoint's source). Write actions and saga-instance views stay open.
-- **Status**: open (deferred to an operations feature).
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26): the starter's `sagas` endpoint lists, shows and repairs instances (write access off by default, an authenticated principal required). Was: open (deferred to an operations feature).
 
 ### G-008-03: Events published through Spring's own publisher do not reach sagas
 - **Description**: with 008, saga-produced events reach Spring listeners (FR-018a), but not the other way round: an
@@ -1136,7 +1136,8 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 2. 012 outbox command failure feedback (G-ADOPT-02) - done 2026-11-24
 3. 013 active/standby relay (G-007-09) - done 2026-11-26
 4. 014 one event bus with Spring Modulith (G-008-03, G-ENG-24)
-5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05)
+5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05) - done 2026-11-26 (`specs/015-saga-operations`), without retry
+   5b. 015b retry a failed saga from its failed step (G-015-01), split from 015, next after it
 6. 016 marker SPI and jMolecules adapter (G-ADOPT-04)
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
@@ -1146,6 +1147,74 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 
 Also open from the 2026-11-12 list: G-010-05 (saga metrics need an OpenTelemetry metric exporter in Spring Boot).
 Revisit the order with feedback from booking-service before each release.
+
+### G-015-01: An operator cannot retry a failed saga from its failed step
+- **Description**: 015's operations API resumes compensation, compensates and marks resolved, but cannot re-run the step
+  of a `FAILED` instance after its cause was fixed: the runtime does not keep the triggering event. Operators can only
+  compensate such an instance or mark it resolved.
+- **Origin**: `specs/015-saga-operations/spec.md` D1, FR-040; user decision, 2026-11-26.
+- **Status**: open (roadmap item 015b, next after 015).
+
+### G-015-02: The recovery sweeper runs on every application instance
+- **Description**: every instance sweeps on its own schedule; safety comes from the instance lock and the admission
+  re-read, not from the relay's leadership. Sweeping only on the leader would save queries, but ties recovery to a
+  transport; that optimisation was not taken.
+- **Origin**: `specs/015-saga-operations/research.md` R7.
+- **Status**: accepted.
+
+### G-015-03: A resume keeps only the latest round's compensation failure on the instance
+- **Description**: `resumeCompensation` resets failed compensations to `NOT_ATTEMPTED`, so `StepCompensation` shows the
+  latest round only; earlier failures live in the lifecycle history.
+- **Origin**: `specs/015-saga-operations/research.md` R4.
+- **Status**: accepted.
+
+### G-015-04: Repairs and sweeps run compensations in the calling thread
+- **Description**: like G-006-08, a repair holds the instance and runs every compensation before it returns; a long
+  compensation blocks the HTTP call of the `sagas` endpoint and a sweep's thread.
+- **Origin**: `specs/015-saga-operations/research.md`.
+- **Status**: open.
+
+### G-015-05: No bulk repair over a query
+- **Description**: every repair acts on one instance; an operator repairs many by listing and repairing each.
+- **Origin**: `specs/015-saga-operations/spec.md` Out of scope.
+- **Status**: open.
+
+### G-015-06: Listings are not snapshot-consistent across pages
+- **Description**: each page is its own read over a keyset cursor (`lastModifiedAt`, `sagaId`); an instance modified
+  between two pages may appear on both or neither.
+- **Origin**: `specs/015-saga-operations/research.md` R2.
+- **Status**: accepted.
+
+### G-015-07: The abandoned-start report is deduplicated in process memory only
+- **Description**: `AbandonedStartPolicy.REPORT` logs `saga.recovery.startAbandoned` once per instance per process
+  (`AbandonedStartReports`); after a restart, or on each application instance, it is logged again.
+- **Origin**: `specs/015-saga-operations/research.md` R9.
+- **Status**: accepted.
+
+### G-015-08: A stopped runtime cannot be started again
+- **Description**: `SagaRuntime.stop()` (called by the starter's `SagaRuntimeLifecycle.stop()`) ended the recovery
+  sweeps and the instance gauge and left the runtime `STOPPED`; `start()` then threw. The in-memory transport's relay
+  had the same one-shot lifecycle since 007 (`Relay.start()` required `CREATED`), so a Spring context that stopped and
+  started its lifecycle beans again (`context.stop(); context.start()`) failed on the restart.
+- **Origin**: `specs/015-saga-operations` implementation, 2026-11-26.
+- **Status**: closed, 2026-11-26. `SagaRuntime.start()` on a runtime stopped after a successful start resumes the
+  background work (sweeps, gauge) and accepts work again, without validating or registering the model a second time;
+  a runtime stopped before it ever started still refuses a start. `Relay.start()` accepts `STOPPED` (it leases afresh
+  what the stop released) unless the previous coordinator thread is still alive, and `LeaderElector.start()` clears
+  its stopped flag so it acquires again after `resign()`. Tests: `SagaRecoveryTest.restartAfterStop`,
+  `ShutdownTest.restartAfterStop`, `SagaRuntimeLifecycleTest.startAfterStop`,
+  `RuntimeAssemblyContainerTest.contextStopAndStart` (Postgres). A delivery still running when its stop timed out keeps
+  running after a restart, and its released message may be delivered again (at least once, as before).
+
+### G-015-09: Test coverage left out of 015's implementation
+- **Description**: contract cases with no automated test: ST2 (two redeliveries racing to adopt one stranded start,
+  guarded by the re-read under the instance lock), CP3 (an open deadline closed by an operator's `compensate`, which
+  goes through the same `EngineSagaLifecycle.replace` as 017), SW10 (a sweep error isolated per instance), the instance gauge's recount cache, and ST4 on Postgres (forcing a crash
+  between the creation write and the first unit of work needs a fault the database cannot inject). The fixture has no
+  crash injection, so stalls and abandoned starts are not reachable through `SagaFixture`. Postgres scale cases are
+  reduced (`OperationsAcceptanceTest`: 40 stalled instances, 60 listed).
+- **Origin**: `specs/015-saga-operations/tasks.md` "Implementation notes".
+- **Status**: open.
 
 ## Release and distribution
 
@@ -1405,7 +1474,7 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   instance `COMPENSATING` and the message set aside, so no redelivered report resumes it; the next event for the
   instance does (`CompensationFaultInjectionTest.commandFailureCrashThenResume`). Same limit as G-006-05.
 - **Origin**: `specs/012-outbox-command-failure-feedback` T032.
-- **Status**: accepted (revisit with G-006-05, roadmap 015).
+- **Status**: updated by `specs/015-saga-operations` (2026-11-26): the interrupted compensation no longer waits for the next event; a recovery sweep resumes it after `stallAge`. Was: accepted (revisit with G-006-05, roadmap 015).
 
 ### G-012-05: The fixture redelivers a failing outbox command at once
 - **Description**: `SagaFixture`'s loop-back transport delivers a failing outbox command again straight away, up to
@@ -1467,7 +1536,7 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   one is `IGNORED` (`NOT_RUNNING`) and resumes nothing, so it does not help with G-006-05 / G-012-04.
 - **Origin**: `specs/017-saga-deadlines` FR-013 (a deadline never runs a step outside `RUNNING`); implementation
   (`RunSteps.admit`, `DeadlineDelivery`).
-- **Status**: accepted (revisit with roadmap 015, saga operations).
+- **Status**: updated by `specs/015-saga-operations` (2026-11-26): a `COMPENSATING` instance a deadline cannot resume is resumed by a recovery sweep after `stallAge`. Was: accepted (revisit with roadmap 015, saga operations).
 
 ### G-017-08: Deadline and scheduling details decided during implementation
 - **Description**: (a) A timeout step may run more than once per instance when its deadline is started again, so its
@@ -1534,7 +1603,7 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   G-007-03). Failover makes the window reachable by a crash of one instance among several, not only by a restart.
 - **Origin**: `specs/013-active-standby-relay` T028 (flaky `crashHandover` until every saga was started before the cut).
 - **Remark**: fixed together with G-ENG-05 (roadmap 015, saga operations).
-- **Status**: open.
+- **Status**: closed by `specs/015-saga-operations` (2026-11-26), with G-ENG-05: the start event's redelivery on the new leader adopts the stranded instance. Was: open.
 
 ### G-013-06: The SC-001 burst runs about 95 s per run
 - **Description**: `MultiInstanceAcceptanceTest.burstThroughBothInstances` (10,000 messages through two instances) takes

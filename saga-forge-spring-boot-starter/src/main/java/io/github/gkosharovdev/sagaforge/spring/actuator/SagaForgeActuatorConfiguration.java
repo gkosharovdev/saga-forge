@@ -1,11 +1,14 @@
 package io.github.gkosharovdev.sagaforge.spring.actuator;
 
+import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.transport.TransportProperties;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
+import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.endpoint.condition.ConditionalOnAvailableEndpoint;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -62,7 +65,8 @@ public class SagaForgeActuatorConfiguration {
     public SagaForgeHealthIndicator sagaforgeHealthIndicator(
         InMemoryTransport transport,
         ObjectProvider<TransportProperties> properties,
-        ObjectProvider<Clock> clock) {
+        ObjectProvider<Clock> clock,
+        ObjectProvider<SagaRuntime> runtime) {
       Duration leaseDuration =
           properties.stream()
               .findFirst()
@@ -72,7 +76,11 @@ public class SagaForgeActuatorConfiguration {
           transport.queries(),
           transport::leadership,
           leaseDuration,
-          clock.getIfUnique(Clock::systemUTC));
+          clock.getIfUnique(Clock::systemUTC),
+          () ->
+              Optional.ofNullable(runtime.getIfUnique())
+                  .filter(SagaRuntime::isStarted)
+                  .map(started -> started.operations().count(Set.of())));
     }
   }
 }

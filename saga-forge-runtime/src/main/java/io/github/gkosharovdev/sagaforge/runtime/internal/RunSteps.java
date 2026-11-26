@@ -280,6 +280,12 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
                     trigger.sagaId(),
                     context.settings().contextStore(),
                     context.settings().sources().clock()));
+    if (trigger.step().start()
+        && !trigger.started()
+        && context.lifecycle().current().status() == SagaStatus.CREATED) {
+      // 015 FR-028: a redelivered start event adopted a stranded start (EventRouter).
+      context.lifecycle().recordStartRecovered(trigger.sagaId());
+    }
     if (trigger.step().expiresDeadline()) {
       deadlines.expire(trigger.step().deadlineName(), context.lifecycle());
     }

@@ -240,9 +240,20 @@ public final class Relay {
   // ----- lifecycle
   // -----------------------------------------------------------------------------------------
 
+  /**
+   * Starts delivering, first or again after {@link #stop(Duration)}; a restart leases afresh what
+   * the stop released.
+   *
+   * @throws IllegalStateException if running, still stopping, or the previous coordinator has not
+   *     ended yet
+   */
   public synchronized void start(EventReceiver eventReceiver, CommandReceiver commandReceiver) {
-    if (state != State.CREATED) {
-      throw new IllegalStateException("start() was already called; the transport is " + state);
+    if (state != State.CREATED && state != State.STOPPED) {
+      throw new IllegalStateException("the transport is " + state + "; stop it before a start");
+    }
+    if (coordinator != null && coordinator.isAlive()) {
+      throw new IllegalStateException(
+          "the transport's previous relay thread has not ended yet; stop it with a longer timeout");
     }
     if (eventReceiver == null) {
       throw new IllegalArgumentException("eventReceiver must not be null");

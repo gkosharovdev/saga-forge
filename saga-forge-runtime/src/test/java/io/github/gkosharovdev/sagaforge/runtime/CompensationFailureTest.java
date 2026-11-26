@@ -85,7 +85,7 @@ class CompensationFailureTest {
         .isEqualTo(CompensationStatus.NOT_ATTEMPTED);
     assertThat(fixture.logger().byEvent("saga.compensation.failed")).hasSize(1);
     assertThat(
-            fixture.storage().history(result.sagaId()).stream()
+            fixture.storage().storedHistory(result.sagaId()).stream()
                 .map(stored -> stored.entry().kind())
                 .toList())
         .endsWith(
@@ -94,7 +94,7 @@ class CompensationFailureTest {
             SagaLifecycleEventKind.COMPENSATION_FAILED);
     // 011: COMPENSATION_FAILED is the one terminal entry.
     assertThat(
-            fixture.storage().history(result.sagaId()).stream()
+            fixture.storage().storedHistory(result.sagaId()).stream()
                 .filter(
                     stored -> stored.entry().kind() == SagaLifecycleEventKind.COMPENSATION_FAILED))
         .hasSize(1);

@@ -7,12 +7,12 @@ status in later releases.
 | # | Limitation | Design around it |
 |---|---|---|
 | 1 | **One delivering instance per database** (G-013-01, G-013-02). Several instances share the message store, but only the elected relay delivers: delivery throughput is that of one instance, and a message appended on a standby waits for the leader's next poll (up to `saga-forge.transport.poll-interval`). | Size the delivering instance for the whole message rate; keep handlers short. Spread load with the Kafka transport once it exists. |
-| 2 | **No operator path out of `COMPENSATION_FAILED`** (G-006-03); the Actuator endpoint is read-only (G-008-02). | Make compensations simple and idempotent so they rarely fail; alert on `saga_forge.saga.ended{outcome=compensation_failed}`; repair by hand. |
+| 2 | **An operator cannot retry a failed step** (G-015-01): a `FAILED` saga can only be compensated or marked resolved, since the runtime does not keep the event that triggered the step. Repairs act on one instance at a time (G-015-05) and run its compensations in the calling thread, so a long compensation holds the HTTP call (G-015-04). | Make steps whose failure you would want to retry mark it `TransientFailure` so `@RetryPolicy` retries it; keep compensations short; script bulk repairs over `SagaOperations.list`. |
 | 3 | **Retry backoff is in-process** (G-005-01): capped (30 s total by default), and a waiting retry blocks the delivering thread and holds the instance (G-005-02). | Keep retry policies short; for a long wait use a deadline whose timeout step re-arms it, or a scheduled command (see [Deadlines](deadlines.md)). |
 | 4 | **Deadlines and scheduled commands do not work with Spring Modulith interop** (G-017-01) A deadline runs up to one poll interval late (G-017-04); overdue ones run in stored, not due, order after downtime (G-017-03). | Set `saga-forge.transport.modulith-interop=false` when a saga declares a deadline. Don't rely on sub-second deadline precision or on the order of two overdue deadlines. |
 | 5 | **An event that continues one saga instance is not handed to another saga type** reacting to the same event class (G-ENG-24). | Give the second saga an event of its own (record a separate event in the handler). |
 | 6 | **Events published through Spring's `ApplicationEventPublisher` do not reach sagas** (G-008-03). | Publish with Saga Forge's `EventPublisher` bean or `DomainEvents.record`. |
-| 7 | **A crash between creating an instance and its first unit of work strands it `CREATED`**, and a redelivered start event is rejected as duplicate (G-ENG-05). | Monitor `saga_instance` rows that stay `CREATED`; re-drive by hand. |
+| 7 | **An abandoned start is only reported by default** (`abandoned-start-policy=report`): a crash between creating an instance and its first unit of work leaves it `CREATED` until its start event is redelivered, which adopts it. The report is deduplicated per process, so each instance logs it again after a restart (G-015-07). | Alert on `saga.recovery.startAbandoned` or the `saga_forge.recovery{kind=start_reported}` counter; choose `fail` when the start event will not come again. |
 | 8 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
 | 9 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
 | 10 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
@@ -26,9 +26,9 @@ Further constraints of the model:
 - **Outside effects are not rolled back**: any handler that calls an outside system takes a `CommandId` parameter and
   passes `commandId.value()` on as the idempotency key (G-005-03). The triggering request itself is not deduplicated
   before a saga exists (G-005-04).
-- **Compensation**: no wait for an undo's confirmation event (G-006-02); a `COMPENSATING` instance with no further event
-  never resumes (G-006-05); a compensation sees the trigger's event type, not the event (G-006-06) — keep what it needs
-  in `SagaContext`; a failed compensation is never retried (G-006-09); compensations can run again after a crash, so
+- **Compensation**: no wait for an undo's confirmation event (G-006-02); a stalled `COMPENSATING` instance resumes only
+  through a recovery sweep after `saga-forge.recovery.stall-age`; a compensation sees the trigger's event type, not the event (G-006-06) — keep what it needs
+  in `SagaContext`; a failed compensation is not retried on its own (G-006-09), only by an operator's resume, after which the instance keeps only the latest round's failure and earlier ones live in the history (G-015-03); compensations can run again after a crash, so
   their commands must be idempotent.
 - **An unmarked exception ends the saga `FAILED` without compensation**; mark exceptions `TransientFailure` or
   `FinalFailure` (or list them in `retryOn`) when the difference matters.
@@ -37,6 +37,9 @@ Further constraints of the model:
 - **Deadlines**: a deadline the relay already leased when it was cancelled is still delivered, then ignored
   (G-017-05); a scheduled command is not cancelled when its saga ends, so cancel it in the ending step if it must not
   run (G-017-06).
+- **Operations**: every application instance runs recovery sweeps, each repair guarded by the instance's lock, not
+  by leadership (G-015-02); an instance listing is read page by page, not as one snapshot, so an instance that changes
+  between two pages may appear on both or neither (G-015-06).
 - **Delivery order is per aggregate, not per saga instance** (G-007-04); the transport is at least once.
 - **Not available**: Kafka transport, MySQL and MongoDB storage, a Quarkus extension, programmatic abort, Spring test
   slices for the fixture (G-009-01).

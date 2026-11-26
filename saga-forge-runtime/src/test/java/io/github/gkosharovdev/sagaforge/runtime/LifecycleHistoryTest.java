@@ -96,7 +96,7 @@ class LifecycleHistoryTest {
 
     String sagaId = engine.receive(new OrderPlaced("order-1", 250L, 3)).results().get(0).sagaId();
 
-    List<StoredEntry> history = storage.history(sagaId);
+    List<StoredEntry> history = storage.storedHistory(sagaId);
     assertThat(kinds(history))
         .containsExactly(
             SagaLifecycleEventKind.CREATED,
@@ -151,7 +151,7 @@ class LifecycleHistoryTest {
             .get(0)
             .sagaId();
 
-    List<StoredEntry> history = storage.history(sagaId);
+    List<StoredEntry> history = storage.storedHistory(sagaId);
     assertThat(kinds(history))
         .containsExactly(
             SagaLifecycleEventKind.CREATED,

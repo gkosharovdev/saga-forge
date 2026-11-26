@@ -36,5 +36,9 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
   transport's outbox and `saga-forge.transport.modulith-interop=false`. Test with `whenTimeElapses(...)`.
 - Several application instances may share the database: one elected relay delivers messages and deadlines, the others
   stand by (`saga-forge.transport.leadership.*`). Don't expect delivery on every node; a takeover can redeliver.
+- Operators repair one saga at a time through `SagaRuntime.operations()` or the `sagas` Actuator endpoint:
+  resume a failed compensation, compensate, or mark `FAILED`/`COMPENSATION_FAILED` resolved (no retry of a failed
+  step). Compensations may run again on a resume, so they pass `CommandId` on. Recovery sweeps
+  (`saga-forge.recovery.*`) resume stalled compensations and report abandoned starts.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

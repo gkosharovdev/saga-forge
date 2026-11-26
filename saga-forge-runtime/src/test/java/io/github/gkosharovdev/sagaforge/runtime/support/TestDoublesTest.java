@@ -225,12 +225,12 @@ class TestDoublesTest {
       assertThat(storage.findByAssociation("orderId", "o-s1")).hasSize(1);
       assertThat(readOnOtherThread("s1")).isEmpty();
       assertThat(storage.committed().findById("s1")).isEmpty();
-      assertThat(storage.history("s1")).isEmpty();
+      assertThat(storage.storedHistory("s1")).isEmpty();
 
       transaction.commit();
 
       assertThat(readOnOtherThread("s1")).isPresent();
-      assertThat(storage.history("s1"))
+      assertThat(storage.storedHistory("s1"))
           .extracting(TransactionalInMemoryStorageProvider.StoredEntry::entry)
           .containsExactly(created("s1"));
       assertThat(storage.saveCalls()).isEqualTo(1);
@@ -244,7 +244,7 @@ class TestDoublesTest {
       transaction.rollback();
 
       assertThat(storage.findById("s1")).isEmpty();
-      assertThat(storage.history("s1")).isEmpty();
+      assertThat(storage.storedHistory("s1")).isEmpty();
     }
 
     @Test
@@ -268,10 +268,10 @@ class TestDoublesTest {
           List.of(stepCompleted("s1", "zeta"), stepCompleted("s1", "alpha")));
       second.commit();
 
-      assertThat(storage.history("s1"))
+      assertThat(storage.storedHistory("s1"))
           .extracting(TransactionalInMemoryStorageProvider.StoredEntry::sequenceNumber)
           .containsExactly(0L, 1L, 2L);
-      assertThat(storage.history("s1"))
+      assertThat(storage.storedHistory("s1"))
           .extracting(stored -> stored.entry().stepName())
           .containsExactly(null, "zeta", "alpha");
     }

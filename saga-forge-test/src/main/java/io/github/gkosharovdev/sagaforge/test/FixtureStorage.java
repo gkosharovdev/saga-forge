@@ -1,13 +1,19 @@
 package io.github.gkosharovdev.sagaforge.test;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The fixture's saga instances and lifecycle history, in memory. Writes join the unit of work's
@@ -66,8 +72,46 @@ final class FixtureStorage implements StorageProvider, FixtureTransactions.Parti
     return List.copyOf(instances.values());
   }
 
+  @Override
+  public synchronized SagaInstancePage find(SagaInstanceQuery query) {
+    if (query == null) {
+      throw new IllegalArgumentException("query must not be null");
+    }
+    List<SagaInstance> probe =
+        instances.values().stream()
+            .filter(i -> query.matches(i.status(), i.sagaType(), i.lastModifiedAt(), i.sagaId()))
+            .sorted(SagaInstancePage.ORDER)
+            .limit(query.limit() + 1L)
+            .toList();
+    return SagaInstancePage.of(probe, query.limit());
+  }
+
+  @Override
+  public synchronized InstanceCounts countByStatus(Set<String> sagaTypes) {
+    if (sagaTypes == null) {
+      throw new IllegalArgumentException("sagaTypes must not be null");
+    }
+    Map<SagaStatus, Long> byStatus = new EnumMap<>(SagaStatus.class);
+    long compensationFailedUnresolved = 0;
+    long failedUnresolved = 0;
+    for (SagaInstance instance : instances.values()) {
+      if (!sagaTypes.isEmpty() && !sagaTypes.contains(instance.sagaType())) {
+        continue;
+      }
+      byStatus.merge(instance.status(), 1L, Long::sum);
+      if (!instance.isResolved() && instance.status() == SagaStatus.COMPENSATION_FAILED) {
+        compensationFailedUnresolved++;
+      } else if (!instance.isResolved() && instance.status() == SagaStatus.FAILED) {
+        failedUnresolved++;
+      }
+    }
+    return new InstanceCounts(byStatus, compensationFailedUnresolved, failedUnresolved);
+  }
+
   /** The lifecycle history of {@code sagaId}, in write order. */
-  synchronized List<SagaLifecycleEntry> history(String sagaId) {
+  @Override
+  public synchronized List<SagaLifecycleEntry> history(String sagaId) {
+    requireSagaId(sagaId);
     return List.copyOf(history.getOrDefault(sagaId, List.of()));
   }
 

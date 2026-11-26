@@ -174,6 +174,12 @@ class OutsideUnitOfWorkTest {
         .isInstanceOf(IllegalStateException.class);
     assertThatThrownBy(() -> notStarted.eventPublisher().publish(new OrderPlaced(ORDER, 1L, 1)))
         .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(notStarted::operations).isInstanceOf(IllegalStateException.class);
     assertThat(outbox.received()).isEmpty();
+
+    // 015: stop() before start refuses a later start; stopping again is harmless.
+    notStarted.stop();
+    notStarted.stop();
+    assertThatThrownBy(notStarted::start).isInstanceOf(IllegalStateException.class);
   }
 }

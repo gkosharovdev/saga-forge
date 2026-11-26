@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import java.time.Instant;
 import java.util.Map;
 
@@ -45,6 +46,12 @@ import java.util.Map;
  * @param openDeadlines the deadlines started and neither expired nor cancelled, by name; an
  *     unmodifiable defensive copy; empty unless {@code status} is {@code CREATED} or {@code
  *     RUNNING} ({@code specs/017-saga-deadlines} FR-014). Committed with the step's unit of work
+ * @param resolution an operator's resolution ({@code specs/015-saga-operations} FR-016); {@code
+ *     null} unless an operator resolved the instance, and then only on a {@code FAILED} or {@code
+ *     COMPENSATION_FAILED} status, which it keeps
+ * @param compensationRound how often an operator or recovery resumed the compensation of this
+ *     instance out of {@code COMPENSATION_FAILED}; 0 until then. Part of the outcome event id of
+ *     every later terminal write ({@code specs/015-saga-operations} research R11)
  */
 public record SagaInstance(
     String sagaId,
@@ -59,7 +66,9 @@ public record SagaInstance(
     SagaFailure failure,
     PendingRetry pendingRetry,
     CompensationTrigger compensationTrigger,
-    Map<String, OpenDeadline> openDeadlines) {
+    Map<String, OpenDeadline> openDeadlines,
+    SagaResolution resolution,
+    int compensationRound) {
   public SagaInstance {
     openDeadlines = copyOpenDeadlines(openDeadlines);
     state = Map.copyOf(state);
@@ -99,6 +108,54 @@ public record SagaInstance(
           "openDeadlines must be empty unless status is CREATED or RUNNING, but status is "
               + status);
     }
+    if (resolution != null
+        && status != SagaStatus.FAILED
+        && status != SagaStatus.COMPENSATION_FAILED) {
+      throw new IllegalArgumentException(
+          "resolution must be null unless status is FAILED or COMPENSATION_FAILED, but status is "
+              + status);
+    }
+    if (compensationRound < 0) {
+      throw new IllegalArgumentException(
+          "compensationRound must not be negative, but is " + compensationRound);
+    }
+  }
+
+  /**
+   * An instance neither resolved nor resumed, as before {@code specs/015-saga-operations}.
+   *
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaInstance(
+      String sagaId,
+      String sagaType,
+      Map<String, Object> state,
+      Map<String, String> associations,
+      SagaStatus status,
+      Instant createdAt,
+      Instant lastModifiedAt,
+      Map<String, StepRecord> steps,
+      String outcome,
+      SagaFailure failure,
+      PendingRetry pendingRetry,
+      CompensationTrigger compensationTrigger,
+      Map<String, OpenDeadline> openDeadlines) {
+    this(
+        sagaId,
+        sagaType,
+        state,
+        associations,
+        status,
+        createdAt,
+        lastModifiedAt,
+        steps,
+        outcome,
+        failure,
+        pendingRetry,
+        compensationTrigger,
+        openDeadlines,
+        null,
+        0);
   }
 
   /**
@@ -220,7 +277,9 @@ public record SagaInstance(
         failure,
         retry,
         compensationTrigger,
-        openDeadlines);
+        openDeadlines,
+        resolution,
+        compensationRound);
   }
 
   /**
@@ -242,7 +301,9 @@ public record SagaInstance(
         failure,
         pendingRetry,
         trigger,
-        openDeadlines);
+        openDeadlines,
+        resolution,
+        compensationRound);
   }
 
   /**
@@ -264,7 +325,64 @@ public record SagaInstance(
         failure,
         pendingRetry,
         compensationTrigger,
-        deadlines);
+        deadlines,
+        resolution,
+        compensationRound);
+  }
+
+  /**
+   * @param newResolution the resolution to record; nullable
+   * @return this instance with {@code resolution} replaced
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaInstance withResolution(SagaResolution newResolution) {
+    return new SagaInstance(
+        sagaId,
+        sagaType,
+        state,
+        associations,
+        status,
+        createdAt,
+        lastModifiedAt,
+        steps,
+        outcome,
+        failure,
+        pendingRetry,
+        compensationTrigger,
+        openDeadlines,
+        newResolution,
+        compensationRound);
+  }
+
+  /**
+   * @param round the compensation round to record; not negative
+   * @return this instance with {@code compensationRound} replaced
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaInstance withCompensationRound(int round) {
+    return new SagaInstance(
+        sagaId,
+        sagaType,
+        state,
+        associations,
+        status,
+        createdAt,
+        lastModifiedAt,
+        steps,
+        outcome,
+        failure,
+        pendingRetry,
+        compensationTrigger,
+        openDeadlines,
+        resolution,
+        round);
+  }
+
+  /**
+   * @return whether an operator {@linkplain SagaResolution resolved} this instance
+   */
+  public boolean isResolved() {
+    return resolution != null;
   }
 
   /** {@code true} for {@code COMPENSATING}, {@code COMPENSATED} and {@code COMPENSATION_FAILED}. */

@@ -118,7 +118,7 @@ class FailurePositionTest {
   }
 
   private static List<SagaLifecycleEventKind> history(FailureFixture fixture, String sagaId) {
-    return fixture.storage().history(sagaId).stream()
+    return fixture.storage().storedHistory(sagaId).stream()
         .map(StoredEntry::entry)
         .map(SagaLifecycleEntry::kind)
         .toList();
