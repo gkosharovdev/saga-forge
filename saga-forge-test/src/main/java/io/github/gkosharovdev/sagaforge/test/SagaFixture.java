@@ -1,11 +1,13 @@
 package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
+import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntimeStartupException;
 import io.opentelemetry.api.OpenTelemetry;
@@ -71,6 +73,8 @@ public final class SagaFixture {
   private final boolean handlerMode;
   private final Set<Class<?>> aggregateTypes;
   private final Map<String, Map<String, String>> compensations;
+  private final boolean recoverOnTime;
+  private final SagaOperations operations;
 
   private SagaFixture(
       SagaRuntime runtime,
@@ -83,7 +87,10 @@ public final class SagaFixture {
       FixtureLogger logger,
       boolean handlerMode,
       Set<Class<?>> aggregateTypes,
-      Map<String, Map<String, String>> compensations) {
+      Map<String, Map<String, String>> compensations,
+      boolean recoverOnTime) {
+    this.recoverOnTime = recoverOnTime;
+    this.operations = new FixtureOperations(runtime::operations, this::drain);
     this.runtime = runtime;
     this.clock = clock;
     this.storage = storage;
@@ -198,6 +205,28 @@ public final class SagaFixture {
     return clock;
   }
 
+  /**
+   * The runtime's operations ({@code specs/015-saga-operations}): find, list and repair instances.
+   * After a repair or a recovery sweep the fixture delivers the commands and events it caused, as
+   * after {@link #when}.
+   */
+  public SagaOperations operations() {
+    return operations;
+  }
+
+  /**
+   * Runs {@code repair} (an operator action through {@link #operations()}) and collects what it
+   * caused, as {@link #when} does; choose the instance with {@link Then#instance}.
+   *
+   * @throws IllegalArgumentException if {@code repair} is {@code null}
+   */
+  public Then whenOperator(java.util.function.Consumer<SagaOperations> repair) {
+    if (repair == null) {
+      throw new IllegalArgumentException("repair must not be null");
+    }
+    return new Then(this, operate(repair), null);
+  }
+
   /** Every command handled in a committed unit of work so far, history included. */
   public List<RecordedCommand> commands() {
     return interceptor.committedSnapshot();
@@ -218,6 +247,19 @@ public final class SagaFixture {
         });
   }
 
+  synchronized EventResult operate(java.util.function.Consumer<SagaOperations> repair) {
+    return record(
+        "an operator action",
+        (reports, outboxFailures) -> {
+          repair.accept(runtime.operations());
+          transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+        });
+  }
+
+  private synchronized void drain() {
+    transport.drain(runtime, interceptor, report -> {}, failure -> {});
+  }
+
   synchronized EventResult elapse(Duration duration) {
     if (duration == null || duration.isNegative()) {
       throw new IllegalArgumentException("duration must be zero or positive, but is " + duration);
@@ -233,9 +275,14 @@ public final class SagaFixture {
     clock.set(instant);
     return record(
         "time reaches " + instant,
-        (reports, outboxFailures) ->
-            transport.deliverDue(
-                runtime, interceptor, clock::instant, reports::add, outboxFailures::add));
+        (reports, outboxFailures) -> {
+          transport.deliverDue(
+              runtime, interceptor, clock::instant, reports::add, outboxFailures::add);
+          if (recoverOnTime) {
+            runtime.operations().recover();
+            transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+          }
+        });
   }
 
   /** Runs {@code work} and collects what it caused, labelled {@code cause} in messages. */
@@ -333,7 +380,8 @@ public final class SagaFixture {
   }
 
   private InstanceView view(SagaInstance instance) {
-    return new InstanceView(instance, contexts.values(instance.sagaId()));
+    return new InstanceView(
+        instance, contexts.values(instance.sagaId()), storage.history(instance.sagaId()));
   }
 
   /**
@@ -355,6 +403,7 @@ public final class SagaFixture {
     private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
     private boolean outcomeEvents = true;
     private int outboxCommandAttempts = 1;
+    private RecoverySettings recovery = RecoverySettings.defaults();
     private final Map<String, String> properties = new LinkedHashMap<>();
 
     private Builder() {}
@@ -497,6 +546,18 @@ public final class SagaFixture {
     }
 
     /**
+     * How the runtime recovers stalled compensations and abandoned starts ({@code
+     * specs/015-saga-operations}). The fixture never schedules sweeps on a thread: with {@code
+     * enabled}, {@code whenTimeElapses}, {@code whenTimeReaches} and {@code givenTimeElapses} run
+     * one sweep after moving the clock; without it a test calls {@code operations().recover()}.
+     * Default {@link RecoverySettings#defaults()}.
+     */
+    public Builder recovery(RecoverySettings recovery) {
+      this.recovery = requireNonNull(recovery, "recovery");
+      return this;
+    }
+
+    /**
      * Whether the runtime records outcome events ({@code specs/011-saga-outcome-events}); default
      * {@code true}, as in {@code SagaRuntime.Builder.outcomeEvents}.
      */
@@ -603,6 +664,7 @@ public final class SagaFixture {
               .openTelemetry(openTelemetry)
               .telemetry(telemetry)
               .outcomeEvents(outcomeEvents)
+              .recovery(recovery.withEnabled(false))
               .propertyResolver(key -> Optional.ofNullable(properties.get(key)))
               .logger(logger);
       if (maxTotalRetryBackoff != null) {
@@ -621,7 +683,8 @@ public final class SagaFixture {
           logger,
           handlerMode,
           Set.copyOf(aggregateTypes),
-          Map.copyOf(compensations));
+          Map.copyOf(compensations),
+          recovery.enabled());
     }
 
     private static int requirePositive(int times) {

@@ -7,14 +7,17 @@ import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
+import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -35,13 +38,21 @@ public final class EngineRuntime {
   private final CommandFailureHandler commandFailures;
   private final EngineCommandGateway commandGateway;
   private final EventPublisher eventPublisher;
+  private final EngineSagaOperations operations;
+  private final UnitOfWork.Collaborators with;
+  private final Object background = new Object();
+  private AutoCloseable instancesGauge;
 
   private EngineRuntime(
       List<SagaModel> sagas,
       EventRouter router,
       CommandFailureHandler commandFailures,
       EngineCommandGateway commandGateway,
-      EventPublisher eventPublisher) {
+      EventPublisher eventPublisher,
+      EngineSagaOperations operations,
+      UnitOfWork.Collaborators with) {
+    this.operations = operations;
+    this.with = with;
     this.sagas = sagas;
     this.router = router;
     this.commandFailures = commandFailures;
@@ -58,6 +69,20 @@ public final class EngineRuntime {
    */
   public static EngineRuntime assemble(
       Collection<Class<?>> registered, EngineSettings settings, Diagnostics diagnostics) {
+    return assemble(registered, settings, diagnostics, RecoverySettings.defaults());
+  }
+
+  /**
+   * As {@link #assemble(Collection, EngineSettings, Diagnostics)}, with the recovery settings of
+   * {@code specs/015-saga-operations}.
+   *
+   * @param recovery the ages, batch size, policy and scheduling of recovery sweeps
+   */
+  public static EngineRuntime assemble(
+      Collection<Class<?>> registered,
+      EngineSettings settings,
+      Diagnostics diagnostics,
+      RecoverySettings recovery) {
     List<SagaModel> sagas =
         registered.stream()
             .filter(type -> type.isAnnotationPresent(Saga.class))
@@ -75,7 +100,9 @@ public final class EngineRuntime {
         new EventRouter(sagas, with, instanceLocks),
         new CommandFailureHandler(sagas, with, instanceLocks),
         gateway,
-        new EngineEventPublisher(settings.dispatcher()));
+        new EngineEventPublisher(settings.dispatcher()),
+        new EngineSagaOperations(sagas, with, instanceLocks, recovery),
+        with);
   }
 
   /**
@@ -135,6 +162,46 @@ public final class EngineRuntime {
   /** The engine's event publisher. */
   public EventPublisher eventPublisher() {
     return eventPublisher;
+  }
+
+  /** The engine's operations API ({@code specs/015-saga-operations}). */
+  public SagaOperations operations() {
+    return operations;
+  }
+
+  /**
+   * Starts what runs in the background: the {@code saga_forge.instances} gauge, and the recovery
+   * sweeper when its settings are enabled.
+   */
+  public void startBackground() {
+    synchronized (background) {
+      instancesGauge =
+          with.instrumentation()
+              .instancesGauge(
+                  () -> operations.count(Set.of()),
+                  with.settings().telemetry().instanceCountInterval(),
+                  with.settings().sources()::now);
+      if (operations.sweeper().settings().enabled()) {
+        operations.sweeper().start(RecoverySweeper::defaultExecutor);
+      }
+    }
+  }
+
+  /**
+   * Stops the background work: the sweeper, after a running sweep ends, and the gauge. Idempotent.
+   */
+  public void stop() {
+    synchronized (background) {
+      operations.sweeper().stop();
+      if (instancesGauge != null) {
+        try {
+          instancesGauge.close();
+        } catch (Exception ignored) {
+          // instancesGauge never throws
+        }
+        instancesGauge = null;
+      }
+    }
   }
 
   private static boolean needsHostInstance(Class<?> type) {

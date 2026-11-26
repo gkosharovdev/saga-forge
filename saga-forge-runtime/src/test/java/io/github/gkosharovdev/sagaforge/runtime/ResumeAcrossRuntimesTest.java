@@ -204,7 +204,7 @@ class ResumeAcrossRuntimesTest {
             booking -> assertThat(booking.claimId()).isEqualTo(Inventory.claimIdFor(BOOKING)));
     // Quickstart scenario 17: one history across both engines, in true order, numbered
     // consecutively.
-    List<StoredEntry> history = world.storage.history(sagaId);
+    List<StoredEntry> history = world.storage.storedHistory(sagaId);
     assertThat(history)
         .extracting(StoredEntry::sequenceNumber)
         .containsExactly(0L, 1L, 2L, 3L, 4L, 5L);

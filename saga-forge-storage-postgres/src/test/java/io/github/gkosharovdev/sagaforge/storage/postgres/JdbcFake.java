@@ -186,6 +186,8 @@ final class JdbcFake {
         SagaInstanceRows.encodeTrigger(
             SagaInstanceRows.TRIGGER_FIELD, instance.compensationTrigger()));
     row.put("open_deadlines", SagaInstanceRows.encodeOpenDeadlines(instance.openDeadlines()));
+    row.put("resolution", SagaInstanceRows.encodeResolution(instance.resolution()));
+    row.put("compensation_round", instance.compensationRound());
     row.put(
         "associations",
         JsonCodec.encodeObject(
@@ -314,6 +316,7 @@ final class JdbcFake {
               case "next" -> ++position[0] < rows.size();
               case "getString" -> (String) value(rows.get(position[0]), args[0]);
               case "getLong" -> ((Number) value(rows.get(position[0]), args[0])).longValue();
+              case "getInt" -> ((Number) value(rows.get(position[0]), args[0])).intValue();
               case "getBoolean" -> (Boolean) value(rows.get(position[0]), args[0]);
               case "getObject" -> value(rows.get(position[0]), args[0]);
               case "close" -> null;

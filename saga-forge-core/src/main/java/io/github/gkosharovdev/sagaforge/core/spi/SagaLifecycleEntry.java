@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import java.time.Instant;
 import java.util.List;
 
@@ -9,7 +10,7 @@ import java.util.List;
  * the engine produces the entries and hands them to {@link StorageProvider#save(SagaInstance,
  * List)} with the instance write they belong to (the creation write, a unit of work's write, or the
  * {@code FAILED} write), in the same transaction. Storage persists them for direct data-store
- * inspection; there is no query API for them.
+ * inspection and returns them, in that order, from {@link StorageProvider#history(String)}.
  *
  * <p>The persisted order of one {@code sagaId}'s entries is the order in which they were handed
  * over: storage assigns each entry its position when it inserts it, after every entry already
@@ -38,6 +39,9 @@ import java.util.List;
  * @param occurredAt the clock instant of the transition; non-null
  * @param trigger the recorded {@link SagaInstance#compensationTrigger()}; non-null if and only if
  *     {@code kind == COMPENSATION_STARTED}
+ * @param operator who asked for the transition and why ({@code specs/015-saga-operations});
+ *     non-null for {@code COMPENSATION_RESUMED} and {@code RESOLVED}, otherwise set when an
+ *     operator's or the recovery's action caused the transition and {@code null} when an event did
  */
 public record SagaLifecycleEntry(
     String sagaId,
@@ -47,7 +51,8 @@ public record SagaLifecycleEntry(
     String outcomeStep,
     SagaFailure failure,
     Instant occurredAt,
-    CompensationTrigger trigger) {
+    CompensationTrigger trigger,
+    OperatorRequest operator) {
   public SagaLifecycleEntry {
     if (sagaId == null) {
       throw new IllegalArgumentException("sagaId must not be null");
@@ -91,6 +96,11 @@ public record SagaLifecycleEntry(
         kind == SagaLifecycleEventKind.COMPENSATION_STARTED,
         "COMPENSATION_STARTED",
         kind);
+    if ((kind == SagaLifecycleEventKind.COMPENSATION_RESUMED
+            || kind == SagaLifecycleEventKind.RESOLVED)
+        && operator == null) {
+      throw new IllegalArgumentException("operator must not be null for kind " + kind);
+    }
     if (kind != SagaLifecycleEventKind.STEP_COMPLETED && !touchedAggregates.isEmpty()) {
       throw new IllegalArgumentException(
           "touchedAggregates must be empty unless kind is STEP_COMPLETED, but kind is " + kind);
@@ -111,7 +121,25 @@ public record SagaLifecycleEntry(
       String outcomeStep,
       SagaFailure failure,
       Instant occurredAt) {
-    this(sagaId, kind, stepName, touchedAggregates, outcomeStep, failure, occurredAt, null);
+    this(sagaId, kind, stepName, touchedAggregates, outcomeStep, failure, occurredAt, null, null);
+  }
+
+  /**
+   * An entry no operator caused, as before {@code specs/015-saga-operations}.
+   *
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaLifecycleEntry(
+      String sagaId,
+      SagaLifecycleEventKind kind,
+      String stepName,
+      List<AggregateReference> touchedAggregates,
+      String outcomeStep,
+      SagaFailure failure,
+      Instant occurredAt,
+      CompensationTrigger trigger) {
+    this(
+        sagaId, kind, stepName, touchedAggregates, outcomeStep, failure, occurredAt, trigger, null);
   }
 
   private static void requirePresentIff(

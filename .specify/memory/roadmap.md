@@ -66,7 +66,8 @@ building on unfinished work.
 | 012 | Outbox command failure feedback (**done**, `specs/012-outbox-command-failure-feedback`) | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
 | 013 | Active/standby relay (**done**, `specs/013-active-standby-relay`) | SF-6 | G-007-09 | W9 | P1 |
 | 014 | One event bus with Spring Modulith | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
-| 015 | Saga operations: query, repair, recovery | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05 | W10 | P1 |
+| 015 | Saga operations: query, repair, recovery (**done** 2026-11-26, `specs/015-saga-operations`, without retry) | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05, G-013-05 | W10 | P1 |
+| 015b | Retry a failed saga from its failed step (split from 015; **next**) | SF-5 | new G-015-01 | W10 (rest) | P1 |
 | 016 | Marker SPI and jMolecules adapter | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
@@ -215,6 +216,9 @@ exactly once each, durably, after commit.
 
 ### 015: Saga operations: query, repair, recovery
 
+**Status: done (2026-11-26).** Queries, the three repairs, recovery sweeps, stranded-start adoption and the starter's
+`sagas` endpoint ship; the retry of a failed step is 015b, next. New limitations: memory.md G-015-02 to G-015-09.
+
 **Problem.** The engine keeps rich instance state but exposes it only through the `StorageProvider` SPI. There is no
 supported way to find instances, or to get a `FAILED`, `COMPENSATION_FAILED`, stranded `CREATED` or stalled
 `COMPENSATING` instance moving again.
@@ -249,6 +253,26 @@ terminal status. Principle III: transitions allowed for operator actions.
 
 **Acceptance.** A `FAILED` instance whose cause was fixed is retried through the API and completes. A
 `COMPENSATION_FAILED` instance is resumed and ends `COMPENSATED`. Each action shows in the history.
+
+### 015b: Retry a failed saga from its failed step
+
+**Split from 015** (user decision, 2026-11-26): 015 ships query, repair (resume compensation, compensate, mark
+resolved) and recovery without retry. Take this item right after 015.
+
+**Problem.** A `FAILED` instance (an `UNCLASSIFIED` failure, effects kept in place) whose cause an operator fixed
+cannot be re-run: the failed step needs the event that triggered it, and the runtime does not keep it. The only
+operator options after 015 are to compensate it or mark it resolved.
+
+**Scope.** An operator `retry(sagaId, OperatorRequest)` on 015's operations API and Actuator write operations that
+re-runs the failed step with its triggering event, in the one `UnitOfWork`, recorded in history.
+
+**Spec questions.** Where the triggering event comes from: stored with the `FAILED` write (a durable event payload in
+storage, which meets the durable value rules of 009 and the Postgres codec), redelivered from the message store when the
+transport kept it (set aside or retained), or retry allowed only when one of those is available. Whether a retried
+step's `@RetryPolicy` attempts restart. Whether `COMPENSATION_FAILED` has a retry distinct from 015's resume.
+
+**Acceptance.** A `FAILED` instance whose cause was fixed is retried through the API and completes; its history shows
+the retry with operator and reason.
 
 ### 016: Marker SPI and jMolecules adapter
 

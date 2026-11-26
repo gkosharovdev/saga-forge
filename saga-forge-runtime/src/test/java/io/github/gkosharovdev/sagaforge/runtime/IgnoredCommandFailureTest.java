@@ -59,14 +59,14 @@ class IgnoredCommandFailureTest {
     fixture.receive(new ParcelDelivered("p-1"));
     SagaInstance before = fixture.committed(sagaId);
     int outcomes = fixture.outcomes().size();
-    int history = fixture.storage().history(sagaId).size();
+    int history = fixture.storage().storedHistory(sagaId).size();
 
     fixture
         .transport()
         .reportFailure(report(fixture.sent(ShipParcel.class), FailureClassification.FINAL, 1));
 
     assertIgnored(sagaId, "terminal:COMPLETED", before, outcomes);
-    assertThat(fixture.storage().history(sagaId)).hasSize(history);
+    assertThat(fixture.storage().storedHistory(sagaId)).hasSize(history);
     assertThat(ParcelSaga.ran()).isEmpty();
   }
 

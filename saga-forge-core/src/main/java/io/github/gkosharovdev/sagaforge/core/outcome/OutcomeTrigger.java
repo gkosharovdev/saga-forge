@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.core.outcome;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import java.time.Instant;
 
 /**
@@ -36,14 +37,28 @@ public record OutcomeTrigger(
     Integer attempts,
     Instant at,
     String commandType,
-    String deadlineName) {
+    String deadlineName,
+    OperatorRequest operatorRequest) {
 
   /** Validates every component. */
   public OutcomeTrigger {
     Values.requireNonNull(kind, "kind");
     Values.requireText(stepName, "stepName");
     Values.requireNonNull(at, "at");
-    if (kind == CompensationTriggerKind.FAILURE_OUTCOME
+    boolean operator = kind == CompensationTriggerKind.OPERATOR_REQUEST;
+    if (operator != (operatorRequest != null)) {
+      throw new IllegalArgumentException(
+          "operatorRequest must be non-null if and only if kind is OPERATOR_REQUEST");
+    }
+    if (operator) {
+      boolean none = classification == null && causeType == null && attempts == null;
+      boolean all = classification != null && causeType != null && attempts != null;
+      if (!none && !all) {
+        throw new IllegalArgumentException(
+            "classification, causeType and attempts must be all present or all null for "
+                + "OPERATOR_REQUEST");
+      }
+    } else if (kind == CompensationTriggerKind.FAILURE_OUTCOME
         || kind == CompensationTriggerKind.DEADLINE_EXPIRED) {
       if (classification != null || causeType != null || attempts != null) {
         throw new IllegalArgumentException(
@@ -68,6 +83,19 @@ public record OutcomeTrigger(
       throw new IllegalArgumentException(
           "deadlineName must be null unless kind is DEADLINE_EXPIRED");
     }
+  }
+
+  /** A trigger no operator asked for, as before {@code specs/015-saga-operations}. */
+  public OutcomeTrigger(
+      CompensationTriggerKind kind,
+      String stepName,
+      FailureClassification classification,
+      String causeType,
+      Integer attempts,
+      Instant at,
+      String commandType,
+      String deadlineName) {
+    this(kind, stepName, classification, causeType, attempts, at, commandType, deadlineName, null);
   }
 
   /**
@@ -111,7 +139,8 @@ public record OutcomeTrigger(
           null,
           trigger.at(),
           null,
-          trigger.deadlineName());
+          trigger.deadlineName(),
+          trigger.operatorRequest());
     }
     return new OutcomeTrigger(
         trigger.kind(),
@@ -120,6 +149,8 @@ public record OutcomeTrigger(
         trigger.failure().causeType(),
         trigger.failure().attempts(),
         trigger.at(),
-        trigger.commandType());
+        trigger.commandType(),
+        null,
+        trigger.operatorRequest());
   }
 }

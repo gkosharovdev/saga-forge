@@ -9,6 +9,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Trigger;
@@ -37,7 +38,10 @@ import java.util.function.Supplier;
  *         <li>start step: {@code EngineSagaLifecycle.start} (an active instance with the value →
  *             {@code DUPLICATE_START}), the creation write in its own transaction ({@code CREATED}
  *             instance and entry, FR-012, FR-024), then the first unit of work ({@code started =
- *             true});
+ *             true}). If the active instance that blocks the start is still {@code CREATED} with no
+ *             step completed once its lock is held, a stranded start (015 FR-028), the start step
+ *             runs on it instead ({@code started = false}, a {@code START_RECOVERED} entry, {@code
+ *             saga.start.recovered});
  *         <li>other step: {@code findByAssociation} filtered to the saga type; one unit of work per
  *             active instance in the order returned, each committed or rolled back on its own; none
  *             → {@code UNMATCHED}; only terminal ones → one {@code UNEXPECTED} result for the most
@@ -182,12 +186,65 @@ final class EventRouter {
                     reaction.associationValue())
                 .sagaId();
       } catch (DuplicateSagaInstanceException duplicate) {
-        return duplicateStart(reaction);
+        Optional<AdoptedStart> adopted = adoptStrandedStart(reaction);
+        if (adopted.isEmpty()) {
+          return duplicateStart(reaction);
+        }
+        startLease.close();
+        return recoverStart(reaction, adopted.get());
       }
       instanceLease = instanceLocks.acquire(sagaId);
       commitCreationOrRelease(reaction.saga(), lifecycle, sagaId, instanceLease);
     }
     return runUnitOfWork(reaction, sagaId, true, instanceLease);
+  }
+
+  /**
+   * The active instance that blocked the start, locked, if it is a stranded start: {@code CREATED}
+   * with no step completed once its lock is held (015 FR-028, contracts/operations-api.md ST1,
+   * ST2). Holds the duplicate-start lock, so the lock order stays duplicate-start → instance.
+   */
+  private Optional<AdoptedStart> adoptStrandedStart(Reaction reaction) {
+    Optional<SagaInstance> blocking =
+        correlatedInstances(reaction).stream()
+            .filter(instance -> !EngineSagaLifecycle.isTerminal(instance.status()))
+            .filter(EventRouter::isStrandedStart)
+            .findFirst();
+    if (blocking.isEmpty()) {
+      return Optional.empty();
+    }
+    String sagaId = blocking.get().sagaId();
+    Lease lease = instanceLocks.acquire(sagaId);
+    try {
+      boolean stillStranded =
+          settings.storage().findById(sagaId).filter(EventRouter::isStrandedStart).isPresent();
+      if (stillStranded) {
+        return Optional.of(new AdoptedStart(sagaId, lease));
+      }
+    } catch (RuntimeException | Error failure) {
+      lease.close();
+      throw failure;
+    }
+    lease.close();
+    return Optional.empty();
+  }
+
+  private record AdoptedStart(String sagaId, Lease lease) {}
+
+  private static boolean isStrandedStart(SagaInstance instance) {
+    return instance.status() == SagaStatus.CREATED && !InstanceChecks.anyStepCompleted(instance);
+  }
+
+  /**
+   * Runs the start step on the adopted instance ({@code started = false}); its unit of work appends
+   * {@code START_RECOVERED} (see {@link RunSteps}).
+   */
+  private SagaHandlingResult recoverStart(Reaction reaction, AdoptedStart adopted) {
+    String sagaId = adopted.sagaId();
+    with.diagnostics().startRecovered(reaction.correlation().instance(sagaId));
+    io.opentelemetry.api.trace.Span.current()
+        .setAttribute(SagaInstrumentation.START_RECOVERED, true);
+    return runUnitOfWork(reaction, sagaId, false, adopted.lease());
   }
 
   private void commitCreationOrRelease(

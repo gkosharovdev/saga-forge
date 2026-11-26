@@ -5,6 +5,8 @@ import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
@@ -67,15 +69,22 @@ final class SagaInstanceRows {
           "failure_attempts",
           "pending_retry",
           "compensation_trigger",
-          "open_deadlines");
+          "open_deadlines",
+          "resolution",
+          "compensation_round");
 
   static final String STATE_FIELD = "saga_instance.state";
   static final String STEPS_FIELD = "saga_instance.steps";
   static final String PENDING_RETRY_FIELD = "saga_instance.pending_retry";
   static final String TRIGGER_FIELD = "saga_instance.compensation_trigger";
   static final String DEADLINES_FIELD = "saga_instance.open_deadlines";
+  static final String RESOLUTION_FIELD = "saga_instance.resolution";
 
   private static final String STATUS = "status";
+  private static final String OPERATOR = "operator";
+  private static final String REASON = "reason";
+  private static final String RESOLVED_AT = "resolvedAt";
+  private static final String OPERATOR_REQUEST = "operatorRequest";
   private static final String TOUCHED_AGGREGATES = "touchedAggregates";
   private static final String AGGREGATE_TYPE = "aggregateType";
   private static final String AGGREGATE_ID = "aggregateId";
@@ -116,11 +125,12 @@ final class SagaInstanceRows {
   }
 
   /**
-   * Binds {@code instance} to parameters 1 to 17, in {@link #COLUMNS} order; {@code state} (3),
+   * Binds {@code instance} to parameters 1 to 19, in {@link #COLUMNS} order; {@code state} (3),
    * {@code steps} (7), {@code pending_retry} (15), {@code compensation_trigger} (16; both SQL
-   * {@code NULL} when absent) and {@code open_deadlines} (17) are JSON text for {@code ?::jsonb}
-   * placeholders. Everything is encoded before the first parameter is set, so an unsupported value
-   * fails with {@link IllegalArgumentException} before any SQL runs.
+   * {@code NULL} when absent) and {@code open_deadlines} (17) and {@code resolution} (18; SQL
+   * {@code NULL} when absent) are JSON text for {@code ?::jsonb} placeholders. Everything is
+   * encoded before the first parameter is set, so an unsupported value fails with {@link
+   * IllegalArgumentException} before any SQL runs.
    *
    * @throws IllegalArgumentException if {@code sagaId}, {@code sagaType}, {@code status}, {@code
    *     createdAt}, or {@code lastModifiedAt} is {@code null}, or a {@code state} value is outside
@@ -133,6 +143,7 @@ final class SagaInstanceRows {
     String pendingRetry = encodePendingRetry(instance.pendingRetry());
     String trigger = encodeTrigger(TRIGGER_FIELD, instance.compensationTrigger());
     String deadlines = encodeOpenDeadlines(instance.openDeadlines());
+    String resolution = encodeResolution(instance.resolution());
 
     statement.setString(1, instance.sagaId());
     statement.setString(2, instance.sagaType());
@@ -146,6 +157,8 @@ final class SagaInstanceRows {
     statement.setString(15, pendingRetry);
     statement.setString(16, trigger);
     statement.setString(17, deadlines);
+    statement.setString(18, resolution);
+    statement.setInt(19, instance.compensationRound());
   }
 
   /**
@@ -168,7 +181,62 @@ final class SagaInstanceRows {
         failureFromRow(row),
         decodePendingRetry(row.getString("pending_retry")),
         decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
-        decodeOpenDeadlines(row.getString("open_deadlines")));
+        decodeOpenDeadlines(row.getString("open_deadlines")),
+        decodeResolution(row.getString("resolution")),
+        row.getInt("compensation_round"));
+  }
+
+  // --- resolution and operator requests (015)
+  // ------------------------------------------------------------
+
+  /**
+   * @return {@code resolution} as JSON text, or {@code null} for SQL {@code NULL}
+   */
+  static String encodeResolution(SagaResolution resolution) {
+    if (resolution == null) {
+      return null;
+    }
+    Map<String, Object> plain = new LinkedHashMap<>();
+    plain.put(OPERATOR, resolution.operator());
+    plain.put(REASON, resolution.reason());
+    plain.put(RESOLVED_AT, resolution.resolvedAt().toString());
+    return JsonCodec.encodeObject(RESOLUTION_FIELD, plain);
+  }
+
+  /**
+   * @return the resolution stored as {@code json}, or {@code null} for SQL {@code NULL}
+   */
+  static SagaResolution decodeResolution(String json) {
+    if (json == null) {
+      return null;
+    }
+    Map<String, Object> plain = JsonCodec.decodeObject(RESOLUTION_FIELD, json);
+    try {
+      return new SagaResolution(
+          requireType(String.class, RESOLUTION_FIELD + "." + OPERATOR, plain.get(OPERATOR)),
+          requireType(String.class, RESOLUTION_FIELD + "." + REASON, plain.get(REASON)),
+          Instant.parse(
+              requireType(
+                  String.class, RESOLUTION_FIELD + "." + RESOLVED_AT, plain.get(RESOLVED_AT))));
+    } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+      throw new IllegalStateException(
+          RESOLUTION_FIELD + " holds an invalid resolution: " + e.getMessage(), e);
+    }
+  }
+
+  private static Map<String, Object> operatorToPlain(OperatorRequest request) {
+    Map<String, Object> plain = new LinkedHashMap<>();
+    plain.put(OPERATOR, request.operator());
+    plain.put(REASON, request.reason());
+    return plain;
+  }
+
+  private static OperatorRequest operatorFromPlain(String field, Object value) {
+    @SuppressWarnings("unchecked")
+    Map<String, Object> plain = requireType(Map.class, field, value);
+    return new OperatorRequest(
+        requireType(String.class, field + "." + OPERATOR, plain.get(OPERATOR)),
+        requireType(String.class, field + "." + REASON, plain.get(REASON)));
   }
 
   // --- open deadlines (017)
@@ -592,6 +660,9 @@ final class SagaInstanceRows {
     if (trigger.deadlineName() != null) {
       plain.put(DEADLINE_NAME, trigger.deadlineName());
     }
+    if (trigger.operatorRequest() != null) {
+      plain.put(OPERATOR_REQUEST, operatorToPlain(trigger.operatorRequest()));
+    }
     plain.put(AT, trigger.at().toString());
     return JsonCodec.encodeObject(field, plain);
   }
@@ -623,7 +694,10 @@ final class SagaInstanceRows {
           Instant.parse(requireType(String.class, field + "." + AT, plain.get(AT))),
           plain.get(DEADLINE_NAME) == null
               ? null
-              : requireType(String.class, field + "." + DEADLINE_NAME, plain.get(DEADLINE_NAME)));
+              : requireType(String.class, field + "." + DEADLINE_NAME, plain.get(DEADLINE_NAME)),
+          plain.get(OPERATOR_REQUEST) == null
+              ? null
+              : operatorFromPlain(field + "." + OPERATOR_REQUEST, plain.get(OPERATOR_REQUEST)));
     } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
       throw new IllegalStateException(
           field + " holds an invalid compensation trigger: " + e.getMessage(), e);

@@ -8,7 +8,8 @@ description: Write, change, test and debug Saga Forge sagas (io.github.gkosharov
 Saga Forge 0.4.0: Java 21, Spring Boot 4.1, Postgres storage, in-memory transport (no broker). Annotations are in
 `io.github.gkosharovdev.sagaforge.core.annotation`; `CommandGateway`/`CommandId` in `core.command`; `DomainEvents`/
 `EventPublisher` in `core.event`; `SagaContext` in `core.lifecycle`; `CompensationTrigger` in `core.compensation`;
-`TransientFailure`/`FinalFailure` in `core.failure`; `SagaFixture` in `io.github.gkosharovdev.sagaforge.test`.
+`TransientFailure`/`FinalFailure` in `core.failure`; `SagaOperations`/`OperatorRequest`/`RepairResult` in
+`core.operations`; `SagaFixture` in `io.github.gkosharovdev.sagaforge.test`.
 
 Guide: https://github.com/gkosharovdev/saga-forge/tree/master/docs/guide (single file:
 https://github.com/gkosharovdev/saga-forge/blob/master/llms-full.txt). Javadoc:
@@ -115,6 +116,20 @@ public class OrderProcessingSaga {
 - Run as many application instances as needed over one database: one elected relay delivers, the others stand by.
   Tune takeover with `saga-forge.transport.leadership.lease-duration` / `renew-interval` / `check-interval` (30 s / 10 s
   / 5 s); keep handlers idempotent (`CommandId`), since a takeover can redeliver.
+- Repair one saga instance through `SagaRuntime.operations()` (`SagaOperations`), each call with an
+  `OperatorRequest(operator, reason)`: `resumeCompensation` (`COMPENSATION_FAILED` or a stalled `COMPENSATING`; failed
+  compensations run again, so they must be idempotent), `compensate` (`CREATED`, `RUNNING`, `FAILED`; trigger kind
+  `OPERATOR_REQUEST`) and `markResolved` (`FAILED`, `COMPENSATION_FAILED`; the status stays). Each returns
+  `RepairResult.Applied` or `NotApplied` with a reason. `list(SagaInstanceQuery)` pages instances, `history(sagaId)`
+  reads the lifecycle history. In a test: `fixture.whenOperator(ops -> ops.resumeCompensation(...))
+  .instance(...).expectHistory(...)`, `expectResolved()`.
+- With the starter, recovery sweeps run every minute on every instance (`saga-forge.recovery.*`): a `COMPENSATING`
+  saga untouched for `stall-age` (5 m) resumes, a `CREATED` saga with no completed step after `abandonment-age` (15 m)
+  is reported (`abandoned-start-policy=report`, the default) or ended `FAILED` (`fail`). A redelivered start event
+  adopts a stranded `CREATED` instance. Over HTTP: the `sagas` Actuator endpoint (`GET /actuator/sagas`,
+  `GET /actuator/sagas/{id}`, `POST /actuator/sagas/{id}/{resume-compensation|compensate|resolve}` with
+  `{"reason": "..."}`); the POST needs `management.endpoint.sagas.access=unrestricted` and an authenticated principal,
+  so secure it with Spring Security.
 - Test with `SagaFixture.of(Saga.class).build().given(...).when(...).expectCommands(...)`; use `.handlers(...)` to run
   real handlers and `givenAggregates(...)` to seed aggregates.
 
@@ -142,6 +157,9 @@ public class OrderProcessingSaga {
   leadership properties.
 - Don't write a saga step that takes `SagaCompleted`, `SagaFailed` or `SagaCompensated`: they are not domain events and
   reach no saga. Start follow-up work from a listener.
+- Don't expect an operator to retry a `FAILED` saga's failed step: there is no retry yet; compensate it or mark it
+  resolved. Don't allow the `sagas` endpoint's write access without Spring Security, and don't turn on
+  `saga-forge.operations.expose-context-values` when context values hold personal data.
 - Don't look for `REQUIRES_INTERVENTION`: a failed compensation ends `COMPENSATION_FAILED` (existing Postgres
   databases apply `schema-upgrade-011.sql`).
 

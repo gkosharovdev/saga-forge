@@ -8,6 +8,8 @@ import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StepRecord;
 import java.util.Arrays;
@@ -402,6 +404,49 @@ public final class Then {
     List<SagaOutcome> actual = outcomeEvents();
     if (!actual.isEmpty()) {
       throw fail(Messages.expectedActual("expected outcome events", "[]", "committed", actual));
+    }
+    return this;
+  }
+
+  // --- operations (015)
+  // ---------------------------------------------------------------------------------------------
+
+  /** The subject was marked resolved by an operator. */
+  public Then expectResolved() {
+    if (subject().resolution().isEmpty()) {
+      throw fail(Messages.expectedActual("expected", "resolved", "actual", "not resolved"));
+    }
+    return this;
+  }
+
+  /** The subject carries no resolution. */
+  public Then expectNotResolved() {
+    InstanceView instance = subject();
+    if (instance.resolution().isPresent()) {
+      throw fail(
+          Messages.expectedActual(
+              "expected", "not resolved", "actual", "resolved by " + instance.resolution().get()));
+    }
+    return this;
+  }
+
+  /**
+   * The subject's lifecycle history contains {@code kinds} in this order, other entries between
+   * them allowed.
+   */
+  public Then expectHistory(SagaLifecycleEventKind... kinds) {
+    List<SagaLifecycleEventKind> actual =
+        subject().history().stream().map(SagaLifecycleEntry::kind).toList();
+    int next = 0;
+    for (SagaLifecycleEventKind kind : actual) {
+      if (next < kinds.length && kinds[next] == kind) {
+        next++;
+      }
+    }
+    if (next < kinds.length) {
+      throw fail(
+          Messages.expectedActual(
+              "expected history containing, in order", List.of(kinds), "actual", actual));
     }
     return this;
   }

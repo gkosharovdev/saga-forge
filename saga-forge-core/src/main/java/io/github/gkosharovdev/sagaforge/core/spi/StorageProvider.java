@@ -1,7 +1,11 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * SPI for durable saga instance persistence.
@@ -137,4 +141,42 @@ public interface StorageProvider {
    * @throws IllegalArgumentException if {@code sagaId} is {@code null}
    */
   void delete(String sagaId);
+
+  /**
+   * Lists the instances {@code query} selects, ordered by ({@code lastModifiedAt}, {@code sagaId})
+   * ascending, starting after its cursor ({@code specs/015-saga-operations} FR-003, FR-009). An
+   * instance matches as {@link SagaInstanceQuery#matches} says; the bounds are exclusive. The page
+   * holds at most {@code query.limit()} instances, and its {@code next} cursor is present if and
+   * only if more instances matched.
+   *
+   * <p>Reads committed state and takes no lock. It joins the runtime's transaction when one is
+   * active on the calling thread and otherwise reads on its own.
+   *
+   * @param query the filter and page; must not be {@code null}
+   * @return the page, never {@code null}
+   * @throws IllegalArgumentException if {@code query} is {@code null}
+   */
+  SagaInstancePage find(SagaInstanceQuery query);
+
+  /**
+   * Counts instances per status, and the {@code FAILED} and {@code COMPENSATION_FAILED} ones that
+   * are not resolved ({@code specs/015-saga-operations} FR-004). Every status is present in the
+   * result. Reads committed state and takes no lock.
+   *
+   * @param sagaTypes the saga type names to count; empty for every type; must not be {@code null}
+   * @return the counts, never {@code null}
+   * @throws IllegalArgumentException if {@code sagaTypes} is {@code null}
+   */
+  InstanceCounts countByStatus(Set<String> sagaTypes);
+
+  /**
+   * Returns the lifecycle history of an instance, every entry handed to {@link #save(SagaInstance,
+   * List)} for it, in stored order ({@code specs/015-saga-operations} FR-007). Reads committed
+   * state and takes no lock.
+   *
+   * @param sagaId the saga instance identifier; must not be {@code null}
+   * @return the entries; empty if the instance does not exist
+   * @throws IllegalArgumentException if {@code sagaId} is {@code null}
+   */
+  List<SagaLifecycleEntry> history(String sagaId);
 }

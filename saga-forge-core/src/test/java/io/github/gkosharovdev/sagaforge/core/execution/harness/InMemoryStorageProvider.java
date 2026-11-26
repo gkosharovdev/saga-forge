@@ -1,13 +1,19 @@
 package io.github.gkosharovdev.sagaforge.core.execution.harness;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Map-backed {@link StorageProvider} for the saga test harness.
@@ -73,6 +79,44 @@ public final class InMemoryStorageProvider implements StorageProvider {
   }
 
   @Override
+  public SagaInstancePage find(SagaInstanceQuery query) {
+    if (query == null) {
+      throw new IllegalArgumentException("query must not be null");
+    }
+    List<SagaInstance> probe =
+        instances.values().stream()
+            .filter(i -> query.matches(i.status(), i.sagaType(), i.lastModifiedAt(), i.sagaId()))
+            .sorted(SagaInstancePage.ORDER)
+            .limit(query.limit() + 1L)
+            .toList();
+    return SagaInstancePage.of(probe, query.limit());
+  }
+
+  @Override
+  public InstanceCounts countByStatus(Set<String> sagaTypes) {
+    if (sagaTypes == null) {
+      throw new IllegalArgumentException("sagaTypes must not be null");
+    }
+    Map<SagaStatus, Long> byStatus = new EnumMap<>(SagaStatus.class);
+    long compensationFailedUnresolved = 0;
+    long failedUnresolved = 0;
+    for (SagaInstance instance : instances.values()) {
+      if (!sagaTypes.isEmpty() && !sagaTypes.contains(instance.sagaType())) {
+        continue;
+      }
+      byStatus.merge(instance.status(), 1L, Long::sum);
+      if (!instance.isResolved()) {
+        if (instance.status() == SagaStatus.COMPENSATION_FAILED) {
+          compensationFailedUnresolved++;
+        } else if (instance.status() == SagaStatus.FAILED) {
+          failedUnresolved++;
+        }
+      }
+    }
+    return new InstanceCounts(byStatus, compensationFailedUnresolved, failedUnresolved);
+  }
+
+  @Override
   public void delete(String sagaId) {
     requireSagaId(sagaId);
     instances.remove(sagaId);
@@ -94,6 +138,7 @@ public final class InMemoryStorageProvider implements StorageProvider {
    * @return an unmodifiable list of entries; empty if none were recorded; never {@code null}
    * @throws IllegalArgumentException if {@code sagaId} is {@code null}
    */
+  @Override
   public List<SagaLifecycleEntry> history(String sagaId) {
     requireSagaId(sagaId);
     return List.copyOf(histories.getOrDefault(sagaId, List.of()));

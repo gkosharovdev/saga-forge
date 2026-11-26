@@ -89,6 +89,24 @@ public final class CompensationFaults implements StorageProvider {
   }
 
   @Override
+  public io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage find(
+      io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery query) {
+    return delegate.find(query);
+  }
+
+  @Override
+  public io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts countByStatus(
+      java.util.Set<String> sagaTypes) {
+    return delegate.countByStatus(sagaTypes);
+  }
+
+  @Override
+  public java.util.List<io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry> history(
+      String sagaId) {
+    return delegate.history(sagaId);
+  }
+
+  @Override
   public void delete(String sagaId) {
     delegate.delete(sagaId);
   }

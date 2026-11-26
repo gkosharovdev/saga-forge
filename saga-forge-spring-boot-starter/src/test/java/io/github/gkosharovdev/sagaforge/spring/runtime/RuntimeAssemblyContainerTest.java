@@ -92,6 +92,31 @@ class RuntimeAssemblyContainerTest {
   }
 
   @Test
+  @DisplayName(
+      "stop() then start() on the same context: runtime and transport run and deliver again")
+  void contextStopAndStart() {
+    try (ConfigurableApplicationContext context = StarterApp.run(OrderApp.class)) {
+      context.stop();
+      assertThat(context.getBean(SagaRuntime.class).isStarted()).isFalse();
+      assertThat(context.getBean(TransportLifecycle.class).isRunning()).isFalse();
+
+      context.start();
+
+      assertThat(context.getBean(SagaRuntime.class).isStarted()).isTrue();
+      assertThat(context.getBean(SagaRuntimeLifecycle.class).isRunning()).isTrue();
+      assertThat(context.getBean(TransportLifecycle.class).isRunning()).isTrue();
+      context.getBean(OrderRepository.class).save(new Order("o-5", true));
+      context.getBean(EventPublisher.class).publish(new OrderCreatedEvent("o-5", AMOUNT));
+      await(
+          () -> "COMPLETED".equals(status(OrderProcessingSaga.class)),
+          "the order saga to complete after the restart");
+      await(
+          () -> count(FulfilmentSaga.class) == 1,
+          "the fulfilment saga to start through the restarted transport");
+    }
+  }
+
+  @Test
   @DisplayName("the CommandGateway bean runs a command handler bean")
   void commandGatewayBean() {
     try (ConfigurableApplicationContext context = StarterApp.run(OrderApp.class)) {

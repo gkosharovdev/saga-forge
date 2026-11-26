@@ -62,7 +62,7 @@ class LifecycleHistoryPropertyTest {
 
     String sagaId = fixture.requestParcel("parcel-1", 4).results().get(0).sagaId();
 
-    List<StoredEntry> history = fixture.storage().history(sagaId);
+    List<StoredEntry> history = fixture.storage().storedHistory(sagaId);
     List<Shape> shapes = history.stream().map(StoredEntry::entry).map(Shape::of).toList();
     assertThat(shapes).isEqualTo(fault.isPresent() ? FAILED_HISTORY : COMPLETED_HISTORY);
     assertThat(history)

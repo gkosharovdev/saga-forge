@@ -37,6 +37,27 @@ public final class UnwindFixture {
   private final RecordingLogger logger = new RecordingLogger();
   private final AtomicInteger sagaIds = new AtomicInteger();
   private final CapturingOutbox outbox = CapturingOutbox.afterCommit();
+  private final java.util.concurrent.atomic.AtomicReference<Instant> now =
+      new java.util.concurrent.atomic.AtomicReference<>(NOW);
+  private final Clock clock =
+      new Clock() {
+        @Override
+        public java.time.ZoneId getZone() {
+          return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+          return this;
+        }
+
+        @Override
+        public Instant instant() {
+          return now.get();
+        }
+      };
+  private io.github.gkosharovdev.sagaforge.runtime.RecoverySettings recovery =
+      io.github.gkosharovdev.sagaforge.runtime.RecoverySettings.defaults();
   private SagaRuntime engine;
 
   private UnwindFixture(
@@ -86,12 +107,48 @@ public final class UnwindFixture {
                     return sagas.apply(journal);
                   }
                 })
-            .clock(Clock.fixed(NOW, ZoneOffset.UTC))
+            .clock(clock)
+            .recovery(recovery)
             .sagaIds(() -> "saga-" + sagaIds.incrementAndGet())
             .logger(logger)
             .build();
     built.start();
     return built;
+  }
+
+  /** Moves this fixture's clock forward by {@code elapsed}. */
+  public UnwindFixture advance(java.time.Duration elapsed) {
+    now.updateAndGet(at -> at.plus(elapsed));
+    return this;
+  }
+
+  /** The fixture clock's current instant. */
+  public Instant now() {
+    return now.get();
+  }
+
+  /** Rebuilds the engine with {@code settings} (015); the old engine is stopped. */
+  public UnwindFixture withRecovery(
+      io.github.gkosharovdev.sagaforge.runtime.RecoverySettings settings) {
+    engine.stop();
+    this.recovery = settings;
+    engine = build(null);
+    return this;
+  }
+
+  /** The engine's operations API (015). */
+  public io.github.gkosharovdev.sagaforge.core.operations.SagaOperations operations() {
+    return engine.operations();
+  }
+
+  /** The current engine. */
+  public SagaRuntime engine() {
+    return engine;
+  }
+
+  /** The context store the engine uses. */
+  public InMemorySagaContextStore contexts() {
+    return contexts;
   }
 
   /** A new engine over the same stores; the old one is no longer used. */

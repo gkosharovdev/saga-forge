@@ -95,8 +95,14 @@ public final class LeaderElector {
     return () -> null;
   }
 
-  /** Runs one round now, so a lone instance leads at once (D9), then schedules the next rounds. */
+  /**
+   * Runs one round now, so a lone instance leads at once (D9), then schedules the next rounds. May
+   * be called again after {@link #resign()}.
+   */
   public void start() {
+    synchronized (this) {
+      stopped = false;
+    }
     tick();
     synchronized (this) {
       gauge = instrumentation.relayActiveGauge(() -> leadership().isPresent());

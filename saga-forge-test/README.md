@@ -176,6 +176,35 @@ SagaFixture fixture = SagaFixture.of(OrderProcessingSaga.class)
   attempt, for example to check that a retry kept the same idempotency key.
 - `maxTotalRetryBackoff(...)` matches the runtime's setting.
 
+## Operating sagas: repairs, history and recovery
+
+`fixture.operations()` is the runtime's operations API: find and list instances, read their history, and repair them
+(`resumeCompensation`, `compensate`, `markResolved`). After a repair the fixture delivers the commands and events it
+caused, as after `when(event)`. `whenOperator(...)` runs a repair and returns expectations over what it caused; choose
+the instance with `instance(...)` (from `OrderProcessingSagaOperationsFixtureTest` in `saga-forge-example`):
+
+```java
+fixture
+    .whenOperator(
+        operations ->
+            operations.resumeCompensation(
+                sagaId, new OperatorRequest("alice", "provider back, refund retried")))
+    .instance(OrderProcessingSaga.class, "o-1")
+    .expectStatus(SagaStatus.COMPENSATED)
+    .expectCommands(new RefundPaymentCommand(sagaId, "payment-1", AMOUNT))
+    .expectHistory(
+        SagaLifecycleEventKind.COMPENSATION_FAILED,
+        SagaLifecycleEventKind.COMPENSATION_RESUMED,
+        SagaLifecycleEventKind.COMPENSATED);
+```
+
+- `expectHistory(kinds...)` checks the lifecycle history contains the kinds in that order, others between them
+  allowed. `expectResolved()` and `expectNotResolved()` check an operator's resolution; `InstanceView.history()` and
+  `InstanceView.resolution()` read them.
+- `recovery(RecoverySettings)` on the builder sets the stall and abandonment ages. The fixture never starts a sweep
+  thread: with `enabled`, every `whenTimeElapses`, `whenTimeReaches` and `givenTimeElapses` runs one sweep after
+  moving the clock; otherwise call `operations().recover()`.
+
 ## Sagas and handlers that need collaborators
 
 Pass instances or factories, built by hand or taken from a Spring context; the fixture itself knows nothing about

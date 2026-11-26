@@ -55,7 +55,7 @@ class CompensationFaultInjectionTest {
 
   /** The steps whose compensation committed, in commit order. */
   static List<String> committedCompensations(UnwindFixture fixture, String sagaId) {
-    return fixture.storage().history(sagaId).stream()
+    return fixture.storage().storedHistory(sagaId).stream()
         .map(stored -> stored.entry())
         .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
         .map(entry -> entry.stepName())
@@ -163,7 +163,7 @@ class CompensationFaultInjectionTest {
 
     assertThat(fixture.committed(sagaId).status()).isEqualTo(SagaStatus.COMPENSATED);
     assertThat(
-            fixture.storage().history(sagaId).stream()
+            fixture.storage().storedHistory(sagaId).stream()
                 .map(stored -> stored.entry())
                 .filter(entry -> entry.kind() == SagaLifecycleEventKind.STEP_COMPENSATED)
                 .map(entry -> entry.stepName())

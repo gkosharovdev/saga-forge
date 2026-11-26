@@ -22,6 +22,14 @@ CREATE TABLE saga_instance (
     compensation_trigger JSONB,
     -- Open deadlines by name (specs/017-saga-deadlines FR-014); empty unless CREATED or RUNNING.
     open_deadlines      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- An operator's resolution of a FAILED or COMPENSATION_FAILED instance, and how often its compensation was
+    -- resumed (specs/015-saga-operations data-model.md "Storage: Postgres").
+    resolution          JSONB,
+    compensation_round  INT NOT NULL DEFAULT 0,
+    CONSTRAINT resolution_only_when_failed
+        CHECK (resolution IS NULL OR status IN ('FAILED', 'COMPENSATION_FAILED')),
+    CONSTRAINT compensation_round_not_negative
+        CHECK (compensation_round >= 0),
     CONSTRAINT open_deadlines_only_while_active
         CHECK (open_deadlines = '{}'::jsonb OR status IN ('CREATED', 'RUNNING')),
     CONSTRAINT outcome_iff_completed
@@ -43,6 +51,10 @@ CREATE TABLE saga_association (
     association_value      TEXT NOT NULL,
     PRIMARY KEY (saga_id, association_property)
 );
+
+-- Operator listings page over (status, last_modified_at, saga_id) (specs/015-saga-operations).
+CREATE INDEX IF NOT EXISTS saga_instance_status_modified
+    ON saga_instance (status, last_modified_at, saga_id);
 
 CREATE INDEX idx_saga_association_lookup
     ON saga_association (association_property, association_value);
@@ -68,6 +80,9 @@ CREATE TABLE saga_lifecycle_history (
     failure_attempts    INT,
     occurred_at         TIMESTAMPTZ NOT NULL,
     compensation_trigger JSONB,
+    -- Who asked for an operator action and why (specs/015-saga-operations); NULL for the engine's own entries.
+    operator            TEXT,
+    operator_reason     TEXT,
     PRIMARY KEY (saga_id, sequence_number)
 );
 

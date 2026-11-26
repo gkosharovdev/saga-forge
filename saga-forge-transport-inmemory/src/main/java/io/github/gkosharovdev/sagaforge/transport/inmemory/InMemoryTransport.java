@@ -107,12 +107,13 @@ public final class InMemoryTransport {
   }
 
   /**
-   * Starts delivering: unconsumed messages first (in per-key order), then new ones.
+   * Starts delivering: unconsumed messages first (in per-key order), then new ones. After {@link
+   * #stop(Duration)} it starts delivering again, including what the stop released.
    *
    * @param events where events go, normally the started {@code SagaRuntime}; non-null
    * @param commands where outbox commands go, normally {@code engine.commandReceiver()}; may be
    *     {@code null} if the model sends no outbox command
-   * @throws IllegalStateException if called twice
+   * @throws IllegalStateException if already running, or a previous stop has not finished
    */
   public void start(EventReceiver events, CommandReceiver commands) {
     relay.start(events, commands);

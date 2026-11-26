@@ -6,8 +6,10 @@ import org.springframework.context.SmartLifecycle;
 
 /**
  * Starts the {@link SagaRuntime} after the context refreshed, one phase before the transport starts
- * delivering ({@code specs/008-spring-boot-starter} FR-001, FR-005). The runtime has no stop of its
- * own: stopping the transport, which happens first, stops all delivery into it.
+ * delivering ({@code specs/008-spring-boot-starter} FR-001, FR-005). Stopping the transport, which
+ * happens first, stops all delivery into it; {@link #stop()} then stops the runtime's recovery
+ * sweeps ({@link SagaRuntime#stop()}, specs/015-saga-operations). A later {@link #start()}, as in
+ * {@code context.stop(); context.start()}, starts the runtime again.
  */
 public final class SagaRuntimeLifecycle implements SmartLifecycle {
 
@@ -31,6 +33,7 @@ public final class SagaRuntimeLifecycle implements SmartLifecycle {
 
   @Override
   public void stop() {
+    runtime.stop();
     running = false;
   }
 

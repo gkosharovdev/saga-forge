@@ -1,11 +1,16 @@
 package io.github.gkosharovdev.sagaforge.runtime.support;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstancePage;
+import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary.Scope;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,7 +36,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li><strong>Own transaction</strong>: with no transaction active, writes apply immediately.
  *   <li><strong>History</strong>: entries handed to {@link #save(SagaInstance, List)} are numbered
  *       by the store when the write is applied, consecutively after the instance's committed {@link
- *       #history(String)}.
+ *       #storedHistory(String)}.
  *   <li><strong>Locking</strong>: {@link #findByIdAndLock(String)} takes a fair per-{@code sagaId}
  *       lock owned by the active transaction, re-entrant within it, and released when it ends. Two
  *       engines sharing one instance of this class model two processes sharing a database.
@@ -129,14 +134,60 @@ public final class TransactionalInMemoryStorageProvider implements StorageProvid
     record(Write.deletion(sagaId));
   }
 
+  @Override
+  public SagaInstancePage find(SagaInstanceQuery query) {
+    if (query == null) {
+      throw new IllegalArgumentException("query must not be null");
+    }
+    List<SagaInstance> probe =
+        visibleInstances().stream()
+            .filter(i -> query.matches(i.status(), i.sagaType(), i.lastModifiedAt(), i.sagaId()))
+            .sorted(SagaInstancePage.ORDER)
+            .limit(query.limit() + 1L)
+            .toList();
+    return SagaInstancePage.of(probe, query.limit());
+  }
+
+  @Override
+  public InstanceCounts countByStatus(Set<String> sagaTypes) {
+    if (sagaTypes == null) {
+      throw new IllegalArgumentException("sagaTypes must not be null");
+    }
+    Map<SagaStatus, Long> byStatus = new EnumMap<>(SagaStatus.class);
+    long compensationFailedUnresolved = 0;
+    long failedUnresolved = 0;
+    for (SagaInstance instance : visibleInstances()) {
+      if (!sagaTypes.isEmpty() && !sagaTypes.contains(instance.sagaType())) {
+        continue;
+      }
+      byStatus.merge(instance.status(), 1L, Long::sum);
+      if (!instance.isResolved() && instance.status() == SagaStatus.COMPENSATION_FAILED) {
+        compensationFailedUnresolved++;
+      } else if (!instance.isResolved() && instance.status() == SagaStatus.FAILED) {
+        failedUnresolved++;
+      }
+    }
+    return new InstanceCounts(byStatus, compensationFailedUnresolved, failedUnresolved);
+  }
+
+  /** Returns the committed lifecycle entries of an instance, in stored order. */
+  @Override
+  public List<SagaLifecycleEntry> history(String sagaId) {
+    return storedHistory(sagaId).stream().map(StoredEntry::entry).toList();
+  }
+
+  private List<SagaInstance> visibleInstances() {
+    return activeScope().map(scope -> viewOf(scope).all()).orElseGet(committedState::all);
+  }
+
   /**
-   * Returns the committed lifecycle history of an instance, in stored order.
+   * Returns the committed lifecycle history of an instance, in stored order, with sequence numbers.
    *
    * @param sagaId the saga instance identifier; must not be {@code null}
    * @return an unmodifiable list; empty if none was committed
    * @throws IllegalArgumentException if {@code sagaId} is {@code null}
    */
-  public List<StoredEntry> history(String sagaId) {
+  public List<StoredEntry> storedHistory(String sagaId) {
     requireSagaId(sagaId);
     return committedState.history(sagaId);
   }

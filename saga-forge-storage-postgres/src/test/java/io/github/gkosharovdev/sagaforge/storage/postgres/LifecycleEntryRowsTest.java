@@ -48,13 +48,14 @@ class LifecycleEntryRowsTest {
   }
 
   @Test
-  @DisplayName("INSERT_HISTORY names the fourteen columns in bind order")
-  void insertNamesFourteenColumnsInBindOrder() {
+  @DisplayName("INSERT_HISTORY names the sixteen columns in bind order")
+  void insertNamesSixteenColumnsInBindOrder() {
     assertThat(LifecycleEntryRows.INSERT_HISTORY)
         .contains(
             "(saga_id, sequence_number, kind, step_name, touched_aggregates, outcome_step, "
                 + "failure_step_name, failure_cause_type, failure_message, failure_failed_at, "
-                + "failure_classification, failure_attempts, occurred_at, compensation_trigger)")
-        .contains("VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)");
+                + "failure_classification, failure_attempts, occurred_at, compensation_trigger, operator, "
+                + "operator_reason)")
+        .contains("VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)");
   }
 }

@@ -34,13 +34,21 @@ with your own bean.
 | `saga-forge.telemetry.record-association-values` | `false` | Record association values (an order id, say) on spans. |
 | `saga-forge.telemetry.record-contents` | `false` | Record saga event and command contents (`toString`, at most 1,000 characters) on spans. |
 | `saga-forge.telemetry.record-failure-messages` | `false` | Record failure messages and exception events on spans; the failure's type is always recorded. |
+| `saga-forge.telemetry.instance-count-interval` | `30s` | How often the `saga_forge.instances` gauge recounts the sagas by status. |
+| `saga-forge.recovery.enabled` | `true` | Whether the runtime runs recovery sweeps on its own. |
+| `saga-forge.recovery.interval` | `1m` | The time between two sweeps. |
+| `saga-forge.recovery.stall-age` | `5m` | How long a compensating saga stays untouched before a sweep resumes it. |
+| `saga-forge.recovery.batch-size` | `100` | Most sagas of each kind one sweep handles (1 to 1,000). |
+| `saga-forge.recovery.abandonment-age` | `15m` | How long a created saga with no completed step waits before a sweep handles it. |
+| `saga-forge.recovery.abandoned-start-policy` | `report` | `report` logs and counts an abandoned start; `fail` ends it `FAILED`. |
+| `saga-forge.operations.expose-context-values` | `false` | Whether the `sagas` endpoint shows a saga's context values; they may hold personal data. |
 
 
 ## Schema and upgrades
 
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
-  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`.
+  `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`, `-015.sql`.
 - A **new database** gets `schema.sql` only, through your migration tool (Flyway/Liquibase) or, in development,
   `saga-forge.storage.postgres.initialize-schema=always`. The current `schema.sql` already contains every upgrade.
 - The **upgrade scripts** bring a database created by an earlier schema forward, in order; each names the schema it
@@ -52,6 +60,8 @@ with your own bean.
   commands.
 - `schema-upgrade-013.sql` (after `-017.sql`) creates the leadership table `saga_message_store_leader` and drops the
   heartbeat table `saga_message_store_consumer`. Stop every instance before applying it.
+- `schema-upgrade-015.sql` (after `-013.sql`) adds an instance's `resolution` and `compensation_round`, the operator
+  columns of `saga_lifecycle_history` and the indexes the instance listing and the recovery sweeps use.
 - Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
   startup fails if tables are missing, naming them.
 
@@ -81,8 +91,7 @@ management.endpoints.web.exposure.include=health,sagaforge
   standby, `leader` as `holderId@holderHost`. Spring Boot leaves `DEGRADED` out of the overall health unless you add
   it to `management.endpoint.health.status.order` (see [Running several instances](#running-several-instances)).
 - Switch them off with `management.endpoint.sagaforge.enabled=false` and `management.health.sagaforge.enabled=false`.
-- There is no endpoint for saga instances and no write action yet; inspect `saga_instance`, `saga_context` and
-  `saga_lifecycle_history` directly.
+- The `sagas` endpoint lists, shows and repairs saga instances; see [Operating saga instances](#operating-saga-instances).
 
 ## OpenTelemetry
 
@@ -123,10 +132,11 @@ Spans (instrumentation scope `io.github.gkosharovdev.sagaforge`):
 | `saga_forge.compensation` | internal | compensation | `saga_forge.saga.type`, `saga_forge.step`, `saga_forge.compensation.status`, `saga_forge.compensation.trigger` | `saga_forge.saga.id`, `saga_forge.unit_of_work.id` |
 | `saga_forge.delivery` | consumer | message the transport delivers | `messaging.system`=`saga_forge.inmemory`, `messaging.operation.type`=`process`, `saga_forge.message.kind`, `saga_forge.payload.type`, `error.type` | `messaging.message.id`, `saga_forge.delivery.attempt`; a failed outbox command: `saga_forge.command.classification` (`final`, `transient`, `unclassified`), and `saga_forge.command.reported`=`true` once its saga was told |
 | `saga_forge.event.ignored` | internal | event no saga type reacts to | `saga_forge.event.type` | content\* |
+| `saga_forge.operation` | internal | repair | `saga_forge.saga.type`, `saga_forge.operation.action`, `saga_forge.operation.result` | `saga_forge.saga.id`, `saga_forge.operator` |
 
 Events on `saga_forge.handle`: `saga_forge.saga.started`, `saga_forge.saga.ended` (`saga_forge.saga.outcome`),
 `saga_forge.retry.scheduled` (`saga_forge.attempt.number`, `saga_forge.retry.wait` in ms),
-`saga_forge.compensation.started`. When a transport reports a failed outbox command, the runtime's reaction has a
+`saga_forge.compensation.started`. A start step that adopted a stranded `CREATED` instance sets `saga_forge.start.recovered`=`true` on its `saga_forge.handle` span. When a transport reports a failed outbox command, the runtime's reaction has a
 `saga_forge.handle` span of its own, with `saga_forge.command.type`, `saga_forge.compensation.trigger`=`COMMAND_FAILED`
 and `saga_forge.failure.classification` (`FINAL` or `EXHAUSTED`), and `saga_forge.handling.outcome` `COMPENSATED`,
 `COMPENSATION_FAILED` or `IGNORED`. \* off by default; failure messages (`saga_forge.failure.message` and exception
@@ -147,6 +157,9 @@ Metrics:
 | `saga_forge.message_store.oldest_unconsumed.age` | gauge | s | — |
 | `saga_forge.relay.active` | gauge | — | 1 while this instance's relay leads its message store, else 0 |
 | `saga_forge.relay.leadership_changes` | counter | — | `saga_forge.leadership.change` (`acquired`, `lost`, `released`) |
+| `saga_forge.operations` | counter | — | `saga_forge.operation.action` (`resume-compensation`, `compensate`, `resolve`), `saga_forge.operation.result` (`APPLIED` or the reason it was not) |
+| `saga_forge.recovery` | counter | — | `saga_forge.recovery.kind` (`compensation_resumed`, `start_reported`, `start_failed`, `error`) |
+| `saga_forge.instances` | gauge | `{saga}` | `saga_forge.saga.status`, `saga_forge.resolved`; recounted every `saga-forge.telemetry.instance-count-interval` |
 
 A deadline delivery's `saga_forge.handle` span carries `saga_forge.deadline.name`; a delivery span of a message with a
 due time carries `saga_forge.message.not_before` on its first attempt. A deadline that arrives when its instance no
@@ -295,8 +308,119 @@ after its saga compensated runs its handler again but does not compensate twice.
 |---|---|---|
 | `RUNNING` | committed, waiting for the next event | none; a saga waits indefinitely (no timeouts) |
 | `COMPLETED` | ended at an `@EndSaga` step (the outcome is its name) | none |
-| `COMPENSATING` | compensations are being run | resumes on the next event for the instance |
+| `COMPENSATING` | compensations are being run | resumes on the next event, or by a recovery sweep once it is untouched for `stall-age`; `resume-compensation` |
 | `COMPENSATED` | all committed steps undone; the trigger says why (a `@StartCompensation` step, a step's `FINAL` or `EXHAUSTED` failure, or a failed outbox command, `COMMAND_FAILED`) | none |
-| `FAILED` | an unclassified failure; committed effects stay in place | investigate; no resume path |
-| `COMPENSATION_FAILED` | a compensation failed; the instance shows what was and was not undone | fix by hand; no operator API yet |
-| `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | investigate |
+| `FAILED` | an unclassified failure; committed effects stay in place | investigate, then `compensate` or `resolve`; no retry of the failed step yet |
+| `COMPENSATION_FAILED` | a compensation failed; the instance shows what was and was not undone | fix the cause, then `resume-compensation`; or undo by hand and `resolve` |
+| `CREATED` | created, first unit of work not finished (a crash at that moment strands it) | a redelivered start event adopts it; a sweep reports it after `abandonment-age`; `compensate` |
+
+## Operating saga instances
+
+Every runtime has an operations API, `SagaRuntime.operations()` (`SagaOperations`), and the starter exposes it as the
+`sagas` Actuator endpoint. It finds instances, repairs one at a time and runs recovery sweeps.
+
+### Finding instances
+
+- `list(SagaInstanceQuery)` returns one page, oldest modified first, filtered by status, saga type and modification
+  time, with a `PageCursor` for the next page (`limit` 1 to 500, 50 by default). Pages are read one by one, so an
+  instance that changes between two pages may appear on both or neither.
+- `find(sagaId)`, `findByAssociation(name, value)`, `history(sagaId)` (the lifecycle history, oldest first),
+  `context(sagaId)` and `count(statuses)` (per status, plus the `FAILED` and `COMPENSATION_FAILED` sagas no operator
+  has resolved).
+
+### The three repairs
+
+Each repair takes an `OperatorRequest` (who, and why; both required) and returns `RepairResult.Applied` with the
+instance after the repair, or `RepairResult.NotApplied` with the reason (`NOT_FOUND`, `WRONG_STATUS`,
+`ALREADY_RESOLVED`) and the status it found. A repair runs under the instance's lock and re-reads the instance first,
+so two operators, or an operator and a sweep, never repair the same instance twice.
+
+| Repair | Applies to | Effect |
+|---|---|---|
+| `resumeCompensation` | `COMPENSATION_FAILED`, or `COMPENSATING` | starts a new compensation round: failed compensations run again, compensated ones do not; ends `COMPENSATED` (outcome event id `sagaId:COMPENSATED:r<round>`) or `COMPENSATION_FAILED` again |
+| `compensate` | `CREATED`, `RUNNING`, `FAILED` | compensates every committed step, most recent first; the trigger is `OPERATOR_REQUEST` with the request |
+| `markResolved` | `FAILED`, `COMPENSATION_FAILED` | records that the saga was handled by hand; the status stays, the unresolved counts drop |
+
+Every repair writes a lifecycle entry (`COMPENSATION_RESUMED`, `COMPENSATION_STARTED` or `RESOLVED`) naming the
+operator and the reason. A compensation that runs again must be safe to run again: pass its `CommandId` on as the
+idempotency key.
+
+In a fixture test, `whenOperator` runs a repair and delivers what it sent
+(`saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaOperationsFixtureTest.java`):
+
+```java
+    fixture
+        .whenOperator(
+            operations ->
+                operations.resumeCompensation(
+                    sagaId, new OperatorRequest("alice", "provider back, refund retried")))
+        .instance(OrderProcessingSaga.class, "o-1")
+        .expectStatus(SagaStatus.COMPENSATED)
+        .expectCommands(new RefundPaymentCommand(sagaId, "payment-1", AMOUNT))
+        .expectHistory(
+            SagaLifecycleEventKind.COMPENSATION_FAILED,
+            SagaLifecycleEventKind.COMPENSATION_RESUMED,
+            SagaLifecycleEventKind.COMPENSATED)
+        .expectOutcomeEvent(
+            SagaCompensated.class,
+            compensated -> compensated.eventId().equals(sagaId + ":COMPENSATED:r1"));
+```
+
+`Then.expectResolved()` and `expectNotResolved()` check a resolution.
+
+### Recovery sweeps
+
+With the starter, every application instance sweeps once a minute (`saga-forge.recovery.*`); a runtime assembled by
+hand sweeps only with `SagaRuntime.Builder.recovery(RecoverySettings.enabledWithDefaults())`, and `recover()` runs one
+sweep on demand. A sweep:
+
+- resumes the compensation of a saga `COMPENSATING` and untouched for `stall-age` (an instance whose compensation was
+  interrupted and that no event reaches);
+- handles a saga still `CREATED` with no completed step after `abandonment-age` (its first unit of work never
+  committed): with `abandoned-start-policy=report` (the default) it logs `saga.recovery.startAbandoned` once per
+  process and counts it; with `fail` it ends it `FAILED`.
+
+`report` is the default because a start ended `FAILED` no longer matches its start event: a redelivered start event
+would then start a second saga. Left `CREATED`, the instance is adopted by a redelivered start event, which runs the
+start step on it and records `START_RECOVERED`. Choose `fail` when the start event will not come again.
+
+Sweeps on several instances are safe without leadership: each repair re-checks the instance under its lock. Each
+sweep handles at most `batch-size` sagas of each kind; the rest wait for the next sweep.
+
+### The `sagas` endpoint
+
+```properties
+management.endpoints.web.exposure.include=health,sagaforge,sagas
+```
+
+- `GET /actuator/sagas?status=FAILED&status=COMPENSATION_FAILED&type=…&modifiedBefore=…&modifiedAfter=…&limit=50&cursor=…`
+  returns one page, the `next` cursor and the counts per status. A bad parameter is a 400.
+- `GET /actuator/sagas/{sagaId}` returns the instance and its history; 404 if unknown. The saga's business state is
+  never shown, its context values only with `saga-forge.operations.expose-context-values=true`.
+- `POST /actuator/sagas/{sagaId}/{action}` with `{"reason": "…"}`, where `action` is `resume-compensation`,
+  `compensate` or `resolve`. The authenticated principal is the operator; without one the answer is 401. A repair
+  that does not apply is a 409 with the reason and the status.
+
+The write operation is off until `management.endpoint.sagas.access=unrestricted`. Only allow it behind Spring
+Security, with a role for operators
+(`saga-forge-example-spring/src/test/java/io/github/gkosharovdev/sagaforge/example/spring/SagasEndpointWebContainerTest.java`):
+
+```java
+    @Bean
+    SecurityFilterChain actuatorSecurity(HttpSecurity http) throws Exception {
+      http.authorizeHttpRequests(
+              requests ->
+                  requests
+                      .requestMatchers(HttpMethod.POST, "/actuator/sagas/**")
+                      .hasRole("OPERATOR")
+                      .anyRequest()
+                      .permitAll())
+          .httpBasic(Customizer.withDefaults())
+          .csrf(csrf -> csrf.disable());
+      return http.build();
+    }
+```
+
+The `sagaforge` health contributor carries `instances.compensationFailed` and `instances.failedUnresolved`; they never
+change its status. Telemetry: a `saga_forge.operation` span and the `saga_forge.operations` counter per repair (action
+and result), the `saga_forge.recovery` counter per sweep result, and the `saga_forge.instances` gauge per status.

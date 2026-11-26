@@ -49,5 +49,23 @@ public enum SagaLifecycleEventKind {
   /**
    * Every applicable compensation committed: the instance is now {@link SagaStatus#COMPENSATED}.
    */
-  COMPENSATED
+  COMPENSATED,
+  /**
+   * An operator or the recovery resumed the compensation of a {@code COMPENSATION_FAILED} or
+   * stalled {@code COMPENSATING} instance, now {@link SagaStatus#COMPENSATING} ({@code
+   * specs/015-saga-operations} FR-012); the entry names the operator.
+   */
+  COMPENSATION_RESUMED,
+  /**
+   * An operator resolved a {@code FAILED} or {@code COMPENSATION_FAILED} instance; its status is
+   * unchanged ({@code specs/015-saga-operations} FR-016). The entry names the operator.
+   */
+  RESOLVED,
+  /**
+   * The start event of a still-{@code CREATED} instance whose first unit of work never committed
+   * was delivered again, and the start step ran on that instance instead of being rejected as a
+   * duplicate start ({@code specs/015-saga-operations} FR-021). Handed over with that unit of
+   * work's write, before its own entries.
+   */
+  START_RECOVERED
 }

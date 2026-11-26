@@ -1,5 +1,8 @@
 package io.github.gkosharovdev.sagaforge.spring;
 
+import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
+import io.github.gkosharovdev.sagaforge.runtime.AbandonedStartPolicy;
+import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import io.github.gkosharovdev.sagaforge.spring.events.ApplicationEventsMode;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -37,6 +40,10 @@ public class SagaForgeProperties {
 
   private final OutcomeEvents outcomeEvents = new OutcomeEvents();
 
+  private final Recovery recovery = new Recovery();
+
+  private final Operations operations = new Operations();
+
   /**
    * Checks values the binder cannot check itself.
    *
@@ -58,6 +65,48 @@ public class SagaForgeProperties {
               + ".",
           "Set it to a positive duration such as 30s, or remove it to use the default.");
     }
+    requirePositive("saga-forge.recovery.interval", recovery.getInterval());
+    requirePositive("saga-forge.recovery.stall-age", recovery.getStallAge());
+    requirePositive("saga-forge.recovery.abandonment-age", recovery.getAbandonmentAge());
+    requirePositive(
+        "saga-forge.telemetry.instance-count-interval", telemetry.getInstanceCountInterval());
+    int batchSize = recovery.getBatchSize();
+    if (batchSize < 1 || batchSize > RecoverySettings.MAX_BATCH_SIZE) {
+      throw new SagaForgeConfigurationException(
+          "saga-forge.recovery.batch-size must be between 1 and "
+              + RecoverySettings.MAX_BATCH_SIZE
+              + ", but is "
+              + batchSize
+              + ".",
+          "Set it to a number such as 100, or remove it to use the default.");
+    }
+    if (recovery.getAbandonedStartPolicy() == null) {
+      throw new SagaForgeConfigurationException(
+          "saga-forge.recovery.abandoned-start-policy must be report or fail.",
+          "Set it to report or fail, or remove it to use the default (report).");
+    }
+  }
+
+  private static void requirePositive(String property, Duration value) {
+    if (value == null || value.isNegative() || value.isZero()) {
+      throw new SagaForgeConfigurationException(
+          property + " must be a positive duration, but is " + value + ".",
+          "Set it to a positive duration such as 1m, or remove it to use the default.");
+    }
+  }
+
+  /**
+   * The runtime's recovery settings from {@code saga-forge.recovery.*}; call {@link #validate()}
+   * first.
+   */
+  public RecoverySettings recoverySettings() {
+    return new RecoverySettings(
+        recovery.isEnabled(),
+        recovery.getInterval(),
+        recovery.getStallAge(),
+        recovery.getBatchSize(),
+        recovery.getAbandonmentAge(),
+        recovery.getAbandonedStartPolicy());
   }
 
   public boolean isEnabled() {
@@ -94,6 +143,104 @@ public class SagaForgeProperties {
 
   public OutcomeEvents getOutcomeEvents() {
     return outcomeEvents;
+  }
+
+  public Recovery getRecovery() {
+    return recovery;
+  }
+
+  public Operations getOperations() {
+    return operations;
+  }
+
+  /**
+   * {@code saga-forge.recovery.*}: sweeps that resume stalled compensations and handle abandoned
+   * starts (specs/015-saga-operations).
+   */
+  public static class Recovery {
+
+    /** Whether the runtime runs recovery sweeps on its own. */
+    private boolean enabled = true;
+
+    /** The time between two sweeps. */
+    private Duration interval = Duration.ofMinutes(1);
+
+    /** How long a compensating saga stays unmodified before a sweep resumes it. */
+    private Duration stallAge = Duration.ofMinutes(5);
+
+    /** How many sagas of each kind one sweep handles at most. */
+    private int batchSize = 100;
+
+    /** How long a created saga with no completed step waits before a sweep handles it. */
+    private Duration abandonmentAge = Duration.ofMinutes(15);
+
+    /**
+     * What a sweep does with an abandoned start: report logs and counts it, fail ends it FAILED.
+     */
+    private AbandonedStartPolicy abandonedStartPolicy = AbandonedStartPolicy.REPORT;
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    public Duration getInterval() {
+      return interval;
+    }
+
+    public void setInterval(Duration interval) {
+      this.interval = interval;
+    }
+
+    public Duration getStallAge() {
+      return stallAge;
+    }
+
+    public void setStallAge(Duration stallAge) {
+      this.stallAge = stallAge;
+    }
+
+    public int getBatchSize() {
+      return batchSize;
+    }
+
+    public void setBatchSize(int batchSize) {
+      this.batchSize = batchSize;
+    }
+
+    public Duration getAbandonmentAge() {
+      return abandonmentAge;
+    }
+
+    public void setAbandonmentAge(Duration abandonmentAge) {
+      this.abandonmentAge = abandonmentAge;
+    }
+
+    public AbandonedStartPolicy getAbandonedStartPolicy() {
+      return abandonedStartPolicy;
+    }
+
+    public void setAbandonedStartPolicy(AbandonedStartPolicy abandonedStartPolicy) {
+      this.abandonedStartPolicy = abandonedStartPolicy;
+    }
+  }
+
+  /** {@code saga-forge.operations.*}: the sagas Actuator endpoint (specs/015-saga-operations). */
+  public static class Operations {
+
+    /** Whether the sagas endpoint shows a saga's context values; they may hold personal data. */
+    private boolean exposeContextValues;
+
+    public boolean isExposeContextValues() {
+      return exposeContextValues;
+    }
+
+    public void setExposeContextValues(boolean exposeContextValues) {
+      this.exposeContextValues = exposeContextValues;
+    }
   }
 
   /**
@@ -232,6 +379,9 @@ public class SagaForgeProperties {
      */
     private boolean recordFailureMessages;
 
+    /** How often the saga_forge.instances gauge recounts the saga instances by status. */
+    private Duration instanceCountInterval = SagaTelemetrySettings.DEFAULT_INSTANCE_COUNT_INTERVAL;
+
     private final Signal tracing = new Signal();
 
     private final Signal metrics = new Signal();
@@ -266,6 +416,14 @@ public class SagaForgeProperties {
 
     public void setRecordFailureMessages(boolean recordFailureMessages) {
       this.recordFailureMessages = recordFailureMessages;
+    }
+
+    public Duration getInstanceCountInterval() {
+      return instanceCountInterval;
+    }
+
+    public void setInstanceCountInterval(Duration instanceCountInterval) {
+      this.instanceCountInterval = instanceCountInterval;
     }
 
     public Signal getTracing() {

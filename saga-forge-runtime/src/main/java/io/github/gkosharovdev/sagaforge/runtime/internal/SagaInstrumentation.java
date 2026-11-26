@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.github.gkosharovdev.sagaforge.core.operations.InstanceCounts;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
@@ -9,6 +11,8 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
+import io.opentelemetry.api.metrics.ObservableLongGauge;
+import io.opentelemetry.api.metrics.ObservableLongMeasurement;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
@@ -16,9 +20,12 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.api.trace.TracerProvider;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * The runtime's OpenTelemetry instrumentation ({@code specs/010-otel-observability} research §1 to
@@ -43,6 +50,9 @@ final class SagaInstrumentation {
   static final String COMMAND = "saga_forge.command";
   static final String COMPENSATION = "saga_forge.compensation";
   static final String EVENT_IGNORED = "saga_forge.event.ignored";
+
+  /** An operator repair ({@code specs/015-saga-operations} research R13). */
+  static final String OPERATION = "saga_forge.operation";
 
   static final AttributeKey<String> SAGA_TYPE = AttributeKey.stringKey("saga_forge.saga.type");
   static final AttributeKey<String> SAGA_ID = AttributeKey.stringKey("saga_forge.saga.id");
@@ -85,6 +95,18 @@ final class SagaInstrumentation {
   static final AttributeKey<String> DEADLINE_EVENT =
       AttributeKey.stringKey("saga_forge.deadline.event");
 
+  static final AttributeKey<String> OPERATION_ACTION =
+      AttributeKey.stringKey("saga_forge.operation.action");
+  static final AttributeKey<String> OPERATION_RESULT =
+      AttributeKey.stringKey("saga_forge.operation.result");
+  static final AttributeKey<String> OPERATOR = AttributeKey.stringKey("saga_forge.operator");
+  static final AttributeKey<String> RECOVERY_KIND =
+      AttributeKey.stringKey("saga_forge.recovery.kind");
+  static final AttributeKey<Boolean> START_RECOVERED =
+      AttributeKey.booleanKey("saga_forge.start.recovered");
+  static final AttributeKey<String> SAGA_STATUS = AttributeKey.stringKey("saga_forge.saga.status");
+  static final AttributeKey<Boolean> RESOLVED = AttributeKey.booleanKey("saga_forge.resolved");
+
   /**
    * Attributes that may appear on metrics: bounded by the model and fixed enumerations (FR-009).
    */
@@ -105,7 +127,12 @@ final class SagaInstrumentation {
           COMPENSATION_TRIGGER,
           ERROR_TYPE,
           DEADLINE_NAME,
-          DEADLINE_EVENT);
+          DEADLINE_EVENT,
+          OPERATION_ACTION,
+          OPERATION_RESULT,
+          RECOVERY_KIND,
+          SAGA_STATUS,
+          RESOLVED);
 
   static final String SAGA_STARTED_COUNTER = "saga_forge.saga.started";
   static final String SAGA_ENDED_COUNTER = "saga_forge.saga.ended";
@@ -118,6 +145,18 @@ final class SagaInstrumentation {
    * ignored} (017).
    */
   static final String DEADLINES_COUNTER = "saga_forge.deadlines";
+
+  /** Operator repairs by {@code action} and {@code result} (015). */
+  static final String OPERATIONS_COUNTER = "saga_forge.operations";
+
+  /**
+   * Recovery sweep actions by {@code kind}: {@code compensation_resumed}, {@code start_reported},
+   * {@code start_failed} or {@code error} (015).
+   */
+  static final String RECOVERY_COUNTER = "saga_forge.recovery";
+
+  /** Saga instances by status and resolution, refreshed at most once per interval (015). */
+  static final String INSTANCES_GAUGE = "saga_forge.instances";
 
   private static final int CONTENT_LIMIT = 1_000;
 
@@ -190,6 +229,82 @@ final class SagaInstrumentation {
 
   Meter meter() {
     return meter;
+  }
+
+  /**
+   * Registers the {@code saga_forge.instances} gauge: one series per (status, resolved), read from
+   * {@code counts} at most once per {@code refresh} as measured by {@code now}; a failing read
+   * keeps the last counts.
+   *
+   * @return closes the gauge; never throws
+   */
+  AutoCloseable instancesGauge(
+      Supplier<InstanceCounts> counts, Duration refresh, Supplier<Instant> now) {
+    CachedCounts cache = new CachedCounts(counts, refresh, now);
+    try {
+      ObservableLongGauge gauge =
+          meter
+              .gaugeBuilder(INSTANCES_GAUGE)
+              .ofLongs()
+              .setDescription("Saga instances by status and resolution")
+              .setUnit("{instance}")
+              .buildWithCallback(measurement -> cache.record(measurement, this));
+      return () -> {
+        try {
+          gauge.close();
+        } catch (RuntimeException failure) {
+          failed(INSTANCES_GAUGE, failure);
+        }
+      };
+    } catch (RuntimeException failure) {
+      failed(INSTANCES_GAUGE, failure);
+      return () -> {};
+    }
+  }
+
+  /** The gauge's last counts and when they were read. Thread-safe. */
+  private static final class CachedCounts {
+
+    private final Supplier<InstanceCounts> source;
+    private final Duration refresh;
+    private final Supplier<Instant> now;
+    private InstanceCounts last;
+    private Instant readAt;
+
+    CachedCounts(Supplier<InstanceCounts> source, Duration refresh, Supplier<Instant> now) {
+      this.source = source;
+      this.refresh = refresh;
+      this.now = now;
+    }
+
+    synchronized void record(ObservableLongMeasurement measurement, SagaInstrumentation owner) {
+      Instant at = now.get();
+      if (last == null || !at.isBefore(readAt.plus(refresh))) {
+        try {
+          last = source.get();
+          readAt = at;
+        } catch (RuntimeException failure) {
+          owner.failed(INSTANCES_GAUGE, failure);
+          if (last == null) {
+            return;
+          }
+        }
+      }
+      for (SagaStatus status : SagaStatus.values()) {
+        long total = last.get(status);
+        long unresolved =
+            status == SagaStatus.FAILED
+                ? last.failedUnresolved()
+                : status == SagaStatus.COMPENSATION_FAILED
+                    ? last.compensationFailedUnresolved()
+                    : total;
+        measurement.record(unresolved, Attributes.of(SAGA_STATUS, status.name(), RESOLVED, false));
+        if (status == SagaStatus.FAILED || status == SagaStatus.COMPENSATION_FAILED) {
+          measurement.record(
+              total - unresolved, Attributes.of(SAGA_STATUS, status.name(), RESOLVED, true));
+        }
+      }
+    }
   }
 
   /**

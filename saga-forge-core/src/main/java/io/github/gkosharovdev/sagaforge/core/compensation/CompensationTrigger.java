@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.compensation;
 
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import java.time.Instant;
@@ -32,6 +33,10 @@ import java.time.Instant;
  * @param at when compensation started; non-null
  * @param deadlineName the expired deadline; non-null if and only if {@code kind ==
  *     DEADLINE_EXPIRED} ({@code specs/017-saga-deadlines})
+ * @param operatorRequest who asked for compensation and why; non-null if and only if {@code kind ==
+ *     OPERATOR_REQUEST} ({@code specs/015-saga-operations}). For that kind {@code failure} is
+ *     optional (the {@code FAILED} instance's failure, of any classification) and {@code stepName}
+ *     is the most recently completed step, or the start step when none completed
  */
 public record CompensationTrigger(
     CompensationTriggerKind kind,
@@ -40,7 +45,8 @@ public record CompensationTrigger(
     String commandType,
     SagaFailure failure,
     Instant at,
-    String deadlineName) {
+    String deadlineName,
+    OperatorRequest operatorRequest) {
 
   public CompensationTrigger {
     if (kind == null) {
@@ -69,19 +75,47 @@ public record CompensationTrigger(
         "deadlineName",
         "kind is DEADLINE_EXPIRED",
         kind);
-    if (outcome == (failure != null)) {
+    boolean operator = kind == CompensationTriggerKind.OPERATOR_REQUEST;
+    if (operator != (operatorRequest != null)) {
+      throw new IllegalArgumentException(
+          "operatorRequest must be non-null if and only if kind is OPERATOR_REQUEST, but kind is "
+              + kind);
+    }
+    if (!operator && outcome == (failure != null)) {
       throw new IllegalArgumentException(
           "failure must be non-null if and only if kind is a failure kind, but "
               + "kind is "
               + kind);
     }
-    if (failure != null) {
+    if (failure != null && !operator) {
       requireClassification(kind, failure.classification());
       if (!failure.stepName().equals(stepName)) {
         throw new IllegalArgumentException(
             "stepName " + stepName + " must be the failed step " + failure.stepName());
       }
     }
+  }
+
+  /**
+   * A trigger no operator asked for, as before {@code specs/015-saga-operations}.
+   *
+   * @param kind what started compensation; not {@code OPERATOR_REQUEST}
+   * @param stepName as for the canonical constructor
+   * @param eventType as for the canonical constructor
+   * @param commandType as for the canonical constructor
+   * @param failure as for the canonical constructor
+   * @param at when compensation started
+   * @param deadlineName as for the canonical constructor
+   */
+  public CompensationTrigger(
+      CompensationTriggerKind kind,
+      String stepName,
+      String eventType,
+      String commandType,
+      SagaFailure failure,
+      Instant at,
+      String deadlineName) {
+    this(kind, stepName, eventType, commandType, failure, at, deadlineName, null);
   }
 
   /**
@@ -199,6 +233,28 @@ public record CompensationTrigger(
         CompensationTriggerKind.COMMAND_FAILED, sender, null, report.commandType(), failure, at);
   }
 
+  /**
+   * An {@code OPERATOR_REQUEST} trigger: an operator asked the runtime to compensate a {@code
+   * RUNNING} or {@code FAILED} instance ({@code specs/015-saga-operations} FR-013).
+   *
+   * @param request who asked and why
+   * @param stepName the most recently completed step, or the start step when none completed
+   * @param failure the instance's recorded failure when it was {@code FAILED}, otherwise {@code
+   *     null}
+   * @param at when compensation started
+   * @return the trigger
+   * @throws IllegalArgumentException if {@code request} is {@code null} or a rule of the canonical
+   *     constructor is violated
+   */
+  public static CompensationTrigger byOperator(
+      OperatorRequest request, String stepName, SagaFailure failure, Instant at) {
+    if (request == null) {
+      throw new IllegalArgumentException("request must not be null");
+    }
+    return new CompensationTrigger(
+        CompensationTriggerKind.OPERATOR_REQUEST, stepName, null, null, failure, at, null, request);
+  }
+
   private static void requirePresentIff(
       String value,
       boolean required,
@@ -223,7 +279,7 @@ public record CompensationTrigger(
           case COMMAND_FAILED ->
               classification == FailureClassification.FINAL
                   || classification == FailureClassification.EXHAUSTED;
-          case FAILURE_OUTCOME, DEADLINE_EXPIRED -> false;
+          case FAILURE_OUTCOME, DEADLINE_EXPIRED, OPERATOR_REQUEST -> false;
         };
     if (!allowed) {
       String expected =

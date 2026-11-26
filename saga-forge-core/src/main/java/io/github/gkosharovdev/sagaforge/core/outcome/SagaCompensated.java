@@ -43,7 +43,26 @@ public record SagaCompensated(
       Map<String, String> associations,
       Instant occurredAt,
       OutcomeTrigger trigger) {
+    return of(sagaType, sagaId, associations, occurredAt, trigger, 0);
+  }
+
+  /**
+   * The outcome of {@code sagaId} in compensation round {@code compensationRound}: {@link
+   * #eventId()} is {@code sagaId:COMPENSATED}, with {@code :r<round>} appended from round 1 on.
+   */
+  public static SagaCompensated of(
+      String sagaType,
+      String sagaId,
+      Map<String, String> associations,
+      Instant occurredAt,
+      OutcomeTrigger trigger,
+      int compensationRound) {
     return new SagaCompensated(
-        Values.eventId(sagaId, "COMPENSATED"), sagaType, sagaId, associations, occurredAt, trigger);
+        Values.eventId(sagaId, "COMPENSATED", compensationRound),
+        sagaType,
+        sagaId,
+        associations,
+        occurredAt,
+        trigger);
   }
 }

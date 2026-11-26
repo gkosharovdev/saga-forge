@@ -117,7 +117,7 @@ class OrderProcessingSagaRuntimeTest {
             completed -> assertThat(completed.outcomeStep()).isEqualTo("completeOrder"));
 
     List<SagaLifecycleEntry> history =
-        storage.history(result.sagaId()).stream().map(StoredEntry::entry).toList();
+        storage.storedHistory(result.sagaId()).stream().map(StoredEntry::entry).toList();
     assertThat(history)
         .extracting(SagaLifecycleEntry::kind)
         .containsExactly(
