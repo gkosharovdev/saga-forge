@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -72,6 +74,26 @@ final class PostgresTestSupport {
     dataSource.setUser(POSTGRES.getUsername());
     dataSource.setPassword(POSTGRES.getPassword());
     return dataSource;
+  }
+
+  /**
+   * A connection pool on the shared container, as an application would pass one. {@link
+   * #newDataSource()} opens a new physical connection on every {@code getConnection()} (TCP
+   * connect, authentication, a new server process), which dominates the time of the volume tests;
+   * the harnesses that run a relay and a runtime use this instead and close it when their process
+   * stops.
+   *
+   * @param maximumSize the most connections the pool opens
+   */
+  static HikariDataSource newPooledDataSource(int maximumSize) {
+    HikariConfig config = new HikariConfig();
+    config.setJdbcUrl(POSTGRES.getJdbcUrl());
+    config.setUsername(POSTGRES.getUsername());
+    config.setPassword(POSTGRES.getPassword());
+    config.setMaximumPoolSize(maximumSize);
+    config.setMinimumIdle(0);
+    config.setPoolName("saga-forge-test");
+    return new HikariDataSource(config);
   }
 
   /**

@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
  * SC-001, FR-017): each is a {@link SagaRuntime} plus {@link InMemoryTransport} with a {@link
  * DataSource} of its own, as two replicas would be. Both append; only the active relay delivers.
  *
- * <p>The number of SC-001 runs is {@code -Dsaga-forge.sc001.runs} (default 1, about 95 s a run; 20
+ * <p>The number of SC-001 runs is {@code -Dsaga-forge.sc001.runs} (default 1, about 9 s a run; 20
  * for SC-001).
  */
 @Tag("container")

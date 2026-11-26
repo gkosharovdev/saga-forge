@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import com.zaxxer.hikari.HikariDataSource;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageQuery;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
@@ -16,13 +17,12 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarn
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import javax.sql.DataSource;
 
 /**
  * Engine + {@link InMemoryTransport} over PostgreSQL: {@link PostgresStorageProvider}, {@link
  * PostgresSagaContextStore} and {@link PostgresMessageStore} on one database
- * (specs/007-in-memory-transport tasks.md T049). Each {@link #assemble()} opens a new {@link
- * DataSource}, as a restarted process would.
+ * (specs/007-in-memory-transport tasks.md T049). Each {@link #assemble()} opens a new connection
+ * pool, as a restarted process would, and closes the previous one.
  */
 final class PostgresTransportHarness implements AutoCloseable {
 
@@ -33,7 +33,11 @@ final class PostgresTransportHarness implements AutoCloseable {
   private final Class<?>[] model;
   private final TransportSettings settings;
   private MessageStore logOverride;
-  private DataSource dataSource;
+
+  /** Worker threads, the leadership thread, the caller's threads and the test's own queries. */
+  private static final int POOL_SIZE = 20;
+
+  private HikariDataSource dataSource;
   private JdbcTransactionBoundary boundary;
   private PostgresMessageStore log;
   private SagaRuntime engine;
@@ -46,9 +50,10 @@ final class PostgresTransportHarness implements AutoCloseable {
     assemble();
   }
 
-  /** Builds a new engine and transport (not started) on a new DataSource. */
+  /** Builds a new engine and transport (not started) on a new connection pool. */
   PostgresTransportHarness assemble() {
-    dataSource = PostgresTestSupport.newDataSource();
+    closePool();
+    dataSource = PostgresTestSupport.newPooledDataSource(POOL_SIZE);
     boundary = new JdbcTransactionBoundary(dataSource);
     log = new PostgresMessageStore(dataSource, boundary);
     MessageStore used = logOverride != null ? logOverride : log;
@@ -159,5 +164,12 @@ final class PostgresTransportHarness implements AutoCloseable {
   @Override
   public void close() {
     transport.stop(Duration.ofSeconds(5));
+    closePool();
+  }
+
+  private void closePool() {
+    if (dataSource != null) {
+      dataSource.close();
+    }
   }
 }

@@ -373,7 +373,7 @@
   implementation decisions (G-017-08); the fixture duplicates the scheduling (G-017-09); no Spring example or Spring
   container test for deadlines (G-017-10).
 
-- Active/standby relay (013), see memory.md G-013-01 to G-013-06: a message appended on a standby waits for the
+- Active/standby relay (013), see memory.md G-013-01 to G-013-05: a message appended on a standby waits for the
   leader's poll (G-013-01); delivery throughput is one relay's, no partitioned leasing (G-013-02); takeover timing, not
   safety, depends on instance clocks (G-013-03); the redelivery-after-commit failover case is not forced in a test
   (G-013-04); a failover between creation write and first unit of work strands the start (G-013-05, with G-ENG-05).

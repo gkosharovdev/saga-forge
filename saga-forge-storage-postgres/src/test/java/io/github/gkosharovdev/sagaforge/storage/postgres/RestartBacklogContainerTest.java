@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.storage.postgres;
 import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zaxxer.hikari.HikariDataSource;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
@@ -45,7 +46,7 @@ class RestartBacklogContainerTest {
   @DisplayName(
       "SC-005: a 10,000-message backlog is consumed within 60 s, and new work flows meanwhile")
   void backlogDeliveredWithinAMinute() {
-    DataSource dataSource = PostgresTestSupport.newDataSource();
+    HikariDataSource dataSource = PostgresTestSupport.newPooledDataSource(16);
     JdbcTransactionBoundary boundary = new JdbcTransactionBoundary(dataSource);
     PostgresMessageStore log = new PostgresMessageStore(dataSource, boundary);
     LocalTransaction tx = boundary.begin();
@@ -85,10 +86,17 @@ class RestartBacklogContainerTest {
       await(() -> delivered.get() == BACKLOG + 1, Duration.ofSeconds(60), "the backlog");
       long seconds = Duration.ofNanos(System.nanoTime() - started).toSeconds();
       assertThat(seconds).isLessThan(60);
-      assertThat(log.query(MessageQuery.builder().statuses(MessageStatus.UNCONSUMED).build()))
-          .isEmpty();
+      // The receiver counts a delivery before the relay marks it consumed, so the last few may
+      // still be unconsumed for a moment.
+      await(
+          () ->
+              log.query(MessageQuery.builder().statuses(MessageStatus.UNCONSUMED).build())
+                  .isEmpty(),
+          Duration.ofSeconds(10),
+          "the last deliveries to be marked consumed");
     } finally {
       transport.stop(Duration.ofSeconds(5));
+      dataSource.close();
     }
   }
 

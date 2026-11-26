@@ -31,7 +31,7 @@ mvn -pl saga-forge-transport-inmemory,saga-forge-storage-postgres -am verify -Pc
 ```
 
 Expected: 10,000 events over 100 associations, published through both instances, run every step once and in order
-(about 95 s; `-Dsaga-forge.sc001.runs=N` repeats it); the same start event appended through both instances starts one
+(about 9 s; `-Dsaga-forge.sc001.runs=N` repeats it); the same start event appended through both instances starts one
 saga; after instance A's connections are cut, B is `ACTIVE` within lease + check (the tests use 5 s / 1 s / 0.5 s
 timings); 20 forced handovers lose nothing; a stalled leader leases nothing after the freeze. In
 `MultiInstanceDeadlineContainerTest`, deadlines due before, during and after a handover each run their timeout step

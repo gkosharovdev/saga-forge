@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import com.zaxxer.hikari.HikariDataSource;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeasedMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
@@ -25,7 +26,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 final class Replica {
 
-  final CuttableDataSource dataSource = new CuttableDataSource(PostgresTestSupport.newDataSource());
+  /** Pooled like an application's; {@link #stop()} closes it, as the process ending would. */
+  private final HikariDataSource pool = PostgresTestSupport.newPooledDataSource(20);
+
+  final CuttableDataSource dataSource = new CuttableDataSource(pool);
   final CardService cards = new CardService();
   final RecordingLogger runtimeLog = new RecordingLogger();
   final List<Object> delivered = new CopyOnWriteArrayList<>();
@@ -117,5 +121,6 @@ final class Replica {
 
   void stop() {
     transport.stop(Duration.ofSeconds(10));
+    pool.close();
   }
 }

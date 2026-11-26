@@ -1533,4 +1533,8 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
 - **Description**: `MultiInstanceAcceptanceTest.burstThroughBothInstances` (10,000 messages through two instances) takes
   about 95 s per run, so it runs once by default; `-Dsaga-forge.sc001.runs=N` repeats it.
 - **Origin**: `specs/013-active-standby-relay` T024 (implementation, 2026-11-26).
-- **Status**: accepted.
+- **Status**: closed 2026-11-26. The time was the test's connections, not the relay: `PostgresTestSupport.newDataSource()`
+  is a `PGSimpleDataSource`, a new physical connection per `getConnection()`. With a Hikari pool (test scope,
+  `PostgresTestSupport.newPooledDataSource`) in `Replica`, `PostgresTransportHarness` and the 10k restart test, one run
+  takes about 9 s, `DeadlineRestartContainerTest.overdueBacklog` about 34 s instead of about 5 min, and the whole Postgres
+  container suite about 1.5 min. Volume tests over Postgres should use a pooled `DataSource`, as an application does.
