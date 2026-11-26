@@ -1691,3 +1691,19 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   Actuator endpoint naming the store chosen for a deadline model (DI4).
 - **Origin**: `specs/014-publish-once` implementation, 2026-11-26.
 - **Status**: open: run `mvn -Pcontainer-tests verify` and record the result in AGENTS.md.
+
+### G-014-07: The inbound listener must not resolve the runtime when Spring creates it
+- **Description**: Spring creates every `ApplicationListener` bean as soon as the first event is multicast, which Spring
+  Data's mapping context does during startup. `InboundSagaEventListener` first took `SagaRuntime` as a constructor
+  argument, so building it built the runtime, whose startup verification looks up the Spring Data repositories still
+  being created: a circular reference (`SpringHostSpisContainerTest` failed in CI run 45908109841). It now resolves the
+  runtime's event types and the dispatcher on the first published payload (`ObjectProvider` suppliers). Keep any future
+  listener bean free of eager runtime dependencies.
+- **Origin**: CI on `014-publish-once`, 2026-11-26.
+- **Status**: closed, 2026-11-26 (`InboundSagaEventListenerTest.lazyCollaborators`).
+
+### G-017-11: `DeadlineParityTest` can time out under load
+- **Description**: the fixture's deadline parity test waits in real time (10 s) for the in-memory transport to deliver
+  a lapsed hold. It timed out once in a full local build on 2026-11-26 and passed three times out of three alone.
+- **Origin**: `specs/014-publish-once` implementation.
+- **Status**: open (watch in CI; a longer wait or a controllable clock in the transport would remove it).

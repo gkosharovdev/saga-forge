@@ -124,8 +124,12 @@ public class ApplicationEventsConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnBean({SagaRuntime.class, EventDispatcher.class})
     InboundSagaEventListener sagaForgeInboundSagaEventListener(
-        SagaRuntime runtime, EventDispatcher dispatcher) {
-      return new InboundSagaEventListener(runtime.eventTypes(), dispatcher);
+        ObjectProvider<SagaRuntime> runtime, ObjectProvider<EventDispatcher> dispatcher) {
+      // Lazy: Spring creates listener beans when the first event is multicast during startup,
+      // before
+      // the runtime can be built (it verifies the Spring Data repositories being created then).
+      return new InboundSagaEventListener(
+          () -> runtime.getObject().eventTypes(), dispatcher::getObject);
     }
   }
 

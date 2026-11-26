@@ -4,6 +4,7 @@ import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.PayloadApplicationEvent;
@@ -32,8 +33,9 @@ import org.springframework.context.PayloadApplicationEvent;
  */
 public final class InboundSagaEventListener implements ApplicationListener<ApplicationEvent> {
 
-  private final Set<Class<?>> sagaEventTypes;
-  private final EventDispatcher dispatcher;
+  private final Supplier<Set<Class<?>>> sagaEventTypes;
+  private final Supplier<EventDispatcher> dispatcher;
+  private volatile Set<Class<?>> resolvedTypes;
 
   /**
    * @param sagaEventTypes the event classes some registered saga has a step for ({@code
@@ -41,10 +43,24 @@ public final class InboundSagaEventListener implements ApplicationListener<Appli
    * @param dispatcher the transport's dispatcher, which stores the event for delivery to sagas
    */
   public InboundSagaEventListener(Set<Class<?>> sagaEventTypes, EventDispatcher dispatcher) {
+    this(constant(sagaEventTypes), constant(dispatcher));
+  }
+
+  /**
+   * Resolves its collaborators on the first published payload, not when the bean is created ({@code
+   * specs/014-publish-once}). Spring creates every listener bean as soon as an event is multicast,
+   * which Spring Data's mapping context does during startup; resolving the runtime then would build
+   * it while the repositories it verifies are still being created.
+   *
+   * @param sagaEventTypes supplies the event classes some registered saga has a step for, read once
+   * @param dispatcher supplies the transport's dispatcher
+   */
+  public InboundSagaEventListener(
+      Supplier<Set<Class<?>>> sagaEventTypes, Supplier<EventDispatcher> dispatcher) {
     if (sagaEventTypes == null || dispatcher == null) {
       throw new IllegalArgumentException("sagaEventTypes and dispatcher must not be null");
     }
-    this.sagaEventTypes = Set.copyOf(sagaEventTypes);
+    this.sagaEventTypes = sagaEventTypes;
     this.dispatcher = dispatcher;
   }
 
@@ -54,19 +70,35 @@ public final class InboundSagaEventListener implements ApplicationListener<Appli
       return;
     }
     Object payload = published.getPayload();
-    if (!sagaEventTypes.contains(payload.getClass())) {
+    if (!types().contains(payload.getClass())) {
       return;
     }
     if (DomainEventScope.current().isPresent()) {
       AlreadyPublishedEvents.add(payload);
       DomainEvents.record(payload);
     } else {
-      dispatcher.dispatch(payload);
+      dispatcher.get().dispatch(payload);
     }
   }
 
   @Override
   public boolean supportsAsyncExecution() {
     return false;
+  }
+
+  private Set<Class<?>> types() {
+    Set<Class<?>> types = resolvedTypes;
+    if (types == null) {
+      types = Set.copyOf(sagaEventTypes.get());
+      resolvedTypes = types;
+    }
+    return types;
+  }
+
+  private static <T> Supplier<T> constant(T value) {
+    if (value == null) {
+      throw new IllegalArgumentException("sagaEventTypes and dispatcher must not be null");
+    }
+    return () -> value;
   }
 }

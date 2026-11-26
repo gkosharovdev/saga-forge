@@ -13,6 +13,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEvent;
 import org.springframework.context.PayloadApplicationEvent;
 
 /**
@@ -34,6 +35,24 @@ class InboundSagaEventListenerTest {
   @AfterEach
   void cleanUp() {
     AlreadyPublishedEvents.clear();
+  }
+
+  @Test
+  @DisplayName(
+      "startup: a non-payload event (Spring Data's mapping events) resolves no collaborator")
+  void lazyCollaborators() {
+    InboundSagaEventListener lazy =
+        new InboundSagaEventListener(
+            () -> {
+              throw new IllegalStateException("runtime resolved too early");
+            },
+            () -> {
+              throw new IllegalStateException("dispatcher resolved too early");
+            });
+
+    lazy.onApplicationEvent(new ApplicationEvent(this) {});
+    PublishingGuard.run(
+        () -> lazy.onApplicationEvent(new PayloadApplicationEvent<>(this, CREATED)));
   }
 
   @Test
