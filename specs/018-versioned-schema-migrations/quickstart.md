@@ -52,14 +52,11 @@ mvn -Pcontainer-tests -pl saga-forge-storage-postgres,saga-forge-spring-boot-sta
      FAILURE saga_instance: column resolution is missing (expected jsonb NULL)
    ```
 
-## 4. Adopter check (booking-service, SC-006)
+## 4. Adopter check (withdrawn)
 
-With the release that contains this feature:
-
-1. Set `initialize-schema=migrate` and keep the service's own `V62` unchanged.
-2. Start against a copy of production: Saga Forge's history shows the detected baseline and then the applied
-   versions, and the service's `flyway_schema_history` is unchanged.
-3. Delete the drift test (W11) and stop copying Saga Forge's schema.
+This section asked booking-service to switch and drop its schema drift test (SC-006). Booking-service never adopted
+Saga Forge, so it has no copied schema to replace; SC-006 is withdrawn. `FlywaySchemaMigrationIntegrationTest`'s
+copied-`V62` case covers the scenario.
 
 ## 5. Docs
 

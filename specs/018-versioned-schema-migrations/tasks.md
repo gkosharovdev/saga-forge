@@ -220,7 +220,7 @@ V5 are applied, the rows are kept, and a saga started before the switch complete
 - [X] T030 [US2] Extend `st-test…/storage/SchemaInitializerTest.java`: an `Unmatched` database (one column dropped at 0.4.0 level) fails startup with `SagaSchemaException`, the database and both histories are unchanged (no history table created), and the message names the closest version and the column (FR-008)
 - [X] T031 [US2] Extend `st-test…/storage/ConcurrentMigrationTest.java`'s V1 case to start from `released/schema-0.1.0.sql` with rows. Exactly one baseline row is written and every row is kept
 
-**Checkpoint**: US1 and US2 together remove booking-service's W11 for new and existing databases.
+**Checkpoint**: US1 and US2 together remove the copied schema and its drift guard for new and existing databases.
 
 ---
 
@@ -309,9 +309,9 @@ then validate. It passes, and it fails with a dropped column.
 - [X] T048 Run the release build `mvn -P release -Dgpg.skip -DskipTests install` and fix any Javadoc error: no `<h3>` in type comments, no `@throws` on record comments
 - [ ] T049 Walk through `specs/018-versioned-schema-migrations/quickstart.md` §3 by hand against `saga-forge-example-spring` with a local Postgres, and record the output in the PR description
   - *Not done here*: needs a local Postgres and the PR description; left for the PR.
-- [X] T050 Re-check every FR-001 to FR-022 and SC-001 to SC-005 against a task and a passing test; list SC-006 (adopter confirmation) as open in the PR
-  - *Done*: every FR and SC-001 to SC-005 has a passing test. FR-018 needed one more, `StartWithoutFlywayTest` (Flyway hidden by a `FilteredClassLoader`; `never`, `always` and `validate` start). SC-006 (booking-service confirmation) stays open.
-- [ ] T051 At the release that ships this feature (not in this PR): add V5's SHA-256 to `pg-test-res…/released-migrations.sha256`
+- [X] T050 Re-check every FR-001 to FR-022 and SC-001 to SC-005 against a task and a passing test; list SC-006 (adopter confirmation) as open in the PR (SC-006 withdrawn 2026-11-27: booking-service never adopted Saga Forge)
+  - *Done*: every FR and SC-001 to SC-005 has a passing test. FR-018 needed one more, `StartWithoutFlywayTest` (Flyway hidden by a `FilteredClassLoader`; `never`, `always` and `validate` start). SC-006 is withdrawn.
+- [ ] T051 At the release that ships this feature (not in this PR): add the SHA-256 of V5 and of every later unreleased version to `pg-test-res…/released-migrations.sha256`
 
 ---
 
@@ -364,12 +364,12 @@ US4: T036 plain-Java example test
 ### MVP (User Story 1)
 
 Phases 1 and 2, then Phase 3. The result migrates empty and up-to-date databases under Saga Forge's own history. This
-is enough for any new adopter, but not yet for booking-service, whose tables already exist.
+is enough for any new adopter, but not yet for a host whose tables already exist.
 
 ### Incremental delivery
 
 1. MVP (US1).
-2. US2, which lets booking-service switch: W11 goes away.
+2. US2, which lets a host with existing tables switch.
 3. US3 gives `validate` for non-Flyway hosts and the endpoint status.
 4. US4 and the docs.
 5. Verification, then the release (T051).

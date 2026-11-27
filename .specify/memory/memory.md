@@ -1170,6 +1170,11 @@ own log beside Modulith's registry (`modulith-interop=false`).
 Also open from the 2026-11-12 list: G-010-05 (saga metrics need an OpenTelemetry metric exporter in Spring Boot).
 Revisit the order with feedback from booking-service before each release.
 
+Correction (2026-11-27, user): booking-service never adopted Saga Forge. Its feedback came from a migration
+attempt, not from running Saga Forge, so it has no copied schema or schema drift test; roadmap 018's W11 and the 018
+spec's SC-006 rested on that mistake and are withdrawn. Treat the other Wn items as reported needs, not workarounds
+in production.
+
 ### G-015-01: An operator cannot retry a failed saga from its failed step
 - **Description**: 015's operations API resumes compensation, compensates and marks resolved, but cannot re-run the step
   of a `FAILED` instance after its cause was fixed: the runtime does not keep the triggering event. Operators can only

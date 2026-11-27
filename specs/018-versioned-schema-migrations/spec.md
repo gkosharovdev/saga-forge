@@ -25,9 +25,11 @@ changed it (005, 006, 007, 010, 011, 013, 015, 017). The host applies them by ha
 migration tool (G-003-25). The starter's `initialize-schema` only creates the tables in an empty database (`always`) or
 checks that they exist (`never`, the default).
 
-The first adopter copied `schema.sql` into its own Flyway migration `V62` and wrote a test that compares the copy with
-the jar's resource, so a library upgrade that changes the schema is noticed (booking-service W11). Every later feature
-that changes the schema (015b, 019) would add another hand-copied script.
+An application on Flyway has to copy `schema.sql` into one of its own migrations (say `V62`) and guard the copy
+against drift, for example with a test that compares it with the jar's resource, so a library upgrade that changes the
+schema is noticed. Every later feature that changes the schema (015b, 019) would add another hand-copied script.
+(Correction, 2026-11-27: the input above names booking-service's workaround W11; booking-service never adopted Saga
+Forge, so it has no copied schema or drift test. The `V62` case is illustrative.)
 
 This feature ships the schema as versioned migrations that a migration tool applies under Saga Forge's own history,
 lets the starter apply them, and adds a startup check that the database has the shape the library needs. Flyway is the
@@ -60,7 +62,7 @@ Released schema levels, from the release tags: 0.1.0 has `schema.sql` with the 0
   baseline version itself, which skips detection.
 - **D5 — Run after the application's own migrations.** When the application also runs Flyway, Saga Forge migrates after
   the application's migrations and before the runtime starts. So an application whose own migration created Saga Forge's
-  tables (booking-service's `V62`) keeps that migration unchanged, and Saga Forge baselines over it.
+  tables (a copied `V62`) keeps that migration unchanged, and Saga Forge baselines over it.
 - **D6 — What `validate` checks.** It checks the tables, columns (name, type and nullability) and constraints (primary
   key, unique, foreign key, check) that the running library version needs. If any is missing or different, startup
   fails with a message that lists every difference by table and column or constraint name. Missing indexes are reported
@@ -84,7 +86,7 @@ An application that manages its own schema with Flyway adds the starter, sets `i
 Saga Forge's tables are created, or brought to the current level, under Saga Forge's own history. The application's
 own migrations and history are untouched.
 
-**Why this priority**: This removes the hand-copied script and the drift guard (W11). Every later schema change then
+**Why this priority**: This removes the hand-copied script and the drift guard. Every later schema change then
 reaches adopters without manual work.
 
 **Independent Test**: Start a Spring application with its own Flyway migrations V1 to V62 against an empty Postgres
@@ -110,7 +112,8 @@ An application whose database was created from `schema.sql` and the upgrade scri
 migration, switches to `migrate`. Saga Forge recognises the database's level, records it as the baseline and applies
 only what is missing. Existing instances, context values, history and messages are kept.
 
-**Why this priority**: The first adopter already has the tables in production through its `V62`. Without a takeover,
+**Why this priority**: An application that already has the tables, from `schema.sql`, the upgrade scripts or a copied migration, cannot
+start over. Without a takeover,
 `migrate` is only for new databases.
 
 **Independent Test**: Create a database from 0.1.0's `schema.sql` with rows in every table, then start with `migrate`.
@@ -296,8 +299,8 @@ table, then run the check. It passes, and it fails with a dropped column.
   test case per Saga Forge table proves this.
 - **SC-005**: With three application instances starting against one empty database at once, each version is applied
   exactly once and all three start.
-- **SC-006**: Booking-service can delete its schema drift test and stop copying Saga Forge's schema for later releases
-  (W11 removed), confirmed by the adopter.
+- **SC-006**: Withdrawn (2026-11-27). It asked booking-service to confirm it could drop its schema drift test, but
+  booking-service never adopted Saga Forge and has no such test. SC-001 and SC-002 cover the outcome.
 
 ## Assumptions
 
