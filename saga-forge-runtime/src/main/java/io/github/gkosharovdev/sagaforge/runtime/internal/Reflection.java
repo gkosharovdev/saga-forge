@@ -1,6 +1,5 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaId;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AccessibleObject;
@@ -14,14 +13,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Reflection over client classes, the production counterpart of the 002 harness's {@code
  * HarnessReflection}.
  *
  * <p>Members are looked up once, when the engine builds its model at {@code start()}, and made
- * accessible then; the lookups cached per class ({@link #aggregateIdentifier(Object)}) use a {@link
- * ClassValue}.
+ * accessible then. Domain markers are not read here: {@code DomainTypes} answers which members
+ * identify an aggregate or handle a command (specs/016-marker-spi-jmolecules).
  *
  * <p>Invocation removes the reflection wrapper: the exception a client method or constructor threw
  * leaves {@link #invoke(Method, Object, Object...)} and {@link #construct(Constructor, Object...)}
@@ -44,14 +44,6 @@ final class Reflection {
   }
 
   private static final PropertyReader ABSENT = bean -> Optional.empty();
-
-  private static final ClassValue<Optional<Field>> IDENTIFIER_FIELDS =
-      new ClassValue<>() {
-        @Override
-        protected Optional<Field> computeValue(Class<?> type) {
-          return annotatedField(type, AggregateIdentifier.class);
-        }
-      };
 
   private Reflection() {}
 
@@ -79,32 +71,6 @@ final class Reflection {
    */
   static Optional<Object> readProperty(Object bean, String name) {
     return propertyReader(bean.getClass(), name).read(bean);
-  }
-
-  /**
-   * The value of the single {@code @AggregateIdentifier} field of an event or command.
-   *
-   * @throws IllegalStateException if the type declares no {@code @AggregateIdentifier} field or its
-   *     value is {@code null}
-   */
-  static Object aggregateIdentifier(Object value) {
-    Field field =
-        IDENTIFIER_FIELDS
-            .get(value.getClass())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        value.getClass().getName() + " declares no @AggregateIdentifier field"));
-    Object id = read(field, value);
-    if (id == null) {
-      throw new IllegalStateException(
-          "@AggregateIdentifier "
-              + field.getName()
-              + " of "
-              + value.getClass().getName()
-              + " is null");
-    }
-    return id;
   }
 
   /**
@@ -147,6 +113,23 @@ final class Reflection {
         .filter(method -> !method.isSynthetic() && !method.isBridge())
         .filter(method -> method.isAnnotationPresent(marker))
         .map(Reflection::accessible)
+        .toList();
+  }
+
+  /** Methods declared on {@code type} itself that {@code selected} accepts, made accessible. */
+  static List<Method> methodsWhere(Class<?> type, Predicate<Method> selected) {
+    return Arrays.stream(type.getDeclaredMethods())
+        .filter(method -> !method.isSynthetic() && !method.isBridge())
+        .filter(selected)
+        .map(Reflection::accessible)
+        .toList();
+  }
+
+  /** Constructors declared on {@code type} that {@code selected} accepts, made accessible. */
+  static List<Constructor<?>> constructorsWhere(Class<?> type, Predicate<Constructor<?>> selected) {
+    return Arrays.stream(type.getDeclaredConstructors())
+        .filter(selected)
+        .<Constructor<?>>map(Reflection::accessible)
         .toList();
   }
 

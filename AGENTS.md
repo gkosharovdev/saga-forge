@@ -222,6 +222,27 @@
   `application-events.mode=after-delivery` is deprecated and refused while the route is on; with deadlines in the model
   and `saga-forge.transport.modulith-interop` not set, the transport keeps the own log. The Spring example's
   `OrderPlacement` publishes through `ApplicationEventPublisher`.
+- Implemented and tested, added by `specs/016-marker-spi-jmolecules` (closes G-ADOPT-04 and G-002-04): vocabularies of
+  domain markers and event harvesting. Core gains `core.spi.model`: `DomainTypeResolver` (one vocabulary: `name`,
+  `role`/`roles`, `identifiers`, `commandHandler`, `describe`), `DomainTypes` (enabled vocabularies composed, Saga
+  Forge's annotations first and always on; `builtIn()`, `of(...)`), `DomainRole`, `RoleMarker`, `IdentifierMember`; the
+  scanner, runtime, transport ordering keys, `DomainEvents.record` and the starter read aggregates, identifiers, events,
+  commands and handlers only through it, and every error text names the marker used (built-in texts unchanged). Rules
+  R30 (one role per type, identifiers agree across vocabularies) and R31 (a by-type link resolves to exactly one
+  aggregate); Properties 16/17 restated, 48 (vocabulary equivalence) and 49 (harvesting). SPI
+  `core.spi.AggregateEventSource` (`supports`, `takeEvents`): the runtime's package-private `EventHarvest` records an
+  aggregate's held events after each aggregate handler and before the save (`SagaRuntime.Builder.aggregateEventSource`,
+  repeatable, first supporting source wins). New module `saga-forge-jmolecules` (`JMoleculesDomainTypeResolver`:
+  `AggregateRoot`/`@AggregateRoot` with `@Identity` or `getId()`, `DomainEvent`/`@DomainEvent`, cqrs `@Command` and
+  `@CommandHandler`, links by `Association`/`@Association`/`Identifier` members; no event source). Builders gain
+  `domainTypes(...)` (runtime, `InMemoryTransport`, `SagaFixture`) and `SagaFixture.Builder.aggregateEventSource`. The
+  starter composes one `DomainTypes` bean from `DomainTypeResolver` beans (jMolecules added unless
+  `saga-forge.jmolecules.enabled=false`), passes `AggregateEventSource` beans in order, and the `sagaforge` endpoint
+  lists `vocabularies` and `eventSources`; no Spring Data event source (014's inbound route covers `@DomainEvents`).
+  Example `saga-forge-example-jmolecules`: the canonical saga over a jMolecules-only domain with an `OrderEventSource`.
+  Guide page `docs/guide/vocabularies.md`.
+- With 016 (vocabularies and harvesting) the whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on
+  2026-11-27 (2,233 tests, 0 failures; 6 skipped, as with 015); the release build `-P release` with Javadoc also passes.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -236,8 +257,8 @@
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
   `DomainEvents`/`EventPublisher`, `core.operations` (`SagaOperations`, `SagaInstanceQuery`/`PageCursor`/
-  `SagaInstancePage`, `OperatorRequest`, `RepairResult`, `SagaResolution`, `InstanceCounts`, `RecoveryReport`), SPI.
-  Zero dependencies.
+  `SagaInstancePage`, `OperatorRequest`, `RepairResult`, `SagaResolution`, `InstanceCounts`, `RecoveryReport`), SPI
+  (`core.spi.model` `DomainTypes`/`DomainTypeResolver`, `AggregateEventSource`, 016). Zero dependencies.
 - `saga-forge-runtime` — the saga runtime; depends on the JDK, `saga-forge-core` and `opentelemetry-api` (010) only. Public surface:
   `SagaRuntime` with its host-facing builder (`operations()`, `stop()`, `Builder.recovery`), `StartupReport`,
   `SagaRuntimeStartupException`, `ImmediateDispatchOutbox`, `RecoverySettings`, `AbandonedStartPolicy`; everything else is package-private in `runtime.internal`, where every write goes through
@@ -266,6 +287,8 @@
 - `saga-forge-test` — the saga test fixture (009), test scope for applications; depends on `saga-forge-core` and
   `saga-forge-runtime` only (no Spring, storage or transport). Public API in `io.github.gkosharovdev.sagaforge.test`;
   its in-memory plug-ins are package-private there. See its `README.md`.
+- `saga-forge-jmolecules` — the jMolecules vocabulary (016): `JMoleculesDomainTypeResolver`; depends on
+  `saga-forge-core` and `jmolecules-ddd` (events and cqrs artifacts optional). See its `README.md`.
 - `saga-forge-example` — `OrderProcessingSaga` is the canonical reference pattern; keep it in sync with
   whatever the annotation model currently supports. Package `example.checkout` holds the README's domain story,
   `CheckoutSaga` and `FulfilmentSaga` (Inventory, Payments and Logistics as stand-in services), told in full in
@@ -273,6 +296,8 @@
 - `saga-forge-example-spring` — the canonical saga as a Spring Boot application (Spring Data JDBC `Order`, service
   beans, no assembly code). Keep it in step with `saga-forge-example`; it keeps amounts as `String` in `SagaContext`
   (G-003-07).
+- `saga-forge-example-jmolecules` — the canonical saga as a Spring Boot application over a domain marked only with
+  jMolecules (typed `OrderId`, `OrderEventSource`); keep it in step with the other two examples.
 
 ## Saga Model (Project-Specific)
 - Sagas are class-based and annotation-driven: `@Saga` on the class, `@SagaId` on exactly one `String` field.
@@ -304,6 +329,9 @@
   `StorageProvider.save` before the first `SagaContextStore.save` for that `sagaId`; a context save for an
   unknown `sagaId` fails with `UncheckedSqlException` (FK violation). 002's harness does not follow this yet
   (G-ENG-01).
+- Domain roles (aggregate, identifier, domain event, command, command handler) come from `DomainTypes`, never from a
+  direct annotation check: Saga Forge's annotations are the built-in vocabulary, jMolecules' an optional second one.
+  The saga side (`@Saga`, `@SagaStep`, ...) is Saga Forge's only. Ask `DomainTypes` in new code that needs a role.
 - Validate a whole model with `AnnotationScanner.validateAll(...)` → `ValidationReport` (cross-class rules,
   Properties 14–20); `validate(...)` covers single-saga rules only.
 - Compensation is step-targeted: `@SagaCompensation(forStep = "...")`, where `forStep` must name an existing
@@ -375,7 +403,7 @@
   store's due times.
 - First adopter: booking-service. memory.md "Adoption backlog" ranks the gaps that matter for it; check it when
   choosing the next feature.
-- jMolecules integration is a documented consideration (`docs/architecture.md`), not yet decided or built.
+- jMolecules integration is built (016): see `docs/architecture.md` "Vocabularies of domain markers".
 - In-memory transport (007), see memory.md G-007-01 to G-007-08: Quarkus extension and the constitution amendment
   pending (G-007-01); starter detection deferred (G-007-02); a redelivered start event does not recover a stranded
   start (G-007-03); delivery order is per aggregate, not per saga instance (G-007-04); relay logic may need a shared
@@ -432,6 +460,13 @@
   repair (G-015-05); listings are not snapshot-consistent (G-015-06); the abandoned-start report is deduplicated per
   process (G-015-07); a stopped runtime and transport start again since G-015-08 closed; uncovered contract cases (G-015-09). Every repair
   is a `UnitOfWork` work whose admission re-reads the instance under its lock; keep it that way.
+
+- Vocabularies and harvesting (016), see memory.md G-016-01 to G-016-09: an outbox command still needs Saga Forge's
+  `@Command(delivery = OUTBOX)` (G-016-01); the fixture sees no Spring-published events (G-016-02); jMolecules has no
+  event-holding convention, so no event source ships (G-016-03); `DomainEvents.capture(Runnable)` knows only the
+  built-in markers (G-016-04); plain-typed identifiers are never links (G-016-05); a by-type event is keyed by its
+  identifier type (G-016-06); no Modulith-interop or `@TransactionalEventListener` harvest test (G-016-07); no
+  invalid-variant equivalence property (G-016-08); package scanning loads each candidate class (G-016-09).
 
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,

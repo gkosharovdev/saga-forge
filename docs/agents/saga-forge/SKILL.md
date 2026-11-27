@@ -1,6 +1,6 @@
 ---
 name: saga-forge
-description: Write, change, test and debug Saga Forge sagas (io.github.gkosharovdev:saga-forge-*) in a Java/Spring Boot application. Use when code involves @Saga, @SagaStep, @StartSaga, @EndSaga, @StartCompensation, @SagaCompensation, @RetryPolicy, @CommandHandler, @Aggregate, @DomainEvent, @Command, CommandGateway, DomainEvents.record, EventPublisher, SagaContext, CommandId or SagaFixture, or when a "Saga engine refused to start" error must be fixed.
+description: Write, change, test and debug Saga Forge sagas (io.github.gkosharovdev:saga-forge-*) in a Java/Spring Boot application. Use when code involves @Saga, @SagaStep, @StartSaga, @EndSaga, @StartCompensation, @SagaCompensation, @RetryPolicy, @CommandHandler, @Aggregate, @DomainEvent, @Command, CommandGateway, DomainEvents.record, EventPublisher, SagaContext, CommandId, SagaFixture, AggregateEventSource or a jMolecules-marked domain (saga-forge-jmolecules), or when a "Saga engine refused to start" error must be fixed.
 ---
 
 # Saga Forge
@@ -80,6 +80,16 @@ public class OrderProcessingSaga {
   repository or an `@AggregateLoader`, then saved), an `@Aggregate` constructor/static factory (creation), or a
   `@Service`/`@Component` method. Exactly one `@Command` parameter; one handler per command type.
 - Record resulting events in handlers and aggregates with `DomainEvents.record(new XEvent(...))`.
+- With `saga-forge-jmolecules` on the class path, a domain marked only with jMolecules needs none of the domain
+  annotations above: `AggregateRoot<T, ID>`/`@AggregateRoot` (identifier `@Identity` or `getId()`), `DomainEvent`/
+  `@DomainEvent`, jMolecules `@Command` and `@CommandHandler`. Events and commands link to their aggregate through an
+  `Association<A, ID>`, `@Association` or `Identifier`-typed member; give typed identifiers a `toString()` that returns
+  the plain value. The saga class keeps Saga Forge's annotations. An outbox command keeps Saga Forge's
+  `@Command(delivery = OUTBOX)` beside jMolecules' `@Command`.
+- When an aggregate holds its events (`domainEvents()`/`clearDomainEvents()`), register an `AggregateEventSource` bean
+  (`supports`, `takeEvents`: return and clear them); the runtime records them after the handler, before the save. In
+  `SagaFixture` pass `.domainTypes(DomainTypes.of(new JMoleculesDomainTypeResolver()))` and
+  `.aggregateEventSource(...)`.
 - Start a saga from application code by publishing its start event the usual Spring way
   (`ApplicationEventPublisher.publishEvent(event)`, or a Spring Data aggregate's `@DomainEvents`), inside your
   `@Transactional` method if you also change state. Saga Forge's `EventPublisher.publish(event)` works too (and also
@@ -156,6 +166,9 @@ public class OrderProcessingSaga {
   deadline on an `@EndSaga`/`@StartCompensation` step, or make a timeout step `@StartSaga`.
 - Don't add `SagaRuntime` configuration classes in a Spring Boot app: the starter assembles everything.
 - Don't use classes in packages named `internal`.
+- Don't mark one class with two roles (an aggregate that is also an event), or point Saga Forge's and jMolecules'
+  identifier markers at different members (R30). Don't link a jMolecules event by a plain `String`/`UUID` member:
+  it is never a link; use `@Association` or a typed identifier.
 - Don't expect every instance to deliver messages or run deadlines: only the active relay does, and delivery throughput
   is that of one instance. Don't look for `saga-forge.transport.heartbeat-interval`: it was replaced by the
   leadership properties.
@@ -180,6 +193,8 @@ https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/validation-rul
 | `@Command type C is handled by @Aggregate instance method ... must declare an @AggregateIdentifier field` | add `@AggregateIdentifier` to the command |
 | `@Aggregate A has instance-method @CommandHandler methods but no @AggregateLoader and no AggregateResolver` | add a Spring Data repository or `@AggregateLoader` |
 | `@CommandHandler H.m parameter #n T cannot be resolved` | make `T` a bean, or inject it into the constructor |
+| `T (jMolecules ...) concerns no known aggregate` | scan the aggregate's package, or name it on the link (`@Association(aggregateType = A.class)`) |
+| `T is marked ... and ...; a type has one role` | give the class one role |
 | `Command C is delivered through the outbox but has no @CommandHandler` | add the handler (in a scanned package) |
 | `@SagaCompensation on m: forStep 'x' does not reference an existing method` | use the exact step method name |
 | `total retry backoff n ms exceeds the engine maximum` | shorten the `@RetryPolicy` |

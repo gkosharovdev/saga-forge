@@ -1,10 +1,7 @@
 package io.github.gkosharovdev.sagaforge.test;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
-import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
-import io.github.gkosharovdev.sagaforge.core.annotation.Command;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaCompensation;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
@@ -18,22 +15,26 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/** The reflection the fixture needs over the registered model; never invokes client code. */
+/**
+ * The reflection the fixture needs over the registered model; never invokes client code. Domain
+ * roles and identifiers come from {@link DomainTypes}, so every enabled vocabulary counts
+ * (specs/016-marker-spi-jmolecules).
+ */
 final class Model {
 
   private Model() {}
 
-  /** The command types the {@code @CommandHandler}s of {@code host} take. */
-  static Set<Class<?>> handledCommandTypes(Class<?> host) {
+  /** The command types the command handlers of {@code host} take. */
+  static Set<Class<?>> handledCommandTypes(Class<?> host, DomainTypes domainTypes) {
     Set<Class<?>> types = new LinkedHashSet<>();
     List<Executable> handlers = new ArrayList<>(List.of(host.getDeclaredConstructors()));
     handlers.addAll(methods(host));
     for (Executable handler : handlers) {
-      if (!handler.isAnnotationPresent(CommandHandler.class)) {
+      if (domainTypes.commandHandler(handler).isEmpty()) {
         continue;
       }
       for (Class<?> parameter : handler.getParameterTypes()) {
-        if (parameter.isAnnotationPresent(Command.class)) {
+        if (domainTypes.isCommand(parameter)) {
           types.add(parameter);
           break;
         }
@@ -52,43 +53,6 @@ final class Model {
       }
     }
     return byStep;
-  }
-
-  static boolean isAggregate(Class<?> type) {
-    return type.isAnnotationPresent(Aggregate.class);
-  }
-
-  /** The {@code @AggregateIdentifier} value of {@code aggregate}. */
-  static Object aggregateIdentifier(Object aggregate) {
-    for (Class<?> type = aggregate.getClass();
-        type != null && type != Object.class;
-        type = type.getSuperclass()) {
-      for (Field field : type.getDeclaredFields()) {
-        if (field.isAnnotationPresent(AggregateIdentifier.class)) {
-          try {
-            field.setAccessible(true);
-            Object id = field.get(aggregate);
-            if (id == null) {
-              throw new IllegalArgumentException(
-                  "@AggregateIdentifier "
-                      + field.getName()
-                      + " of "
-                      + aggregate.getClass().getSimpleName()
-                      + " is null");
-            }
-            return id;
-          } catch (IllegalAccessException | RuntimeException e) {
-            if (e instanceof IllegalArgumentException illegal) {
-              throw illegal;
-            }
-            throw new IllegalStateException(
-                "cannot read @AggregateIdentifier of " + aggregate.getClass().getName(), e);
-          }
-        }
-      }
-    }
-    throw new IllegalArgumentException(
-        aggregate.getClass().getName() + " has no @AggregateIdentifier field");
   }
 
   /** A new object of {@code type} through its no-argument constructor, if it declares one. */

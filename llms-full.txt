@@ -21,6 +21,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
 | [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
+| [Vocabularies](vocabularies.md) | drive sagas from a domain marked only with jMolecules, or hand aggregate-held events to sagas |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
 | [Limitations](limitations.md) | know what to design around in 0.4.0 |
@@ -41,8 +42,8 @@ Saga Forge uses DDD / EventStorming terms (full glossary in
 - **Domain event**: a fact about one aggregate that already happened. Recorded by handlers with
   `DomainEvents.record(...)`, or published by application code through Spring's `ApplicationEventPublisher` (or
   Saga Forge's `EventPublisher`).
-- **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate`, identified by one
-  `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
+- **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate` (or a jMolecules aggregate marker,
+  see [Vocabularies](vocabularies.md)), identified by one `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
   `@AggregateLoader`/`@AggregateSaver`).
 - **Policy**: the cross-aggregate rule "when X happens, Y should happen" that a saga encodes.
 - **Saga**: the durable process for one instance of a policy, a `@Saga` class whose instances are correlated by an
@@ -320,6 +321,10 @@ All annotations are in `io.github.gkosharovdev.sagaforge.core.annotation` (`saga
 runtime and validated when the runtime starts; a violation stops startup with the message listed in
 [Validation rules](validation-rules.md) (rule ids `R1` to `R23` below).
 
+The aggregate, identifier, domain event, command and command handler annotations below are Saga Forge's vocabulary of
+domain markers. With `saga-forge-jmolecules`, jMolecules' markers fill the same roles and the domain needs none of
+them; the saga class always uses Saga Forge's annotations. See [Vocabularies](vocabularies.md).
+
 Other types a model uses:
 
 | Type | Package (`io.github.gkosharovdev.sagaforge.` + ) | Role |
@@ -564,7 +569,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R29), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R31), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -634,6 +639,28 @@ R19 violations (after `has an invalid retry policy: `):
 | R17 | `@AggregateSaver method {m} in {H} must take exactly one @Aggregate-typed parameter` | Wrong saver signature. | `@AggregateSaver void save(Order order)`. |
 | R18 | `Aggregate {A} has more than one @AggregateLoader: {H1.m}, {H2.m}` (or `@AggregateSaver`) | Two loaders (or savers) for one aggregate. | Keep one of each per aggregate type. |
 | R23 | `Command {C} is delivered through the outbox but has no @CommandHandler` | An `@Command(delivery = OUTBOX)` type no registered class handles. | Add a handler, make sure its class is in the scanned packages (or a `SagaModelContributor`), or use `IN_UNIT_OF_WORK`. In `SagaFixture` record mode, `register(HandlerClass.class)`. |
+
+## Vocabularies of markers
+
+With a second vocabulary enabled (see [Vocabularies](vocabularies.md)), the texts above name the marker the model
+used instead of Saga Forge's annotation, and list every accepted marker where a role is missing. For jMolecules:
+
+| Instead of | The text reads |
+|---|---|
+| `@CommandHandler method {m} in {H} must declare exactly one @Command parameter, found {n}` | `jMolecules @CommandHandler method {m} in {H} must declare exactly one command parameter (@Command, or jMolecules @Command), found {n}` |
+| `{T} must declare exactly one @AggregateIdentifier field, found {n}` | `{T} (jMolecules @AggregateRoot) must declare exactly one jMolecules @Identity member, found {n}`; for an event, `exactly one jMolecules link member (Association, @Association or Identifier)` |
+| `@DomainEvent type {E} names aggregate {X}, which is not annotated @Aggregate` | `Domain event type {E} (jMolecules DomainEvent) names aggregate {X}, which is not an aggregate (@Aggregate, or jMolecules @AggregateRoot / AggregateRoot)` |
+| `@AggregateLoader method {m} in {H} must take exactly one parameter and return an @Aggregate type` | `... return an aggregate type (@Aggregate, or jMolecules @AggregateRoot / AggregateRoot)` (the saver likewise) |
+| `Command {C} is delivered through the outbox but has no @CommandHandler` | `Command {C} is delivered through the outbox but has no command handler` |
+
+Two rules exist only because a type can be marked by several vocabularies:
+
+| Rule | Error text | What it means | How to fix |
+|---|---|---|---|
+| R30 | `{T} is marked {marker1} ({role1}) and {marker2} ({role2}); a type has one role` | One class is, say, both an aggregate and a domain event, in one vocabulary or across two. | Give the class one role. |
+| R30 | `{T} names different identifiers: {marker1} {member1}, {marker2} {member2}` | Saga Forge's and jMolecules' identifier markers point at different members. | Mark the same member in both, or drop one marker. |
+| R31 | `{T} ({marker}) concerns no known aggregate: no known aggregate has identifier type {Id}. Name the aggregate on the link member, or give the aggregate its own identifier type` | A jMolecules event or command links by an identifier type no scanned aggregate uses. | Scan the aggregate's package, or name it: `@Association(aggregateType = A.class)` or `Association<A, ID>`. |
+| R31 | `... concerns no known aggregate: identifier type {Id} belongs to {A}, {B}. ...` | Two aggregates share the identifier type. | Name the aggregate on the link, or give each aggregate its own identifier type. |
 
 ## Runtime startup checks
 
@@ -1478,6 +1505,207 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 More in [Testing](testing.md#deadlines): `expectOpenDeadline`, `expectNoOpenDeadline`, `expectDeadlineIgnored`,
 `InstanceView.openDeadlines()` and `Builder.property(key, value)` for `${key}` durations.
 
+<!-- docs/guide/vocabularies.md -->
+
+# Vocabularies: a jMolecules domain
+
+Saga Forge reads the domain side of a model (aggregates, their identifiers, domain events, commands and command
+handlers) through *vocabularies* of markers. Its own annotations are always one. The `saga-forge-jmolecules` module
+adds a second, so a domain marked only with [jMolecules](https://github.com/xmolecules/jmolecules) drives sagas with no
+Saga Forge annotation on it. The saga class itself keeps Saga Forge's annotations (`@Saga`, `@SagaStep`,
+`@StartSaga`, `@EndSaga`, `@StartCompensation`, `@SagaCompensation`).
+
+## Enable it
+
+Add the module. With the Spring Boot starter nothing else is needed: the starter adds the vocabulary while
+`saga-forge.jmolecules.enabled` is not `false`.
+
+```xml
+        <dependency>
+            <groupId>io.github.gkosharovdev</groupId>
+            <artifactId>saga-forge-jmolecules</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmolecules</groupId>
+            <artifactId>jmolecules-events</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jmolecules</groupId>
+            <artifactId>jmolecules-cqrs-architecture</artifactId>
+        </dependency>
+```
+
+Source: `saga-forge-example-jmolecules/pom.xml`.
+
+`jmolecules-events` is needed for events, `jmolecules-cqrs-architecture` for commands and command handlers. Keep the
+domain package in the scanned packages:
+
+```properties
+# The domain lives beside the application package; the starter scans it for jMolecules aggregates and handlers.
+saga-forge.scan-packages=io.github.gkosharovdev.sagaforge.example.jmolecules.domain
+```
+
+Source: `saga-forge-example-jmolecules/src/main/resources/application.properties`.
+
+A hand-assembled runtime passes one `DomainTypes` to the runtime and the transport (`SagaRuntime.Builder.domainTypes`,
+`InMemoryTransport.Builder.domainTypes`); a fixture test passes it to `SagaFixture.Builder.domainTypes` (see
+[Testing](testing.md#a-jmolecules-domain)). Saga Forge's annotations stay recognised, and a model may mix both.
+
+## The domain
+
+The aggregate implements `AggregateRoot<T, ID>`, so its identifier is `getId()`, and marks its handler with jMolecules'
+`@CommandHandler`. Events and commands carry the order's typed identifier, which links them to the aggregate:
+
+```java
+public final class Order implements AggregateRoot<Order, OrderId> {
+  // ...
+  @CommandHandler
+  public void handle(ReserveStock command) {
+    if (inStock) {
+      status = Status.COMPLETED;
+      events.add(new OrderCompleted(id));
+    } else {
+      status = Status.OUT_OF_STOCK;
+      events.add(new StockUnavailable(id));
+    }
+  }
+  // ...
+  /** The events recorded since the repository last took them, oldest first. */
+  public List<Object> domainEvents() {
+    return List.copyOf(events);
+  }
+
+  public void clearDomainEvents() {
+    events.clear();
+  }
+}
+```
+
+Source: `saga-forge-example-jmolecules/src/main/java/io/github/gkosharovdev/sagaforge/example/jmolecules/domain/Order.java`.
+
+```java
+public record PaymentProcessed(OrderId orderId, String paymentId, BigDecimal amount)
+    implements DomainEvent {}
+```
+
+```java
+@Command
+public record ReserveStock(OrderId orderId) {}
+```
+
+Source: `PaymentProcessed.java` and `ReserveStock.java` in the same package.
+
+The saga is the canonical one, unchanged: `@SagaStep(associationProperty = "orderId")` reads the event's `orderId`
+member, whatever its type.
+
+## What is recognised
+
+| Role | jMolecules marker | Identifier or link |
+|---|---|---|
+| aggregate | `@AggregateRoot`, `AggregateRoot<T, ID>` | the `@Identity` field or method; for `AggregateRoot<T, ID>` without one, `getId()` |
+| domain event | `@DomainEvent`, `DomainEvent` | one link member, below |
+| command | `@Command` (also the deprecated `cqrs.annotation.Command`) | at most one link member |
+| command handler | `@CommandHandler` on a method or constructor | - |
+
+A link member is a declared field or record component of type `Association<A, ID>`, one marked
+`@Association(aggregateType = A.class)` or `@Association`, or one whose type implements jMolecules' `Identifier`.
+Without a named aggregate, the link resolves to the one aggregate whose identifier has the member's type. A plain
+`String` or `UUID` member is never a link. When two aggregates share an identifier type, validation names both: name
+the aggregate on the link, or give each aggregate its own identifier type.
+
+Not recognised: `@DomainEventHandler`, `@Repository`, `@Service`, and any saga-side marker.
+
+### Typed identifiers
+
+Associations, the in-memory transport's ordering keys and aggregate references use an identifier's text form
+(`String.valueOf`). Keep it the plain value and the same in every event and command of a saga:
+
+```java
+public record OrderId(String value) implements Identifier {
+
+  public OrderId {
+    Objects.requireNonNull(value, "value");
+  }
+
+  @Override
+  public String toString() {
+    return value;
+  }
+}
+```
+
+Source: `saga-forge-example-jmolecules/src/main/java/io/github/gkosharovdev/sagaforge/example/jmolecules/domain/OrderId.java`.
+
+Loaders, savers and Spring Data repositories receive the identifier value itself, not its text.
+
+### Outbox commands
+
+jMolecules has no delivery attribute. A command handled after the sender commits keeps Saga Forge's `@Command` beside
+jMolecules' one:
+
+```java
+@org.jmolecules.architecture.cqrs.Command
+@io.github.gkosharovdev.sagaforge.core.annotation.Command(delivery = CommandDelivery.OUTBOX)
+record NotifyCustomer(OrderId orderId) {}
+```
+
+## Events held on the aggregate
+
+A jMolecules aggregate usually holds its events instead of calling `DomainEvents.record`. Register an
+`AggregateEventSource`: after each aggregate command handler, and before the aggregate is saved, the runtime asks the
+first source that supports the aggregate's type for its events and records them, in order, as if the handler had
+recorded them. They continue the saga in the same unit of work and roll back with it.
+
+```java
+@Component
+public class OrderEventSource implements AggregateEventSource {
+
+  @Override
+  public boolean supports(Class<?> aggregateType) {
+    return Order.class.isAssignableFrom(aggregateType);
+  }
+
+  @Override
+  public List<Object> takeEvents(Object aggregate) {
+    Order order = (Order) aggregate;
+    List<Object> events = order.domainEvents();
+    order.clearDomainEvents();
+    return events;
+  }
+}
+```
+
+Source: `saga-forge-example-jmolecules/src/main/java/io/github/gkosharovdev/sagaforge/example/jmolecules/application/OrderEventSource.java`.
+
+With the starter, define it as a bean (several are asked in `@Order` order); by hand, pass it to
+`SagaRuntime.Builder.aggregateEventSource`; in a fixture test, to `SagaFixture.Builder.aggregateEventSource`. A source
+must clear what it returns, or the next handler call on the same aggregate returns the events again. Every returned
+object must be a domain event of an enabled vocabulary, otherwise the handling fails with
+`Event source {S} returned {T} for aggregate {A}, which is not a domain event (accepted: ...)`.
+
+A Spring Data aggregate with `@DomainEvents` and `@AfterDomainEventPublication` needs no source in a Spring Boot
+application: its events are published when the repository saves it and reach sagas through the starter's inbound
+route, like any event published through `ApplicationEventPublisher`. If you register a source for such an aggregate
+anyway, it takes and clears the events before the save, so Spring Data publishes nothing for them and each event
+reaches the saga once.
+
+## Another vocabulary
+
+A team with its own markers implements `DomainTypeResolver` (`core.spi.model`): it names the vocabulary, answers which
+role a type has (`role`, or `roles` when one class could carry two), which members identify or link it
+(`identifiers`), whether an executable is a command handler (`commandHandler`), and how its markers read in error
+texts (`describe`, `describeIdentifier`). An empty answer means "this vocabulary does not mark it". With the starter,
+define the resolver as a bean; by hand, pass `DomainTypes.of(resolver)` to the runtime, the transport and the fixture.
+`saga-forge-jmolecules`' `JMoleculesDomainTypeResolver` is the worked example.
+
+## Checking what is enabled
+
+The `sagaforge` Actuator endpoint lists `vocabularies` (Saga Forge's first) and `eventSources` (class names, in the
+order the runtime asks them). Error texts name the marker the model used, for example
+`jMolecules @CommandHandler method handle in NoCommandHandler must declare exactly one command parameter (@Command, or jMolecules @Command), found 0`;
+see [Validation rules](validation-rules.md#vocabularies-of-markers).
+
 <!-- docs/guide/testing.md -->
 
 # Testing with `SagaFixture`
@@ -1737,6 +1965,27 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 
 With a chosen `instance(...)`, only that instance's outcome event counts. `result().outcomeEvents()` lists them for
 your own assertions. Build the fixture with `outcomeEvents(false)` to match an application that switched them off.
+
+## A jMolecules domain
+
+A model marked with jMolecules (see [Vocabularies](vocabularies.md)) passes its `DomainTypes` to the builder, and an
+aggregate that holds its events gets its `AggregateEventSource`, which takes effect where aggregate handlers run
+(`handlers(...)` mode or `handleAggregates`):
+
+```java
+  private SagaFixture fixture() {
+    return SagaFixture.of(OrderProcessingSaga.class, Order.class)
+        .domainTypes(DomainTypes.of(new JMoleculesDomainTypeResolver()))
+        .handlers(payments)
+        .aggregateEventSource(new OrderEventSource())
+        .build();
+  }
+```
+
+Source: `saga-forge-example-jmolecules/src/test/java/io/github/gkosharovdev/sagaforge/example/jmolecules/OrderProcessingSagaFixtureTest.java`.
+
+The fixture has no Spring, so events that Spring would publish (Spring Data `@DomainEvents` on save) do not reach the
+saga in a fixture test: register an event source for such an aggregate in the test.
 
 ## What the fixture catches before production
 
@@ -2211,6 +2460,13 @@ status in later releases.
 | 11 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |
 
 Further constraints of the model:
+
+- **jMolecules domains** (see [Vocabularies](vocabularies.md)): an outbox command still needs Saga Forge's
+  `@Command(delivery = OUTBOX)` beside jMolecules' `@Command` (G-016-01); a fixture test sees no Spring-published
+  events, so a Spring Data aggregate's `@DomainEvents` need an event source registered in the test (G-016-02); a
+  plain-typed identifier (`String`, `UUID`) on an event or command is never a link, mark it `@Association` (G-016-05);
+  the in-memory transport keys an event linked only by identifier type by that type's name rather than the
+  aggregate's, which still orders one aggregate's events together (G-016-06).
 
 - **`SagaContext` values must be JSON scalars on Postgres** (`String`, `Boolean`, `Integer`, `Long`, finite `Double`,
   `List`, `Map` with `String` keys). Store `BigDecimal` as a string; a small `Long` reads back as `Integer` (G-003-07).

@@ -23,9 +23,11 @@ Requires Java 21 and Spring Boot 4.1.
 | Aggregates without `@AggregateLoader`/`@AggregateSaver` | their Spring Data repository (`findById`/`save`) | `AggregateResolver` |
 | Domain events as Spring application events | every recorded event, and every `EventPublisher` publication, published inside its transaction (`application-events.mode=in-transaction`) | set `saga-forge.application-events.mode` |
 | Spring events to sagas | an event published through `ApplicationEventPublisher` whose type a saga has a step for is stored for sagas in the publishing transaction | `saga-forge.application-events.inbound.enabled=false` |
+| Vocabularies of domain markers | Saga Forge's annotations, plus jMolecules' markers when `saga-forge-jmolecules` is on the class path; every `DomainTypeResolver` bean adds one | `DomainTypes`; `saga-forge.jmolecules.enabled=false` |
+| Aggregate event sources | every `AggregateEventSource` bean, asked in `@Order` order after each aggregate command handler; none by default (Spring Data `@DomainEvents` reach sagas through the inbound route) | — (define or omit the beans) |
 | Lifecycle | the runtime starts after the context refreshed, then the transport; on shutdown the transport stops first | — |
 | Spring Modulith | with its event publication registry present, the transport stores its messages there: one outbox | `saga-forge.transport.modulith-interop=false` |
-| Actuator | with Actuator present, a read-only `sagaforge` endpoint and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
+| Actuator | with Actuator present, a read-only `sagaforge` endpoint (counts, leadership, `vocabularies`, `eventSources`) and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
 | OpenTelemetry | the application's `OpenTelemetry` bean (Spring Boot's OpenTelemetry setup, or Micrometer Tracing's OpenTelemetry bridge) handed to the runtime and the transport: saga spans inside the request's trace, saga metrics, trace context stored with every message | `SagaForgeTelemetry`, or `saga-forge.telemetry.*` |
 
 Every bean backs off when the application defines one of the same type. Two `SagaRuntime` beans fail startup.
@@ -312,6 +314,7 @@ instance delivers.
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
+| `saga-forge.jmolecules.enabled` | `true` | Whether jMolecules' aggregate, event, command and command handler markers are recognised when `saga-forge-jmolecules` is on the class path. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events, and events published through `EventPublisher`, are published as Spring application events inside the transaction. `after-delivery` (deprecated, refused while the inbound route is on): published when the transport delivers them, after the commit. `none`: not published. |
 | `saga-forge.application-events.inbound.enabled` | `true` | Whether events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) whose type a saga has a step for are stored for sagas, in the publishing transaction. |

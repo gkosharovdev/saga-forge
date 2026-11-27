@@ -1,9 +1,10 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.SagaModel.Compensation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.UnitOfWork.Collaborators;
@@ -146,10 +147,11 @@ final class RunCompensation implements UnitOfWork.Work<SagaInstance, RunCompensa
   @Override
   public void recorded(Recording recording, WorkContext context) {
     Object domainEvent = recording.event();
-    if (!domainEvent.getClass().isAnnotationPresent(DomainEvent.class)) {
+    DomainTypes domainTypes = context.settings().domainTypes();
+    if (!domainTypes.isDomainEvent(domainEvent.getClass())) {
       IllegalArgumentException invalid =
           new IllegalArgumentException(
-              domainEvent.getClass().getName() + " is not annotated @DomainEvent");
+              domainTypes.notMarkedMessage(domainEvent.getClass(), DomainRole.DOMAIN_EVENT));
       context.reportFailure(invalid);
       throw invalid;
     }

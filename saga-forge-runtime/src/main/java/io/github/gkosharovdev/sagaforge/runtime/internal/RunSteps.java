@@ -1,6 +1,5 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
@@ -400,15 +399,9 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
     deadlines.stepCompleted(currentStep, context.lifecycle());
   }
 
-  private static AggregateReference touchedAggregateOf(Object domainEvent, WorkContext context) {
+  private AggregateReference touchedAggregateOf(Object domainEvent, WorkContext context) {
     try {
-      DomainEvent annotation = domainEvent.getClass().getAnnotation(DomainEvent.class);
-      if (annotation == null) {
-        throw new IllegalArgumentException(
-            domainEvent.getClass().getName() + " is not annotated @DomainEvent");
-      }
-      return AggregateReference.of(
-          annotation.aggregate(), Reflection.aggregateIdentifier(domainEvent));
+      return with.eventAggregates().touchedBy(domainEvent);
     } catch (RuntimeException invalid) {
       context.reportFailure(invalid);
       throw invalid;

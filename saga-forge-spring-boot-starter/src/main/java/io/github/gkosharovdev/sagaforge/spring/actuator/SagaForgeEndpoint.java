@@ -1,9 +1,12 @@
 package io.github.gkosharovdev.sagaforge.spring.actuator;
 
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Supplier;
@@ -14,20 +17,41 @@ import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
  * Read-only operator view of the message store ({@code specs/008-spring-boot-starter} FR-020,
  * contracts/actuator.md): message counts per status, capped at 1,000 each, the age of the oldest
  * unconsumed message, and this instance's relay role with the store's leader ({@code
- * specs/013-active-standby-relay} FR-022). No write operation (G-008-02).
+ * specs/013-active-standby-relay} FR-022), the enabled vocabularies of domain markers and the
+ * registered aggregate event sources ({@code specs/016-marker-spi-jmolecules} FR-030). No write
+ * operation (G-008-02).
  */
 @Endpoint(id = "sagaforge")
 public class SagaForgeEndpoint {
 
   private final MessageStoreQueries queries;
   private final Supplier<LeadershipStatus> leadership;
+  private final DomainTypes domainTypes;
+  private final List<String> eventSources;
 
   /**
+   * An endpoint reporting Saga Forge's annotations as the only vocabulary.
+   *
    * @param leadership this instance's view of the leadership, read on every request
    */
   public SagaForgeEndpoint(MessageStoreQueries queries, Supplier<LeadershipStatus> leadership) {
+    this(queries, leadership, DomainTypes.builtIn(), List.of());
+  }
+
+  /**
+   * @param leadership this instance's view of the leadership, read on every request
+   * @param domainTypes the vocabularies the runtime recognises, listed by name
+   * @param eventSources the aggregate event sources the runtime asks, in order, listed by class
+   */
+  public SagaForgeEndpoint(
+      MessageStoreQueries queries,
+      Supplier<LeadershipStatus> leadership,
+      DomainTypes domainTypes,
+      List<? extends AggregateEventSource> eventSources) {
     this.queries = queries;
     this.leadership = leadership;
+    this.domainTypes = domainTypes;
+    this.eventSources = eventSources.stream().map(source -> source.getClass().getName()).toList();
   }
 
   @ReadOperation
@@ -39,6 +63,8 @@ public class SagaForgeEndpoint {
     payload.put("counts", counts);
     status.oldestUnconsumed().ifPresent(age -> payload.put("oldestUnconsumed", age.toString()));
     payload.put("leadership", leadership(leadership.get()));
+    payload.put("vocabularies", domainTypes.vocabularies());
+    payload.put("eventSources", eventSources);
     return payload;
   }
 

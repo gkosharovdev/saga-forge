@@ -12,6 +12,7 @@ import io.github.gkosharovdev.sagaforge.core.operations.SagaInstanceQuery;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner;
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
@@ -30,6 +31,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineRuntime;
@@ -347,7 +349,8 @@ public final class SagaRuntime implements EventReceiver {
    * of both (FR-034, FR-035).
    */
   private ValidationReport checked() {
-    ValidationReport validation = new ReflectiveAnnotationScanner().validateAll(registered);
+    ValidationReport validation =
+        new ReflectiveAnnotationScanner(settings.domainTypes()).validateAll(registered);
     StartupReport report =
         new StartupReport(validation, EngineRuntime.startupErrors(registered, settings));
     if (!report.isValid()) {
@@ -423,6 +426,8 @@ public final class SagaRuntime implements EventReceiver {
     private boolean outcomeEvents = true;
     private Function<String, Optional<String>> propertyResolver = key -> Optional.empty();
     private RecoverySettings recovery = RecoverySettings.defaults();
+    private DomainTypes domainTypes = DomainTypes.builtIn();
+    private final List<AggregateEventSource> aggregateEventSources = new ArrayList<>();
 
     private Builder() {}
 
@@ -625,6 +630,33 @@ public final class SagaRuntime implements EventReceiver {
       return this;
     }
 
+    /**
+     * Optional: the vocabularies of domain markers the registered model is read with ({@code
+     * specs/016-marker-spi-jmolecules}). Default {@link DomainTypes#builtIn()}: Saga Forge's
+     * {@code @Aggregate}, {@code @AggregateIdentifier}, {@code @DomainEvent}, {@code @Command} and
+     * {@code @CommandHandler}. Pass {@code DomainTypes.of(new JMoleculesDomainTypeResolver())} for
+     * a domain marked with jMolecules; give the transport the same instance.
+     *
+     * @throws IllegalArgumentException if {@code domainTypes} is {@code null}
+     */
+    public Builder domainTypes(DomainTypes domainTypes) {
+      this.domainTypes = requireNonNull(domainTypes, "domainTypes");
+      return this;
+    }
+
+    /**
+     * Optional, repeatable: a source of the events aggregates hold, asked after an aggregate's
+     * command handler returned and before the aggregate is saved ({@code
+     * specs/016-marker-spi-jmolecules} FR-020). The first registered source supporting the
+     * aggregate's class takes them; none by default.
+     *
+     * @throws IllegalArgumentException if {@code source} is {@code null}
+     */
+    public Builder aggregateEventSource(AggregateEventSource source) {
+      aggregateEventSources.add(requireNonNull(source, "aggregateEventSource"));
+      return this;
+    }
+
     /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
     public Builder logger(System.Logger logger) {
       this.logger = requireNonNull(logger, "logger");
@@ -646,7 +678,8 @@ public final class SagaRuntime implements EventReceiver {
       requirePresent(contextStore, "contextStore");
       requirePresent(transactions, "transactions");
       requirePresent(dispatcher, "dispatcher");
-      if (handlerInstances == null && EngineRuntime.needsHandlerInstances(registered)) {
+      if (handlerInstances == null
+          && EngineRuntime.needsHandlerInstances(registered, domainTypes)) {
         throw new IllegalStateException(
             "A registered class hosts a service @CommandHandler, an"
                 + " @AggregateLoader or an @AggregateSaver, but no handlerInstances(...) was given");
@@ -680,7 +713,9 @@ public final class SagaRuntime implements EventReceiver {
           openTelemetry,
           telemetry,
           outcomeEvents,
-          propertyResolver);
+          propertyResolver,
+          domainTypes,
+          aggregateEventSources);
     }
 
     private static String randomId() {

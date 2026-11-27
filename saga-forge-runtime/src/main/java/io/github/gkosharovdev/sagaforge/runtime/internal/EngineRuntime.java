@@ -1,9 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
@@ -12,6 +10,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
@@ -99,14 +98,15 @@ public final class EngineRuntime {
             gateway,
             diagnostics,
             gateway.instrumentation(),
-            EventSubscriptions.of(registered));
+            EventSubscriptions.of(registered),
+            EventAggregates.of(registered, settings.domainTypes()));
     InstanceLocks instanceLocks = new InstanceLocks();
     return new EngineRuntime(
         sagas,
         new EventRouter(sagas, with, instanceLocks),
         new CommandFailureHandler(sagas, with, instanceLocks),
         gateway,
-        new EngineEventPublisher(settings.dispatcher()),
+        new EngineEventPublisher(settings.dispatcher(), settings.domainTypes()),
         new EngineSagaOperations(sagas, with, instanceLocks, recovery),
         with);
   }
@@ -116,8 +116,9 @@ public final class EngineRuntime {
    * {@code @AggregateLoader} or an {@code @AggregateSaver} instance method, so a {@code
    * HandlerInstanceProvider} must supply its instances.
    */
-  public static boolean needsHandlerInstances(Collection<Class<?>> registered) {
-    return registered.stream().anyMatch(EngineRuntime::needsHostInstance);
+  public static boolean needsHandlerInstances(
+      Collection<Class<?>> registered, DomainTypes domainTypes) {
+    return registered.stream().anyMatch(type -> needsHostInstance(type, domainTypes));
   }
 
   /**
@@ -218,12 +219,16 @@ public final class EngineRuntime {
     }
   }
 
-  private static boolean needsHostInstance(Class<?> type) {
+  private static boolean needsHostInstance(Class<?> type, DomainTypes domainTypes) {
     if (type.isAnnotationPresent(Saga.class)) {
       return false;
     }
     boolean serviceHandlers =
-        !type.isAnnotationPresent(Aggregate.class) && hasInstanceMethod(type, CommandHandler.class);
+        !domainTypes.isAggregate(type)
+            && Reflection.methodsWhere(
+                    type, method -> domainTypes.commandHandler(method).isPresent())
+                .stream()
+                .anyMatch(method -> !Modifier.isStatic(method.getModifiers()));
     return serviceHandlers
         || hasInstanceMethod(type, AggregateLoader.class)
         || hasInstanceMethod(type, AggregateSaver.class);

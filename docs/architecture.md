@@ -29,6 +29,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Observability (OpenTelemetry API instrumentation of the runtime and the in-memory transport: span tree per handling, trace context stored with each message, saga and message-store metrics, trace ids in diagnostics, `SagaTelemetrySettings`, starter `saga-forge.telemetry.*`) | Implemented, tested, including container suites (Postgres restart continuity, Spring with Micrometer Tracing's OpenTelemetry bridge) ([010](../specs/010-otel-observability/spec.md)) |
 | Saga deadlines and scheduled commands (`@StartDeadline`/`@DeadlineExpired`, `DeadlineReached`, trigger kind `DEADLINE_EXPIRED`, `SagaInstance.openDeadlines`, `CommandGateway.schedule`/`cancel`, `MessageStore` due times and `cancel`, status `CANCELLED`, rules R24 to R29, Properties 40 to 43) | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites ([017](../specs/017-saga-deadlines/spec.md)); not with Spring Modulith interop (G-017-01), which the starter leaves off for a model with deadlines unless set ([014](../specs/014-publish-once/spec.md)) |
 | Publish once ([014](../specs/014-publish-once/spec.md)): events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) reach sagas, `EventPublisher` publishes to Spring, a recorded event its own instance ran in process also reaches other saga types (Property 47, `EventReceiver.receive(event, sourceSagaId)`) | Implemented in core, the runtime, the in-memory transport, the starter and the fixture, tested without containers; the starter's `PublishOnceContainerTest` is written and compiles, not yet run against Postgres |
+| Vocabularies of domain markers and harvested events ([016](../specs/016-marker-spi-jmolecules/spec.md)): `core.spi.model` (`DomainTypes`, `DomainTypeResolver`, `DomainRole`, `Marker`, `IdentifierMember`), rules R30 and R31, Properties 48 and 49; `saga-forge-jmolecules` (`JMoleculesDomainTypeResolver`); `core.spi.AggregateEventSource` | Implemented in core, the runtime, the in-memory transport, the starter (`saga-forge.jmolecules.enabled`, event source beans) and the fixture, tested, including the jMolecules example's container test; no Modulith-interop harvest test (G-016-07) |
 | Saga operations (`SagaRuntime.operations()`: instance queries, `resumeCompensation`/`compensate`/`markResolved` with `OperatorRequest`, `recover()`; recovery sweeps with `RecoverySettings`/`AbandonedStartPolicy`; stranded-start adoption; `SagaResolution`, `compensationRound`; the starter's `sagas` Actuator endpoint) | Implemented in core, the runtime, Postgres, the starter and the fixture, tested, including container suites ([015](../specs/015-saga-operations/spec.md)); no retry of a failed step (G-015-01) |
 
 ## Module responsibilities
@@ -38,6 +39,11 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   no implementation), `DomainEvents.record`, and the SPI contracts. Zero runtime dependencies, including no
   Spring dependency. This is deliberate: the annotation model and validation rules must be usable from a
   future non-Spring runtime without forcing a Spring dependency on every consumer.
+- **`saga-forge-jmolecules`** — the jMolecules vocabulary (016): `JMoleculesDomainTypeResolver` recognises
+  jMolecules' aggregate, domain event, command and command handler markers, `@Identity` and link members
+  (`Association`, `@Association`, `Identifier`-typed members) as Saga Forge domain roles, so a domain that depends
+  only on jMolecules needs no Saga Forge annotation. Depends on `saga-forge-core` and `jmolecules-ddd`, with the events
+  and CQRS artifacts optional. See [Vocabularies of domain markers](#vocabularies-of-domain-markers).
 - **`saga-forge-runtime`** — the saga runtime over the core SPI, depending on `saga-forge-core` and the JDK only.
   `SagaRuntime` is the `EventReceiver` transports deliver to: it routes each event to saga types and instances by
   association, runs each saga-scoped unit of work in the host's local transaction through `TransactionBoundary`,
@@ -150,7 +156,8 @@ choreography — it is layered on top of an event-driven delivery mechanism, not
 
 This process state is also the intended foundation for **downstream policies**: a policy that needs to know
 "has the payment step for this booking already completed" should be able to answer that by reading saga
-process state (through a `@ReadModel`-backed repository) rather than re-deriving it from raw event history.
+process state (through a read-model repository; a `@ReadModel` marker is a possible future addition, not part of the
+annotation model) rather than re-deriving it from raw event history.
 
 ## How saga instances exchange messages (in-memory transport)
 
@@ -479,8 +486,8 @@ What remains to be built (the runtime/persistence half):
   `StorageProvider` can hold that state, but no engine round-trips it yet, so cross-unit-of-work persistence
   of `SagaContext` state is still unbuilt.
 - This is also the mechanism that should back the "process state available to downstream policies" principle
-  already stated in the "Why orchestration on an event-driven substrate" section above — a `@ReadModel`-backed
-  policy reading saga state should be reading through this same `SagaContext`-backed state, not a parallel
+  already stated in the "Why orchestration on an event-driven substrate" section above — a policy reading saga
+  state through a read model should be reading through this same `SagaContext`-backed state, not a parallel
   mechanism.
 
 ### Idempotent step execution
@@ -600,23 +607,37 @@ Known limitations: no deadlines with Spring Modulith interop (G-017-01; the star
 interval (G-017-04); a deadline leased before its cancel is delivered and ignored (G-017-05); a scheduled command is not
 cancelled with its saga (G-017-06).
 
-## jMolecules consideration
+## Vocabularies of domain markers
 
-[jMolecules](https://github.com/xmolecules/jmolecules) provides DDD/architecture marker annotations
-(`@AggregateRoot`, `@Entity`, `@Service`, etc.) and structural tests that verify a codebase actually respects
-them. Saga Forge's own markers (`@DomainEvent`, `@Command`, `@ReadModel`) already play a similar role, but
-narrower — they mark types for the scanner, not for architectural verification.
+Since [016](../specs/016-marker-spi-jmolecules/spec.md) the scanner, the runtime, the in-memory transport, the starter
+and the fixture never read Saga Forge's domain annotations (`@Aggregate`, `@AggregateIdentifier`, `@DomainEvent`,
+`@Command`, `@CommandHandler`) directly; they ask `core.spi.model.DomainTypes`, which composes **vocabularies**:
 
-The intended integration, not yet decided or built, is **optional interop, not a hard dependency**:
+- A vocabulary is a `DomainTypeResolver`: for a type it answers the **role** (`DomainRole`: aggregate, domain event,
+  command) with the `Marker` that gives it, the **identifier members** (an aggregate's identity, an event's or
+  command's link to its aggregate, as `IdentifierMember`s, which may name the aggregate and unwrap a typed id), and
+  whether a method or constructor is a **command handler**. It also says how error texts name its markers.
+- Saga Forge's annotations are the built-in vocabulary, always enabled and asked first. With only it enabled, every
+  error text is the one the scanner gave before 016. Other vocabularies are enabled per runtime
+  (`SagaRuntime.Builder.domainTypes(DomainTypes.of(...))`, the transport's and the fixture's builders likewise; the
+  starter builds one `DomainTypes` from every `DomainTypeResolver` bean).
+- Two rules exist only because of vocabularies: **R30**, a type has one role and its vocabularies agree on its
+  identifiers; **R31**, every event and command of another vocabulary concerns a known aggregate, either named on its
+  link or found by the link's identifier type. Delivery stays Saga Forge's: a command handled after the sender commits
+  keeps `@Command(delivery = OUTBOX)` beside the other vocabulary's marker.
+- `saga-forge-jmolecules` is the shipped vocabulary. Core stays free of dependencies; the module depends on
+  `jmolecules-ddd`, probes the optional events and CQRS artifacts, and the starter enables it when it is on the class
+  path (`saga-forge.jmolecules.enabled`, default `true`). Associations use an identifier's text form, so typed ids keep
+  a stable `toString()`.
 
-- `saga-forge-core` should keep its own `@DomainEvent`/`@Command`/`@ReadModel` annotations as the primary
-  contract the scanner validates against, since the framework cannot require every consumer to adopt
-  jMolecules.
-- A thin, separately-versioned adapter could recognize jMolecules' `@Event`, `@Service`-style annotations as
-  equivalent, so teams already using jMolecules don't have to double-annotate their types. This is additive
-  and should not change `saga-forge-core`'s zero-dependency posture.
-- Until this is designed in detail, treat jMolecules support as unimplemented and don't assume any
-  recognition of jMolecules annotations exists.
+**Events held on the aggregate.** Aggregates in jMolecules and Spring Data style keep their pending events instead of
+calling `DomainEvents.record`. An `AggregateEventSource` (`core.spi`) takes them: after an aggregate's command handler
+returns and before the aggregate is saved, the runtime asks the first registered source that supports the aggregate's
+class and records each event as `DomainEvents.record` would, after any the handler recorded itself (Property 49).
+Service handlers are never harvested. The starter passes every `AggregateEventSource` bean in `@Order` and defines none:
+the convention for holding events is the application's. With a Spring Data aggregate, a source that also clears the
+events means Spring Data publishes nothing on save; without one, Spring Data's `@DomainEvents` publication reaches the
+saga through 014's inbound route, so each step and each Spring listener sees an event once either way.
 
 ## Vocabulary
 
@@ -646,8 +667,8 @@ Saga Forge borrows its vocabulary from DDD / EventStorming rather than inventing
 - **Policy** — the cross-aggregate rule a saga encodes: "when X happens, Y should happen." A `@Saga` class is
   a declarative expression of one or more related policies, scoped by a shared association property.
 - **Projection** (Read Model) — a denormalized view built from events, used to enrich a step's decision
-  without reaching into another aggregate's internals. Accessed via a repository injected into the saga;
-  types exposed this way are marked `@ReadModel`.
+  without reaching into another aggregate's internals. Accessed via a repository injected into the saga. Saga Forge
+  has no read-model annotation today; a `@ReadModel` marker is a possible future addition (G-002-04).
 - **Saga** — the durable, single-process orchestrator for one instance of a policy, identified by `@SagaId`
   and correlated to events via `associationProperty`. Not to be confused with the Saga pattern in the generic
   distributed-transaction sense — here it specifically means an annotated class matching this framework's

@@ -50,10 +50,12 @@
         <module>saga-forge-storage-mongodb</module>
         <module>saga-forge-storage-mysql</module>
         <module>saga-forge-transport-inmemory</module>
+        <module>saga-forge-jmolecules</module>
         <module>saga-forge-transport-kafka</module>
         <module>saga-forge-spring-boot-starter</module>
         <module>saga-forge-example</module>
         <module>saga-forge-example-spring</module>
+        <module>saga-forge-example-jmolecules</module>
     </modules>
 
     <properties>
@@ -64,6 +66,8 @@
         <jqwik.version>1.9.2</jqwik.version>
         <assertj.version>3.27.3</assertj.version>
         <archunit.version>1.4.1</archunit.version>
+        <!-- 016: the jMolecules vocabulary module and example -->
+        <jmolecules-bom.version>2025.0.2</jmolecules-bom.version>
         <!-- The version Spring Boot 4.1.x manages, so applications get one API version (010 research §10) -->
         <opentelemetry.version>1.62.0</opentelemetry.version>
         <!-- Release profile: whether a validated deployment is published without a manual step in the portal -->
@@ -99,6 +103,13 @@
                 <artifactId>assertj-core</artifactId>
                 <version>${assertj.version}</version>
                 <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.jmolecules</groupId>
+                <artifactId>jmolecules-bom</artifactId>
+                <version>${jmolecules-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
             <!-- 011: keeps the runtime's transaction boundary in one class (UnitOfWorkBoundaryTest) -->
             <dependency>
@@ -222,6 +233,7 @@
                             <excludeArtifacts>
                                 <artifact>saga-forge-example</artifact>
                                 <artifact>saga-forge-example-spring</artifact>
+                                <artifact>saga-forge-example-jmolecules</artifact>
                                 <artifact>saga-forge-storage-mysql</artifact>
                                 <artifact>saga-forge-storage-mongodb</artifact>
                                 <artifact>saga-forge-transport-kafka</artifact>

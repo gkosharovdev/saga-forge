@@ -3,9 +3,11 @@ package io.github.gkosharovdev.sagaforge.spring.transport;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
+import io.github.gkosharovdev.sagaforge.spring.runtime.SagaForgeDomainTypesConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetry;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
@@ -29,7 +31,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  * {@link TransportLifecycle} that starts it around the started runtime and stops it first.
  */
 @AutoConfiguration(
-    after = {SpringTransactionConfiguration.class, PostgresStorageConfiguration.class})
+    after = {
+      SagaForgeDomainTypesConfiguration.class,
+      SpringTransactionConfiguration.class,
+      PostgresStorageConfiguration.class
+    })
 @ConditionalOnProperty(
     prefix = "saga-forge",
     name = "enabled",
@@ -59,7 +65,8 @@ public class InMemoryTransportConfiguration {
       TransportProperties properties,
       ThreadPoolTaskExecutor sagaForgeTransportExecutor,
       ObjectProvider<SagaForgeTelemetry> telemetry,
-      ObjectProvider<Clock> clock) {
+      ObjectProvider<Clock> clock,
+      ObjectProvider<DomainTypes> domainTypes) {
     SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
     return InMemoryTransport.builder()
         .messageStore(messageStore)
@@ -69,6 +76,7 @@ public class InMemoryTransportConfiguration {
         .clock(clock.getIfUnique(Clock::systemUTC))
         .openTelemetry(resolved.openTelemetry())
         .telemetry(resolved.settings())
+        .domainTypes(domainTypes.getIfAvailable(DomainTypes::builtIn))
         .build();
   }
 

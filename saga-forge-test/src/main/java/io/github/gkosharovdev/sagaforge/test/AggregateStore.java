@@ -1,14 +1,16 @@
 package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * The fixture's aggregates in handler mode (research §7): keyed by type and
- * {@code @AggregateIdentifier} value, seeded with {@code givenAggregates} and read with {@code
+ * The fixture's aggregates in handler mode (research §7): keyed by type and identifier value (as
+ * {@link DomainTypes} reads it), seeded with {@code givenAggregates} and read with {@code
  * SagaFixture.aggregate}. As the runtime's {@link AggregateResolver} it loads and saves the
  * registered aggregate types that have no {@code @AggregateLoader}; a client loader and saver keep
  * precedence. Writes roll back with the unit of work. A loaded aggregate is a copy, so a handler
@@ -20,10 +22,12 @@ final class AggregateStore implements AggregateResolver, FixtureTransactions.Par
   private record Key(Class<?> type, Object id) {}
 
   private final Set<Class<?>> aggregateTypes;
+  private final DomainTypes domainTypes;
   private Map<Key, Object> aggregates = new LinkedHashMap<>();
 
-  AggregateStore(Set<Class<?>> aggregateTypes) {
+  AggregateStore(Set<Class<?>> aggregateTypes, DomainTypes domainTypes) {
     this.aggregateTypes = Set.copyOf(aggregateTypes);
+    this.domainTypes = domainTypes;
   }
 
   @Override
@@ -55,8 +59,8 @@ final class AggregateStore implements AggregateResolver, FixtureTransactions.Par
     if (aggregate == null) {
       throw new IllegalArgumentException("aggregate must not be null");
     }
-    if (!Model.isAggregate(aggregate.getClass())) {
-      throw new IllegalArgumentException(aggregate.getClass().getName() + " is not an @Aggregate");
+    if (!domainTypes.isAggregate(aggregate.getClass())) {
+      throw new IllegalArgumentException(notAnAggregate(aggregate.getClass()));
     }
     put(Model.shallowCopy(aggregate));
   }
@@ -66,7 +70,23 @@ final class AggregateStore implements AggregateResolver, FixtureTransactions.Par
   }
 
   private void put(Object aggregate) {
-    aggregates.put(new Key(aggregate.getClass(), Model.aggregateIdentifier(aggregate)), aggregate);
+    aggregates.put(new Key(aggregate.getClass(), identifier(aggregate)), aggregate);
+  }
+
+  /** Saga Forge's text before vocabularies, or one listing every vocabulary's markers. */
+  private String notAnAggregate(Class<?> type) {
+    return domainTypes.vocabularies().size() == 1
+        ? type.getName() + " is not an @Aggregate"
+        : domainTypes.notMarkedMessage(type, DomainRole.AGGREGATE);
+  }
+
+  /** The aggregate's identifier; the reason it has none is an {@link IllegalArgumentException}. */
+  private Object identifier(Object aggregate) {
+    try {
+      return domainTypes.identifierValue(aggregate);
+    } catch (IllegalStateException unreadable) {
+      throw new IllegalArgumentException(unreadable.getMessage(), unreadable);
+    }
   }
 
   @Override

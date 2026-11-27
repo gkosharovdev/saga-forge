@@ -1,14 +1,13 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
-import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.annotation.SagaStep;
 import io.github.gkosharovdev.sagaforge.core.annotation.StartDeadline;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
+import io.github.gkosharovdev.sagaforge.core.spi.model.Marker;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
@@ -82,6 +81,7 @@ final class StartupChecks {
    */
   static List<String> errorsOf(Collection<Class<?>> registered, EngineSettings settings) {
     Set<Class<?>> loadedTypes = loaderTypes(registered);
+    DomainTypes domainTypes = settings.domainTypes();
     List<String> errors = new ArrayList<>();
     for (Class<?> type : registered) {
       if (type.isAnnotationPresent(Saga.class)) {
@@ -91,19 +91,26 @@ final class StartupChecks {
         schedulingError(type, settings).ifPresent(errors::add);
         continue;
       }
-      if (type.isAnnotationPresent(Aggregate.class)
-          && hasInstanceHandler(type)
+      Optional<Method> instanceHandler =
+          domainTypes.isAggregate(type)
+              ? firstInstanceHandler(type, domainTypes)
+              : Optional.empty();
+      if (instanceHandler.isPresent()
           && !loadedTypes.contains(type)
           && !resolverSupports(type, settings)) {
         errors.add(
-            "@Aggregate "
+            domainTypes.markers(type).get(0).display()
+                + " "
                 + type.getSimpleName()
-                + " has instance-method @CommandHandler methods but"
-                + " no @AggregateLoader and no AggregateResolver supporting it");
+                + " has instance-method "
+                + handlerMarker(instanceHandler.get(), domainTypes)
+                + " methods but no @AggregateLoader and no AggregateResolver supporting it");
       }
-      handlers(type).forEach(handler -> errors.addAll(unresolvableParameters(handler, settings)));
+      handlers(type, domainTypes)
+          .forEach(handler -> errors.addAll(unresolvableParameters(handler, settings)));
       if (!settings.outbox().supportsCommands()) {
-        handlers(type).forEach(handler -> outboxCommandError(handler).ifPresent(errors::add));
+        handlers(type, domainTypes)
+            .forEach(handler -> outboxCommandError(handler, domainTypes).ifPresent(errors::add));
       }
     }
     return List.copyOf(errors);
@@ -113,19 +120,21 @@ final class StartupChecks {
    * An error if {@code handler} handles a {@code @Command(delivery = OUTBOX)} type while the outbox
    * cannot store commands ({@code specs/007-in-memory-transport} research §3, tasks.md T056).
    */
-  private static Optional<String> outboxCommandError(Executable handler) {
-    int position = commandPosition(handler.getParameters());
+  private static Optional<String> outboxCommandError(Executable handler, DomainTypes domainTypes) {
+    int position = commandPosition(handler.getParameters(), domainTypes);
     if (position < 0) {
       return Optional.empty();
     }
     Class<?> commandType = handler.getParameters()[position].getType();
-    if (commandType.getAnnotation(Command.class).delivery() != CommandDelivery.OUTBOX) {
+    if (domainTypes.delivery(commandType) != CommandDelivery.OUTBOX) {
       return Optional.empty();
     }
     return Optional.of(
         "Command "
             + commandType.getSimpleName()
-            + " handled by @CommandHandler "
+            + " handled by "
+            + handlerMarker(handler, domainTypes)
+            + " "
             + handlerName(handler)
             + " is delivered through the outbox, but the Outbox does not support commands");
   }
@@ -181,9 +190,18 @@ final class StartupChecks {
         .collect(Collectors.toSet());
   }
 
-  private static boolean hasInstanceHandler(Class<?> aggregateType) {
-    return Reflection.annotatedMethods(aggregateType, CommandHandler.class).stream()
-        .anyMatch(method -> !Modifier.isStatic(method.getModifiers()));
+  private static Optional<Method> firstInstanceHandler(
+      Class<?> aggregateType, DomainTypes domainTypes) {
+    return Reflection.methodsWhere(
+            aggregateType, method -> domainTypes.commandHandler(method).isPresent())
+        .stream()
+        .filter(method -> !Modifier.isStatic(method.getModifiers()))
+        .findFirst();
+  }
+
+  /** How a startup error names {@code handler}'s marker: {@code "@CommandHandler"} or another. */
+  private static String handlerMarker(Executable handler, DomainTypes domainTypes) {
+    return domainTypes.commandHandler(handler).map(Marker::display).orElse("@CommandHandler");
   }
 
   private static boolean resolverSupports(Class<?> aggregateType, EngineSettings settings) {
@@ -191,16 +209,16 @@ final class StartupChecks {
         .anyMatch(resolver -> resolver.supports(aggregateType));
   }
 
-  private static Stream<Executable> handlers(Class<?> host) {
+  private static Stream<Executable> handlers(Class<?> host, DomainTypes domainTypes) {
     return Stream.concat(
-        Reflection.annotatedConstructors(host, CommandHandler.class).stream(),
-        Reflection.annotatedMethods(host, CommandHandler.class).stream());
+        Reflection.constructorsWhere(host, c -> domainTypes.commandHandler(c).isPresent()).stream(),
+        Reflection.methodsWhere(host, m -> domainTypes.commandHandler(m).isPresent()).stream());
   }
 
   /** One error per non-command parameter of {@code handler} that no parameter resolver supports. */
   private static List<String> unresolvableParameters(Executable handler, EngineSettings settings) {
     Parameter[] parameters = handler.getParameters();
-    int commandPosition = commandPosition(parameters);
+    int commandPosition = commandPosition(parameters, settings.domainTypes());
     if (commandPosition < 0) {
       return List.of();
     }
@@ -221,7 +239,8 @@ final class StartupChecks {
                   .anyMatch(resolver -> resolver.supports(handler, parameter));
       if (!supported) {
         errors.add(
-            "@CommandHandler "
+            handlerMarker(handler, settings.domainTypes())
+                + " "
                 + handlerName(handler)
                 + " parameter #"
                 + (position + 1)
@@ -232,7 +251,8 @@ final class StartupChecks {
     }
     if (commandIdPositions.size() > 1) {
       errors.add(
-          "@CommandHandler "
+          handlerMarker(handler, settings.domainTypes())
+              + " "
               + handlerName(handler)
               + " declares more than one CommandId parameter: #"
               + commandIdPositions.stream()
@@ -246,9 +266,9 @@ final class StartupChecks {
    * The position of the first {@code @Command}-typed parameter, as the command gateway binds it; -1
    * if none.
    */
-  private static int commandPosition(Parameter[] parameters) {
+  private static int commandPosition(Parameter[] parameters, DomainTypes domainTypes) {
     for (int position = 0; position < parameters.length; position++) {
-      if (parameters[position].getType().isAnnotationPresent(Command.class)) {
+      if (domainTypes.isCommand(parameters[position].getType())) {
         return position;
       }
     }

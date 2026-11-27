@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
@@ -10,6 +11,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.opentelemetry.api.OpenTelemetry;
 import java.util.List;
@@ -47,6 +49,10 @@ import java.util.function.Function;
  *     default (specs/011-saga-outcome-events FR-016)
  * @param properties resolves the keys of {@code @StartDeadline(duration = "${key[:default]}")} at
  *     startup; resolves nothing by default (specs/017-saga-deadlines FR-010)
+ * @param domainTypes the vocabularies of domain markers the model is read with; {@link
+ *     DomainTypes#builtIn()} by default (specs/016-marker-spi-jmolecules)
+ * @param aggregateEventSources take the events aggregates hold after their handlers, first
+ *     supporting wins; none by default (specs/016-marker-spi-jmolecules)
  */
 public record EngineSettings(
     StorageProvider storage,
@@ -65,7 +71,9 @@ public record EngineSettings(
     OpenTelemetry openTelemetry,
     SagaTelemetrySettings telemetry,
     boolean outcomeEvents,
-    Function<String, Optional<String>> properties) {
+    Function<String, Optional<String>> properties,
+    DomainTypes domainTypes,
+    List<AggregateEventSource> aggregateEventSources) {
 
   /**
    * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -85,8 +93,51 @@ public record EngineSettings(
     requireNonNull(openTelemetry, "openTelemetry");
     requireNonNull(telemetry, "telemetry");
     requireNonNull(properties, "properties");
+    requireNonNull(domainTypes, "domainTypes");
     aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
     parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
+    aggregateEventSources = copyOf(aggregateEventSources, "aggregateEventSources");
+  }
+
+  /** Settings with Saga Forge's own domain annotations only (016). */
+  public EngineSettings(
+      StorageProvider storage,
+      SagaContextStore contextStore,
+      TransactionBoundary transactions,
+      EventDispatcher dispatcher,
+      HandlerInstanceProvider handlerInstances,
+      List<AggregateResolver> aggregateResolvers,
+      List<HandlerParameterResolver> parameterResolvers,
+      Optional<SagaObjectProvider> sagaObjects,
+      Outbox outbox,
+      Outbox.Timing outboxTiming,
+      TimeAndIdentity sources,
+      RetrySettings retry,
+      CommandInterceptor commandInterceptor,
+      OpenTelemetry openTelemetry,
+      SagaTelemetrySettings telemetry,
+      boolean outcomeEvents,
+      Function<String, Optional<String>> properties) {
+    this(
+        storage,
+        contextStore,
+        transactions,
+        dispatcher,
+        handlerInstances,
+        aggregateResolvers,
+        parameterResolvers,
+        sagaObjects,
+        outbox,
+        outboxTiming,
+        sources,
+        retry,
+        commandInterceptor,
+        openTelemetry,
+        telemetry,
+        outcomeEvents,
+        properties,
+        DomainTypes.builtIn(),
+        List.of());
   }
 
   /** Settings that resolve no deadline property (017). */

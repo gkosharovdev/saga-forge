@@ -8,6 +8,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeadershipLostException;
@@ -84,6 +85,7 @@ public final class Relay {
 
   static final String MAX_ATTEMPTS = "MAX_ATTEMPTS";
 
+  private final LogAppender appender;
   private final MessageStore messageStore;
   private final TransactionBoundary transactions;
   private final TransportSettings settings;
@@ -130,11 +132,13 @@ public final class Relay {
         logger,
         hostExecutor,
         instrumentation,
-        LeaderElector.backgroundScheduling());
+        LeaderElector.backgroundScheduling(),
+        DomainTypes.builtIn());
   }
 
   /**
    * @param leaderScheduling the thread leadership rounds run on (013)
+   * @param domainTypes the vocabularies ordering keys read identifiers with (016)
    */
   public Relay(
       MessageStore messageStore,
@@ -144,7 +148,9 @@ public final class Relay {
       Logger logger,
       Executor hostExecutor,
       TransportInstrumentation instrumentation,
-      Supplier<ScheduledExecutorService> leaderScheduling) {
+      Supplier<ScheduledExecutorService> leaderScheduling,
+      DomainTypes domainTypes) {
+    this.appender = new LogAppender(domainTypes);
     this.messageStore = messageStore;
     this.transactions = transactions;
     this.settings = settings;
@@ -177,7 +183,7 @@ public final class Relay {
                     new IllegalStateException(
                         "the in-memory transport's outbox needs the unit of work's transaction to be active"));
     messageStore.append(
-        tx, LogAppender.entries(batch, clock.instant(), instrumentation.currentContext()));
+        tx, appender.entries(batch, clock.instant(), instrumentation.currentContext()));
   }
 
   /** Whether the message store keeps due times and cancels ({@code specs/017-saga-deadlines}). */
@@ -210,8 +216,7 @@ public final class Relay {
     if (event == null) {
       throw new IllegalArgumentException("domainEvent must not be null");
     }
-    NewMessage entry =
-        LogAppender.published(event, clock.instant(), instrumentation.currentContext());
+    NewMessage entry = appender.published(event, clock.instant(), instrumentation.currentContext());
     var active = transactions.current();
     if (active.isPresent()) {
       messageStore.append(active.get(), List.of(entry));

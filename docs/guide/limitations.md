@@ -20,6 +20,13 @@ status in later releases.
 
 Further constraints of the model:
 
+- **jMolecules domains** (see [Vocabularies](vocabularies.md)): an outbox command still needs Saga Forge's
+  `@Command(delivery = OUTBOX)` beside jMolecules' `@Command` (G-016-01); a fixture test sees no Spring-published
+  events, so a Spring Data aggregate's `@DomainEvents` need an event source registered in the test (G-016-02); a
+  plain-typed identifier (`String`, `UUID`) on an event or command is never a link, mark it `@Association` (G-016-05);
+  the in-memory transport keys an event linked only by identifier type by that type's name rather than the
+  aggregate's, which still orders one aggregate's events together (G-016-06).
+
 - **`SagaContext` values must be JSON scalars on Postgres** (`String`, `Boolean`, `Integer`, `Long`, finite `Double`,
   `List`, `Map` with `String` keys). Store `BigDecimal` as a string; a small `Long` reads back as `Integer` (G-003-07).
 - **`SagaContext` values survive rollbacks and retries**: write them so that writing again is harmless.

@@ -588,7 +588,9 @@ Noted only; nothing is bumped until the starter feature decides.
   Projection says read-model types "are marked `@ReadModel`". The "downstream policies" mentions read as target
   design and are fine. Either add the annotation through a spec or reword these as future.
 - **Origin**: `docs/architecture.md` "jMolecules consideration", "Vocabulary" (Projection); noticed at 003 T027.
-- **Status**: open.
+- **Status**: closed, 2026-11-27 (016 T059): the section became "Vocabularies of domain markers" and every `@ReadModel`
+  mention, the Projection entry included, reads as a possible future addition; the constitution's Principle II no longer
+  lists it (PATCH, 016 T065).
 
 ### G-002-02: README core row misses the 002 contracts
 - **Description**: The `saga-forge-core` row of README.md's Modules table lists only the annotations, SPI
@@ -617,7 +619,9 @@ Noted only; nothing is bumped until the starter feature decides.
   "Components and Interfaces", "Progress State Persistence Model"; noticed at 003 T029.
 - **Status**: open (the user's call). 004 T103 appended Properties 21 to 28 to `saga-forge-framework/design.md`,
   each naming its test class, with a note that none of `saga-context-lifecycle/design.md`'s Properties 1 to 12 applies
-  to the engine as written; that document and the stale `SagaInstance` section are unchanged.
+  to the engine as written; that document and the stale `SagaInstance` section are unchanged. 016 appended rules R30 and
+  R31, restated Properties 16 and 17 for any vocabulary and added Properties 48 and 49; jMolecules stays out of core
+  (only `saga-forge-jmolecules` depends on it, Principle I).
 
 ## Governance
 
@@ -1152,7 +1156,7 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
    (`specs/014-publish-once`; container suites pending, G-014-06); two logs (Saga Forge's own, Modulith's registry)
 5. 015 saga operations (G-006-03, G-008-02, G-006-05, G-ENG-05) - done 2026-11-26 (`specs/015-saga-operations`), without retry
    5b. 015b retry a failed saga from its failed step (G-015-01), split from 015; after 014 and 016 (2026-11-26)
-6. 016 marker SPI and jMolecules adapter (G-ADOPT-04) - next
+6. 016 marker SPI and jMolecules adapter (G-ADOPT-04) - done 2026-11-27 (`specs/016-marker-spi-jmolecules`)
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
 8. 018 versioned schema migrations (G-003-25)
@@ -1369,8 +1373,9 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   static `DomainEvents.record`. A domain that depends only on jMolecules must double-annotate or translate events in
   the application layer. architecture.md "jMolecules consideration" states the intent, nothing is built.
 - **Origin**: booking-service feedback SF-3 (W5, W6).
-- **Status**: open (roadmap feature 016: a core marker SPI, a `saga-forge-jmolecules` module, an
-  `AggregateEventSource` SPI; fluent registration and handlers returning events rejected).
+- **Status**: closed, 2026-11-27 (`specs/016-marker-spi-jmolecules`): `core.spi.model.DomainTypes`/`DomainTypeResolver`,
+  the `saga-forge-jmolecules` module and the `AggregateEventSource` SPI. No starter Spring Data source: 014's inbound
+  route already delivers `@DomainEvents`. Limits G-016-01 to G-016-09.
 
 ### G-ADOPT-05: No process metadata on instances or messages
 - **Description**: an instance records no correlation data, and steps and handlers do not see the triggering
@@ -1711,3 +1716,61 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   a lapsed hold. It timed out once in a full local build on 2026-11-26 and passed three times out of three alone.
 - **Origin**: `specs/014-publish-once` implementation.
 - **Status**: open (watch in CI; a longer wait or a controllable clock in the transport would remove it).
+
+## Marker vocabularies (016)
+
+### G-016-01: An outbox command needs Saga Forge's `@Command` beside jMolecules'
+- **Description**: jMolecules' `@Command` has no delivery attribute, so `CommandDelivery.OUTBOX` is declared with Saga
+  Forge's `@Command(delivery = OUTBOX)` on the same type (spec D12). The domain then depends on Saga Forge for that type.
+- **Origin**: `specs/016-marker-spi-jmolecules` FR-028.
+- **Status**: open (a per-type delivery setting outside the domain would remove it; no spec).
+
+### G-016-02: The fixture sees no Spring-published events
+- **Description**: `SagaFixture` has no Spring, so events Spring Data publishes on save (`@DomainEvents`) never reach the
+  saga in a fixture test; the test registers an `AggregateEventSource` for such an aggregate.
+- **Origin**: 016 research R7.
+- **Status**: open (related to G-009-01).
+
+### G-016-03: jMolecules defines no event-holding convention
+- **Description**: `saga-forge-jmolecules` ships no `AggregateEventSource`; each application writes one for its own
+  convention (the example's `OrderEventSource`).
+- **Origin**: 016 research R7.
+- **Status**: open (ship one if jMolecules standardises a convention).
+
+### G-016-04: `DomainEvents.capture(Runnable)` knows only the built-in markers
+- **Description**: outside a unit of work `capture(Runnable)` checks recorded events against `DomainTypes.builtIn()`;
+  code capturing jMolecules events calls `capture(DomainTypes, Runnable)`.
+- **Origin**: 016 T020.
+- **Status**: open.
+
+### G-016-05: Plain-typed identifiers are never links
+- **Description**: a `String` or `UUID` member on a jMolecules event or command is not inferred to link an aggregate;
+  it needs `@Association`, or the identifier a type implementing `Identifier`.
+- **Origin**: 016 FR-016 (clarified: association field only).
+- **Status**: open by decision.
+
+### G-016-06: A by-type event is keyed by its identifier type
+- **Description**: the in-memory transport keys an event whose link names no aggregate `<identifier type>#<id>`, not
+  `<aggregate>#<id>`; R31 makes the identifier type belong to one aggregate, so per-aggregate order holds, but the key
+  differs from the same aggregate's named-link events, which are ordered separately.
+- **Origin**: 016 research R6.
+- **Status**: open (carrying a key computed by the runtime on `NewMessage` would remove it).
+
+### G-016-07: No Modulith-interop or `@TransactionalEventListener` harvest test
+- **Description**: `HarvestWithSpringDataTest` covers harvesting over a Spring Data map repository with plain
+  `@EventListener`s; the Modulith-interop and `@TransactionalEventListener` variants need a database and were not built.
+- **Origin**: 016 T049.
+- **Status**: open.
+
+### G-016-08: No equivalence property over invalid variants
+- **Description**: Property 48 is tested over valid twin models and generated event sequences; validating generated
+  invalid variants against both vocabularies (same violations) is not built.
+- **Origin**: 016 T055/T056.
+- **Status**: open.
+
+### G-016-09: Package scanning loads each candidate class
+- **Description**: scanning a package for a vocabulary's types loads each class (without initialising it) and asks
+  `DomainTypes`, because class metadata alone cannot tell an interface-marked aggregate (`AggregateRoot<T, ID>`).
+  Large scanned packages pay class loading at startup.
+- **Origin**: 016 T023.
+- **Status**: open (narrow `saga-forge.scan-packages` to the domain).

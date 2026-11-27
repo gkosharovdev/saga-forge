@@ -39,6 +39,7 @@ public class SagaForgeProperties {
   private final Telemetry telemetry = new Telemetry();
 
   private final OutcomeEvents outcomeEvents = new OutcomeEvents();
+  private final JMolecules jmolecules = new JMolecules();
 
   private final Recovery recovery = new Recovery();
 
@@ -143,6 +144,10 @@ public class SagaForgeProperties {
 
   public OutcomeEvents getOutcomeEvents() {
     return outcomeEvents;
+  }
+
+  public JMolecules getJmolecules() {
+    return jmolecules;
   }
 
   public Recovery getRecovery() {
@@ -252,6 +257,27 @@ public class SagaForgeProperties {
     /**
      * Whether a saga reaching a terminal status records an outcome event (SagaCompleted,
      * SagaFailed, SagaCompensated).
+     */
+    private boolean enabled = true;
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
+  }
+
+  /**
+   * {@code saga-forge.jmolecules.*}: jMolecules' markers as a vocabulary
+   * (specs/016-marker-spi-jmolecules), when saga-forge-jmolecules is on the class path.
+   */
+  public static class JMolecules {
+
+    /**
+     * Whether jMolecules' aggregate, event, command and command handler markers are recognised when
+     * saga-forge-jmolecules is on the class path.
      */
     private boolean enabled = true;
 

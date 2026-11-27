@@ -1,6 +1,5 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
@@ -12,6 +11,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.EngineSagaLifecycle.PendingWrite;
 import io.opentelemetry.api.common.Attributes;
@@ -96,7 +96,8 @@ final class UnitOfWork implements BoundUnitOfWork {
       CommandGateway gateway,
       Diagnostics diagnostics,
       SagaInstrumentation instrumentation,
-      EventSubscriptions subscriptions) {}
+      EventSubscriptions subscriptions,
+      EventAggregates eventAggregates) {}
 
   /**
    * What runs inside one unit of work.
@@ -122,13 +123,14 @@ final class UnitOfWork implements BoundUnitOfWork {
     T perform(WorkContext context);
 
     /**
-     * A domain event was recorded while the work ran. The default rejects a {@code null} or
-     * non-{@code @DomainEvent} event without failing the unit of work; a work may report the
-     * rejection, track the event, or {@linkplain Recording#ranHere() run it itself}.
+     * A domain event was recorded while the work ran. The default rejects a {@code null} event or
+     * one that is not a domain event in the engine's vocabularies, without failing the unit of
+     * work; a work may report the rejection, track the event, or {@linkplain Recording#ranHere()
+     * run it itself}.
      */
     default void recorded(Recording recording, WorkContext context) {
       Object event = recording.event();
-      if (event == null || !event.getClass().isAnnotationPresent(DomainEvent.class)) {
+      if (event == null || !context.settings().domainTypes().isDomainEvent(event.getClass())) {
         throw new IllegalArgumentException("Not a @DomainEvent: " + event);
       }
     }
@@ -405,6 +407,11 @@ final class UnitOfWork implements BoundUnitOfWork {
     } finally {
       ReentrancyGuard.exit();
     }
+  }
+
+  @Override
+  public DomainTypes domainTypes() {
+    return settings.domainTypes();
   }
 
   @Override

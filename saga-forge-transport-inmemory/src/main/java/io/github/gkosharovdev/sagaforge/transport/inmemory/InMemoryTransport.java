@@ -6,9 +6,11 @@ import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStore;
 import io.github.gkosharovdev.sagaforge.core.spi.store.StoredMessage;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.LeaderElector;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.Relay;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.internal.TransportInstrumentation;
 import io.opentelemetry.api.OpenTelemetry;
@@ -72,7 +74,9 @@ public final class InMemoryTransport {
             builder.clock,
             builder.logger,
             builder.executor,
-            instrumentation);
+            instrumentation,
+            LeaderElector.backgroundScheduling(),
+            builder.domainTypes);
     this.dispatcher = new TransportDispatcher(relay);
     this.outbox = new TransportOutbox(relay);
     this.queries = new MessageStoreQueries(builder.messageStore, relay, builder.clock);
@@ -258,6 +262,7 @@ public final class InMemoryTransport {
     private Logger logger = System.getLogger("io.github.gkosharovdev.sagaforge.transport");
     private OpenTelemetry openTelemetry = OpenTelemetry.noop();
     private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
+    private DomainTypes domainTypes = DomainTypes.builtIn();
 
     private Builder() {}
 
@@ -321,6 +326,16 @@ public final class InMemoryTransport {
     /** Optional: what is recorded; default {@link SagaTelemetrySettings#defaults()}. */
     public Builder telemetry(SagaTelemetrySettings value) {
       this.telemetry = requireNonNull(value, "telemetry");
+      return this;
+    }
+
+    /**
+     * Optional: the vocabularies of domain markers, which name the identifiers ordering keys are
+     * built from ({@code specs/016-marker-spi-jmolecules}); pass the runtime's instance. Default
+     * {@link DomainTypes#builtIn()}.
+     */
+    public Builder domainTypes(DomainTypes value) {
+      this.domainTypes = requireNonNull(value, "domainTypes");
       return this;
     }
 

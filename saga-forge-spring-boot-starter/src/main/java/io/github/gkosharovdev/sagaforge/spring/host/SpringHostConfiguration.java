@@ -4,6 +4,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -56,12 +58,13 @@ public class SpringHostConfiguration {
     @Bean
     @ConditionalOnMissingBean(AggregateResolver.class)
     public SpringDataAggregateResolver sagaForgeAggregateResolver(
-        ConfigurableListableBeanFactory beanFactory) {
+        ConfigurableListableBeanFactory beanFactory, ObjectProvider<DomainTypes> domainTypes) {
       ConversionService conversions =
           beanFactory.getConversionService() != null
               ? beanFactory.getConversionService()
               : DefaultConversionService.getSharedInstance();
-      return new SpringDataAggregateResolver(beanFactory, conversions);
+      return new SpringDataAggregateResolver(
+          beanFactory, conversions, domainTypes.getIfAvailable(DomainTypes::builtIn));
     }
   }
 }
