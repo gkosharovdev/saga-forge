@@ -1,6 +1,17 @@
 <!--
 Sync Impact Report
-Version change: 1.0.1 → 1.1.0 (MINOR — Development Workflow materially expanded)
+Version change: 1.1.0 → 1.1.1 (PATCH — correction; no principle semantics changed)
+Modified principles:
+  - II. Annotation-Driven, Declarative Style — removed `@ReadModel` from the annotation list: no such annotation
+    exists in saga-forge-core (memory.md G-002-04; specs/016-marker-spi-jmolecules FR-032). Domain markers may also
+    come from an enabled vocabulary (016), which keeps the model declarative; wording unchanged.
+Modified sections: none
+Added sections: none
+Removed sections: none
+Templates requiring updates: none (.specify/templates/* reference principles by number only)
+Dependent guidance updated: docs/architecture.md (@ReadModel reads as future), memory.md G-002-04 closed.
+Follow-up TODOs: none
+Previous report (1.1.0): MINOR — Development Workflow materially expanded
 Modified principles: none
 Modified sections:
   - Development Workflow — added three rules: composition over inheritance in class-level design (a class
@@ -46,7 +57,7 @@ core-level coupling to one stack defeats that goal and blocks future integration
 
 ### II. Annotation-Driven, Declarative Style
 Sagas are modeled declaratively via annotations (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`,
-`@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@ReadModel`, `@Aggregate`,
+`@EndSaga`, `@SagaCompensation`, `@DomainEvent`, `@Command`, `@Aggregate`,
 `@AggregateIdentifier`, `@CommandHandler`, `@AggregateLoader`, `@AggregateSaver`), not imperative
 orchestration code. New capabilities (retry, idempotency, failure classification, etc.) MUST be
 expressed as framework-owned annotation attributes or SPI extension points, not as aliases into
@@ -140,4 +151,4 @@ All Speckit-driven work (`/speckit-plan`, `/speckit-implement`) MUST verify comp
 Principles above before merge. Complexity that violates Principle I or IV must be explicitly justified
 in the relevant `spec.md`/`plan.md` or rejected.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-23
+**Version**: 1.1.1 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-11-27

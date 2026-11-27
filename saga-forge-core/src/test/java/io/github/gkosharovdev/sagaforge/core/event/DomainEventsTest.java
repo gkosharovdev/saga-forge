@@ -8,6 +8,8 @@ import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.TestEvent;
 import io.github.gkosharovdev.sagaforge.core.scanner.fixtures.TestEvent2;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventRecorder;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
+import io.github.gkosharovdev.sagaforge.core.spi.model.vocabulary.TestDomainTypeResolver;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -192,5 +194,33 @@ class DomainEventsTest {
     assertThat(seenElsewhere.get()).isEmpty();
     assertThat(recordFailure.get()).isInstanceOf(IllegalStateException.class);
     assertThat(recorded).isEmpty();
+  }
+
+  @Test
+  void rejectionNamesTheMissingAnnotation() {
+    assertThatThrownBy(
+            () -> DomainEvents.capture(() -> DomainEvents.record(new NotADomainEvent("o-1"))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(NotADomainEvent.class.getName() + " is not annotated @DomainEvent");
+  }
+
+  @io.github.gkosharovdev.sagaforge.core.spi.model.vocabulary.TestEvent
+  record VocabularyEvent(String id) {}
+
+  @Test
+  void captureWithVocabulariesAcceptsTheirEvents() {
+    DomainTypes types = DomainTypes.of(new TestDomainTypeResolver());
+    VocabularyEvent event = new VocabularyEvent("v-1");
+
+    assertThat(DomainEvents.capture(types, () -> DomainEvents.record(event)))
+        .containsExactly(event);
+    assertThatThrownBy(() -> DomainEvents.capture(() -> DomainEvents.record(event)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(VocabularyEvent.class.getName() + " is not annotated @DomainEvent");
+    assertThatThrownBy(
+            () -> DomainEvents.capture(types, () -> DomainEvents.record(new NotADomainEvent("n"))))
+        .hasMessage(
+            NotADomainEvent.class.getName()
+                + " is not a domain event (accepted: @DomainEvent, or @TestEvent)");
   }
 }

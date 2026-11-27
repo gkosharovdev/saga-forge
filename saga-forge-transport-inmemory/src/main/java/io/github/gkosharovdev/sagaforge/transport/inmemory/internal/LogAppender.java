@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory.internal;
 
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 import io.github.gkosharovdev.sagaforge.core.spi.store.NewMessage;
 import java.time.Instant;
@@ -16,15 +17,18 @@ import java.util.UUID;
  */
 final class LogAppender {
 
-  private LogAppender() {}
+  private final OrderingKeys orderingKeys;
+
+  LogAppender(DomainTypes domainTypes) {
+    this.orderingKeys = new OrderingKeys(domainTypes);
+  }
 
   /**
    * One entry per event, in recording order, then one per outbox command, in send order, then one
    * per scheduled message ({@code specs/017-saga-deadlines}): its own id, no ordering key, held
    * back until its {@code notBefore}.
    */
-  static List<NewMessage> entries(
-      OutgoingMessages batch, Instant now, Map<String, String> traceContext) {
+  List<NewMessage> entries(OutgoingMessages batch, Instant now, Map<String, String> traceContext) {
     List<NewMessage> entries = new ArrayList<>(batch.events().size() + batch.commands().size());
     List<Object> events = batch.events();
     for (int index = 0; index < events.size(); index++) {
@@ -36,7 +40,7 @@ final class LogAppender {
               event.getClass().getName(),
               event,
               null,
-              OrderingKeys.ofEvent(event),
+              orderingKeys.ofEvent(event),
               batch.sagaType(),
               batch.sagaId(),
               now,
@@ -51,7 +55,7 @@ final class LogAppender {
               command.getClass().getName(),
               command,
               outgoing.commandId(),
-              OrderingKeys.ofCommand(command, outgoing.commandId()),
+              orderingKeys.ofCommand(command, outgoing.commandId()),
               batch.sagaType(),
               batch.sagaId(),
               now,
@@ -80,14 +84,14 @@ final class LogAppender {
   }
 
   /** The entry of an event published outside any unit of work. */
-  static NewMessage published(Object event, Instant now, Map<String, String> traceContext) {
+  NewMessage published(Object event, Instant now, Map<String, String> traceContext) {
     return new NewMessage(
         UUID.randomUUID().toString(),
         MessageKind.EVENT,
         event.getClass().getName(),
         event,
         null,
-        OrderingKeys.ofEvent(event),
+        orderingKeys.ofEvent(event),
         null,
         null,
         now,

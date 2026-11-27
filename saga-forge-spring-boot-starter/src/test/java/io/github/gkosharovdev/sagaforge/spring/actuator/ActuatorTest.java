@@ -3,8 +3,11 @@ package io.github.gkosharovdev.sagaforge.spring.actuator;
 import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
+import io.github.gkosharovdev.sagaforge.jmolecules.JMoleculesDomainTypeResolver;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
@@ -17,6 +20,7 @@ import java.lang.reflect.Method;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -52,9 +56,47 @@ class ActuatorTest {
 
   private static final Duration LEASE = LeadershipSettings.defaults().leaseDuration();
 
+  /** An event source for the payload test. */
+  private static final class NoEvents implements AggregateEventSource {
+
+    @Override
+    public boolean supports(Class<?> aggregateType) {
+      return false;
+    }
+
+    @Override
+    public List<Object> takeEvents(Object aggregate) {
+      return List.of();
+    }
+  }
+
   private static SagaForgeHealthIndicator health(InMemoryTransport transport) {
     return new SagaForgeHealthIndicator(
         transport.queries(), transport::leadership, LEASE, Clock.systemUTC());
+  }
+
+  @Test
+  @DisplayName(
+      "the payload lists the enabled vocabularies, Saga Forge's first, and the event sources"
+          + " (016 FR-030)")
+  void vocabularies() {
+    InMemoryTransport transport = transport();
+    DomainTypes withJMolecules = DomainTypes.of(new JMoleculesDomainTypeResolver());
+    AggregateEventSource source = new NoEvents();
+
+    assertThat(new SagaForgeEndpoint(transport.queries(), transport::leadership).status())
+        .containsEntry("vocabularies", DomainTypes.builtIn().vocabularies())
+        .containsEntry("eventSources", List.of());
+    assertThat(
+            new SagaForgeEndpoint(
+                    transport.queries(), transport::leadership, withJMolecules, List.of(source))
+                .status())
+        .containsEntry("eventSources", List.of(NoEvents.class.getName()))
+        .containsEntry("vocabularies", withJMolecules.vocabularies())
+        .extractingByKey("vocabularies")
+        .asInstanceOf(InstanceOfAssertFactories.LIST)
+        .last()
+        .isEqualTo("jMolecules");
   }
 
   @Test

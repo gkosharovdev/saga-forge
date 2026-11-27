@@ -3,9 +3,11 @@ package io.github.gkosharovdev.sagaforge.test;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.telemetry.SagaTelemetrySettings;
 import io.github.gkosharovdev.sagaforge.runtime.RecoverySettings;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
@@ -404,6 +406,8 @@ public final class SagaFixture {
     private boolean outcomeEvents = true;
     private int outboxCommandAttempts = 1;
     private RecoverySettings recovery = RecoverySettings.defaults();
+    private DomainTypes domainTypes = DomainTypes.builtIn();
+    private final List<AggregateEventSource> aggregateEventSources = new ArrayList<>();
     private final Map<String, String> properties = new LinkedHashMap<>();
 
     private Builder() {}
@@ -600,6 +604,34 @@ public final class SagaFixture {
     }
 
     /**
+     * Optional: the vocabularies of domain markers the model uses
+     * (specs/016-marker-spi-jmolecules), for example {@code DomainTypes.of(new
+     * JMoleculesDomainTypeResolver())}. Default {@link DomainTypes#builtIn()}, Saga Forge's
+     * annotations only.
+     *
+     * @throws IllegalArgumentException if {@code domainTypes} is {@code null}
+     */
+    public Builder domainTypes(DomainTypes domainTypes) {
+      requireNonNull(domainTypes, "domainTypes");
+      this.domainTypes = domainTypes;
+      return this;
+    }
+
+    /**
+     * Optional, repeatable: a source of the events aggregates hold, as {@code
+     * SagaRuntime.Builder.aggregateEventSource} (specs/016-marker-spi-jmolecules FR-026). It takes
+     * effect where aggregate handlers run, that is in {@link #handlers} mode or with {@link
+     * #handleAggregates}; the first registered source supporting an aggregate wins.
+     *
+     * @throws IllegalArgumentException if {@code source} is {@code null}
+     */
+    public Builder aggregateEventSource(AggregateEventSource source) {
+      requireNonNull(source, "aggregateEventSource");
+      aggregateEventSources.add(source);
+      return this;
+    }
+
+    /**
      * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the
      * runtime's startup does (FR-003).
      *
@@ -616,16 +648,18 @@ public final class SagaFixture {
       FixtureStorage storage = new FixtureStorage();
       transactions.participant(storage);
       Set<Class<?>> aggregateTypes = new LinkedHashSet<>();
-      model.stream().filter(Model::isAggregate).forEach(aggregateTypes::add);
-      AggregateStore aggregates = new AggregateStore(aggregateTypes);
+      model.stream().filter(domainTypes::isAggregate).forEach(aggregateTypes::add);
+      AggregateStore aggregates = new AggregateStore(aggregateTypes, domainTypes);
       transactions.participant(aggregates);
 
       boolean handlerMode = !hosts.isEmpty() || handleAggregates;
       Set<Class<?>> handledTypes = new LinkedHashSet<>();
-      hosts.keySet().forEach(host -> handledTypes.addAll(Model.handledCommandTypes(host)));
+      hosts
+          .keySet()
+          .forEach(host -> handledTypes.addAll(Model.handledCommandTypes(host, domainTypes)));
       if (handlerMode) {
         aggregateTypes.forEach(
-            aggregate -> handledTypes.addAll(Model.handledCommandTypes(aggregate)));
+            aggregate -> handledTypes.addAll(Model.handledCommandTypes(aggregate, domainTypes)));
       }
       FixtureContextStore contexts =
           new FixtureContextStore(
@@ -648,6 +682,7 @@ public final class SagaFixture {
       SagaRuntime.Builder runtime =
           SagaRuntime.builder()
               .register(model.toArray(Class<?>[]::new))
+              .domainTypes(domainTypes)
               .storage(storage)
               .contextStore(contexts)
               .transactions(transactions)
@@ -670,6 +705,7 @@ public final class SagaFixture {
       if (maxTotalRetryBackoff != null) {
         runtime.maxTotalRetryBackoff(maxTotalRetryBackoff);
       }
+      aggregateEventSources.forEach(runtime::aggregateEventSource);
       SagaRuntime started = runtime.build();
       started.start();
       return new SagaFixture(

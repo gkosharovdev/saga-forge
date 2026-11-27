@@ -1,6 +1,5 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
@@ -10,6 +9,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
 import io.github.gkosharovdev.sagaforge.runtime.internal.InstanceLocks.Lease;
 import io.github.gkosharovdev.sagaforge.runtime.internal.RunSteps.Trigger;
@@ -500,13 +501,14 @@ final class EventRouter {
         reaction.saga().typeName(), sagaId, outcome, false, null, null, null, List.of());
   }
 
-  private static void requireDomainEvent(Object event) {
+  private void requireDomainEvent(Object event) {
     if (event == null) {
       throw new IllegalArgumentException("domainEvent must not be null");
     }
-    if (!event.getClass().isAnnotationPresent(DomainEvent.class)) {
+    DomainTypes domainTypes = with.settings().domainTypes();
+    if (!domainTypes.isDomainEvent(event.getClass())) {
       throw new IllegalArgumentException(
-          event.getClass().getName() + " is not annotated @DomainEvent");
+          domainTypes.notMarkedMessage(event.getClass(), DomainRole.DOMAIN_EVENT));
     }
   }
 

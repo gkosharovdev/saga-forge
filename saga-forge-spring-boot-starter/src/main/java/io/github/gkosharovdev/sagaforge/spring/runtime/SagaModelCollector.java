@@ -1,13 +1,10 @@
 package io.github.gkosharovdev.sagaforge.spring.runtime;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.spring.SagaForgeConfigurationException;
-import java.io.IOException;
-import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -29,21 +26,36 @@ import org.springframework.util.ClassUtils;
  * command handlers, loaders and savers, found in the application's auto-configuration packages and
  * {@code saga-forge.scan-packages}, among the application's beans, and from {@link
  * SagaModelContributor} beans. Events and commands are reached from signatures and are not
- * collected.
+ * collected. Aggregates and command handlers are recognised in every vocabulary of the {@link
+ * DomainTypes} ({@code specs/016-marker-spi-jmolecules}).
  */
 public final class SagaModelCollector {
 
   private final ListableBeanFactory beanFactory;
   private final List<String> extraPackages;
   private final ObjectProvider<SagaModelContributor> contributors;
+  private final DomainTypes domainTypes;
 
+  /** A collector recognising Saga Forge's annotations only. */
   public SagaModelCollector(
       ListableBeanFactory beanFactory,
       List<String> extraPackages,
       ObjectProvider<SagaModelContributor> contributors) {
+    this(beanFactory, extraPackages, contributors, DomainTypes.builtIn());
+  }
+
+  /**
+   * @param domainTypes the vocabularies that mark aggregates and command handlers
+   */
+  public SagaModelCollector(
+      ListableBeanFactory beanFactory,
+      List<String> extraPackages,
+      ObjectProvider<SagaModelContributor> contributors,
+      DomainTypes domainTypes) {
     this.beanFactory = beanFactory;
     this.extraPackages = List.copyOf(extraPackages);
     this.contributors = contributors;
+    this.domainTypes = domainTypes;
   }
 
   /**
@@ -65,23 +77,27 @@ public final class SagaModelCollector {
     }
     contributors.orderedStream().forEach(contributor -> found.addAll(contributor.classes()));
     List<Class<?>> ordered = new ArrayList<>(found);
-    ordered.sort(Comparator.comparingInt(SagaModelCollector::rank).thenComparing(Class::getName));
+    ordered.sort(Comparator.comparingInt(this::rank).thenComparing(Class::getName));
     return List.copyOf(ordered);
   }
 
-  private static int rank(Class<?> type) {
+  private int rank(Class<?> type) {
     if (type.isAnnotationPresent(Saga.class)) {
       return 0;
     }
-    return type.isAnnotationPresent(Aggregate.class) ? 2 : 1;
+    return domainTypes.isAggregate(type) ? 2 : 1;
   }
 
-  static boolean isModelClass(Class<?> type) {
-    if (type.isAnnotationPresent(Saga.class) || type.isAnnotationPresent(Aggregate.class)) {
+  /**
+   * Whether {@code type} belongs to the model: a saga, an aggregate, or the host of a command
+   * handler, loader or saver.
+   */
+  boolean isModelClass(Class<?> type) {
+    if (type.isAnnotationPresent(Saga.class) || domainTypes.isAggregate(type)) {
       return true;
     }
     for (var method : type.getDeclaredMethods()) {
-      if (method.isAnnotationPresent(CommandHandler.class)
+      if (domainTypes.commandHandler(method).isPresent()
           || method.isAnnotationPresent(AggregateLoader.class)
           || method.isAnnotationPresent(AggregateSaver.class)) {
         return true;
@@ -99,12 +115,9 @@ public final class SagaModelCollector {
             return definition.getMetadata().isIndependent();
           }
         };
-    scanner.addIncludeFilter(new ModelTypeFilter());
-    ClassLoader loader =
-        beanFactory instanceof org.springframework.beans.factory.config.ConfigurableBeanFactory c
-                && c.getBeanClassLoader() != null
-            ? c.getBeanClassLoader()
-            : ClassUtils.getDefaultClassLoader();
+    ClassLoader loader = classLoader();
+    scanner.addIncludeFilter(new SagaTypeFilter());
+    scanner.addIncludeFilter(new DomainTypeFilter(loader));
     List<Class<?>> classes = new ArrayList<>();
     for (var candidate : scanner.findCandidateComponents(basePackage)) {
       try {
@@ -123,23 +136,50 @@ public final class SagaModelCollector {
     return classes;
   }
 
-  /**
-   * Matches sagas, aggregates and classes with handler, loader or saver methods, from metadata
-   * only.
-   */
-  private static final class ModelTypeFilter implements TypeFilter {
+  private ClassLoader classLoader() {
+    return beanFactory instanceof org.springframework.beans.factory.config.ConfigurableBeanFactory c
+            && c.getBeanClassLoader() != null
+        ? c.getBeanClassLoader()
+        : ClassUtils.getDefaultClassLoader();
+  }
 
-    private static final List<Class<? extends Annotation>> TYPE_MARKERS =
-        List.of(Saga.class, Aggregate.class);
-    private static final List<Class<? extends Annotation>> METHOD_MARKERS =
-        List.of(CommandHandler.class, AggregateLoader.class, AggregateSaver.class);
+  /** Matches sagas and classes with loader or saver methods, from metadata only. */
+  private static final class SagaTypeFilter implements TypeFilter {
+
+    private static final List<String> METHOD_MARKERS =
+        List.of(AggregateLoader.class.getName(), AggregateSaver.class.getName());
 
     @Override
-    public boolean match(MetadataReader reader, MetadataReaderFactory factory) throws IOException {
+    public boolean match(MetadataReader reader, MetadataReaderFactory factory) {
       AnnotationMetadata metadata = reader.getAnnotationMetadata();
-      return TYPE_MARKERS.stream().anyMatch(marker -> metadata.hasAnnotation(marker.getName()))
-          || METHOD_MARKERS.stream()
-              .anyMatch(marker -> metadata.hasAnnotatedMethods(marker.getName()));
+      return metadata.hasAnnotation(Saga.class.getName())
+          || METHOD_MARKERS.stream().anyMatch(metadata::hasAnnotatedMethods);
+    }
+  }
+
+  /**
+   * Matches aggregates and command handler hosts in every vocabulary, which metadata cannot tell (a
+   * vocabulary may mark by interface): loads the class, without initialising it, and asks {@link
+   * DomainTypes}. A class that cannot be loaded is not a candidate (memory.md G-016-01).
+   */
+  private final class DomainTypeFilter implements TypeFilter {
+
+    private final ClassLoader loader;
+
+    private DomainTypeFilter(ClassLoader loader) {
+      this.loader = loader;
+    }
+
+    @Override
+    public boolean match(MetadataReader reader, MetadataReaderFactory factory) {
+      if (reader.getClassMetadata().isAnnotation() || reader.getClassMetadata().isInterface()) {
+        return false;
+      }
+      try {
+        return isModelClass(ClassUtils.forName(reader.getClassMetadata().getClassName(), loader));
+      } catch (ClassNotFoundException | LinkageError unloadable) {
+        return false;
+      }
     }
   }
 }

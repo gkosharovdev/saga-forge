@@ -256,6 +256,27 @@ Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/examp
 With a chosen `instance(...)`, only that instance's outcome event counts. `result().outcomeEvents()` lists them for
 your own assertions. Build the fixture with `outcomeEvents(false)` to match an application that switched them off.
 
+## A jMolecules domain
+
+A model marked with jMolecules (see [Vocabularies](vocabularies.md)) passes its `DomainTypes` to the builder, and an
+aggregate that holds its events gets its `AggregateEventSource`, which takes effect where aggregate handlers run
+(`handlers(...)` mode or `handleAggregates`):
+
+```java
+  private SagaFixture fixture() {
+    return SagaFixture.of(OrderProcessingSaga.class, Order.class)
+        .domainTypes(DomainTypes.of(new JMoleculesDomainTypeResolver()))
+        .handlers(payments)
+        .aggregateEventSource(new OrderEventSource())
+        .build();
+  }
+```
+
+Source: `saga-forge-example-jmolecules/src/test/java/io/github/gkosharovdev/sagaforge/example/jmolecules/OrderProcessingSagaFixtureTest.java`.
+
+The fixture has no Spring, so events that Spring would publish (Spring Data `@DomainEvents` on save) do not reach the
+saga in a fixture test: register an event source for such an aggregate in the test.
+
 ## What the fixture catches before production
 
 - An invalid model fails `build()` with the same `SagaRuntimeStartupException` as production

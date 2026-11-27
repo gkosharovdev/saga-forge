@@ -307,13 +307,14 @@ MongoDB storage, a Quarkus extension. See [Limitations](docs/guide/limitations.m
 
 | Module | Role |
 |---|---|
-| `saga-forge-core` | Annotations, startup validation, `CommandGateway`, `DomainEvents`/`EventPublisher`, `SagaContext`, SPI. No dependencies. |
+| `saga-forge-core` | Annotations, startup validation, `CommandGateway`, `DomainEvents`/`EventPublisher`, `SagaContext`, SPI (including `DomainTypes`/`DomainTypeResolver` vocabularies of domain markers and `AggregateEventSource`). No dependencies. |
 | `saga-forge-runtime` | The saga runtime (`SagaRuntime`): routing, units of work, retry, compensation. |
 | `saga-forge-spring-boot-starter` | Auto-configuration for Spring Boot 4.1; see [its README](saga-forge-spring-boot-starter/README.md). |
 | `saga-forge-storage-postgres` | Postgres storage for saga instances, `SagaContext` values and the message store. |
 | `saga-forge-transport-inmemory` | In-process transport over a durable message store (transactional outbox and relay); with several instances one relay delivers, the others stand by. |
+| `saga-forge-jmolecules` | Lets a domain marked only with jMolecules drive sagas; see [its README](saga-forge-jmolecules/README.md) and the [guide](docs/guide/vocabularies.md). |
 | `saga-forge-test` | `SagaFixture`, for tests; see [its README](saga-forge-test/README.md). |
-| `saga-forge-example`, `saga-forge-example-spring` | The canonical order saga, in plain Java and as a Spring Boot application (not published). |
+| `saga-forge-example`, `saga-forge-example-spring`, `saga-forge-example-jmolecules` | The canonical order saga, in plain Java, as a Spring Boot application, and over a jMolecules-only domain (not published). |
 
 The `saga-forge-storage-mysql`, `saga-forge-storage-mongodb` and `saga-forge-transport-kafka` modules are placeholders.
 

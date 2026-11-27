@@ -1,9 +1,8 @@
 package io.github.gkosharovdev.sagaforge.spring.runtime;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
-import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
@@ -13,14 +12,12 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.StorageProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.SagaForgeConfigurationException;
 import io.github.gkosharovdev.sagaforge.spring.SagaForgeProperties;
 import io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration;
-import io.github.gkosharovdev.sagaforge.spring.host.SpringDataAggregateResolver;
-import io.github.gkosharovdev.sagaforge.spring.host.SpringHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.spring.host.SpringHostConfiguration;
-import io.github.gkosharovdev.sagaforge.spring.host.SpringSagaObjectProvider;
 import io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetry;
 import io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetryConfiguration;
@@ -47,6 +44,7 @@ import org.springframework.core.env.Environment;
  */
 @AutoConfiguration(
     after = {
+      SagaForgeDomainTypesConfiguration.class,
       SagaForgeTelemetryConfiguration.class,
       SpringTransactionConfiguration.class,
       PostgresStorageConfiguration.class,
@@ -67,8 +65,13 @@ public class SagaRuntimeConfiguration {
   public SagaModelCollector sagaForgeModelCollector(
       ConfigurableListableBeanFactory beanFactory,
       SagaForgeProperties properties,
-      ObjectProvider<SagaModelContributor> contributors) {
-    return new SagaModelCollector(beanFactory, properties.getScanPackages(), contributors);
+      ObjectProvider<SagaModelContributor> contributors,
+      ObjectProvider<DomainTypes> domainTypes) {
+    return new SagaModelCollector(
+        beanFactory,
+        properties.getScanPackages(),
+        contributors,
+        domainTypes.getIfAvailable(DomainTypes::builtIn));
   }
 
   @Bean
@@ -88,6 +91,8 @@ public class SagaRuntimeConfiguration {
       ObjectProvider<AggregateResolver> aggregateResolvers,
       ObjectProvider<SagaForgeTelemetry> telemetry,
       ObjectProvider<Clock> clock,
+      ObjectProvider<DomainTypes> domainTypes,
+      ObjectProvider<AggregateEventSource> eventSources,
       Environment environment) {
     properties.validate();
     StorageDetection detection = new StorageDetection(beanFactory.getBeanClassLoader());
@@ -111,12 +116,19 @@ public class SagaRuntimeConfiguration {
           "Configure a DataSource and a PlatformTransactionManager, or define a TransactionBoundary bean.");
     }
 
+    DomainTypes vocabularies = domainTypes.getIfAvailable(DomainTypes::builtIn);
     List<Class<?>> model = collector.collect();
-    verify(
-        model, sagaObjects.getIfAvailable(), handlerInstances.getIfAvailable(), aggregateResolvers);
+    new ModelHostChecks(
+            vocabularies,
+            collector,
+            sagaObjects.getIfAvailable(),
+            handlerInstances.getIfAvailable(),
+            aggregateResolvers)
+        .verify(model);
 
     SagaRuntime.Builder builder =
         SagaRuntime.builder()
+            .domainTypes(vocabularies)
             .register(model.toArray(Class<?>[]::new))
             .storage(storageProvider)
             .contextStore(contexts)
@@ -132,6 +144,7 @@ public class SagaRuntimeConfiguration {
     handlerInstances.ifAvailable(builder::handlerInstances);
     parameterResolvers.orderedStream().forEach(builder::parameterResolver);
     aggregateResolvers.orderedStream().forEach(builder::aggregateResolver);
+    eventSources.orderedStream().forEach(builder::aggregateEventSource);
     SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
     builder.openTelemetry(resolved.openTelemetry()).telemetry(resolved.settings());
     return builder.build();
@@ -169,29 +182,5 @@ public class SagaRuntimeConfiguration {
           "Keep a single SagaRuntime bean.");
     }
     return beanFactory.getBean(SagaRuntime.class);
-  }
-
-  /** The checks of FR-010 to FR-013 that the runtime's own startup checks cannot see. */
-  private static void verify(
-      List<Class<?>> model,
-      SagaObjectProvider sagaObjects,
-      HandlerInstanceProvider handlerInstances,
-      ObjectProvider<AggregateResolver> aggregateResolvers) {
-    for (Class<?> type : model) {
-      if (type.isAnnotationPresent(Saga.class)) {
-        if (sagaObjects instanceof SpringSagaObjectProvider spring) {
-          spring.verify(type);
-        }
-      } else if (type.isAnnotationPresent(Aggregate.class)) {
-        aggregateResolvers
-            .orderedStream()
-            .filter(SpringDataAggregateResolver.class::isInstance)
-            .map(SpringDataAggregateResolver.class::cast)
-            .forEach(resolver -> resolver.verify(type));
-      } else if (SagaModelCollector.isModelClass(type)
-          && handlerInstances instanceof SpringHandlerInstanceProvider spring) {
-        spring.verify(type);
-      }
-    }
   }
 }

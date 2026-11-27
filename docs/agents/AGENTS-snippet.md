@@ -43,5 +43,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
   resume a failed compensation, compensate, or mark `FAILED`/`COMPENSATION_FAILED` resolved (no retry of a failed
   step). Compensations may run again on a resume, so they pass `CommandId` on. Recovery sweeps
   (`saga-forge.recovery.*`) resume stalled compensations and report abandoned starts.
+- With `saga-forge-jmolecules`, jMolecules markers (`AggregateRoot`, `DomainEvent`, `@Command`, `@CommandHandler`)
+  replace the domain annotations; links are `Association`/`@Association`/`Identifier` members, never plain `String`s.
+  An aggregate that holds its events gets an `AggregateEventSource` bean that returns and clears them.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

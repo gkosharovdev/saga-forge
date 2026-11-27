@@ -14,6 +14,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Validation rules](validation-rules.md) | turn a startup error into a fix |
 | [Recipes](recipes.md) | copy a working pattern: multi-aggregate unit of work, compensation, retry and idempotency, outbox commands, a modular monolith |
 | [Deadlines](deadlines.md) | give a wait a time limit with `@StartDeadline`/`@DeadlineExpired`, or schedule a command for later |
+| [Vocabularies](vocabularies.md) | drive sagas from a domain marked only with jMolecules, or hand aggregate-held events to sagas |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
 | [Limitations](limitations.md) | know what to design around in 0.4.0 |
@@ -34,8 +35,8 @@ Saga Forge uses DDD / EventStorming terms (full glossary in
 - **Domain event**: a fact about one aggregate that already happened. Recorded by handlers with
   `DomainEvents.record(...)`, or published by application code through Spring's `ApplicationEventPublisher` (or
   Saga Forge's `EventPublisher`).
-- **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate`, identified by one
-  `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
+- **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate` (or a jMolecules aggregate marker,
+  see [Vocabularies](vocabularies.md)), identified by one `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
   `@AggregateLoader`/`@AggregateSaver`).
 - **Policy**: the cross-aggregate rule "when X happens, Y should happen" that a saga encodes.
 - **Saga**: the durable process for one instance of a policy, a `@Saga` class whose instances are correlated by an

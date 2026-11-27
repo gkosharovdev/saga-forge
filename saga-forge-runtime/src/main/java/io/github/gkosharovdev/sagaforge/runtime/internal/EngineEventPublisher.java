@@ -1,10 +1,11 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 
 /**
  * The engine's {@link EventPublisher} (002 contracts/event-publisher.md, FR-018).
@@ -24,9 +25,11 @@ import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 final class EngineEventPublisher implements EventPublisher {
 
   private final EventDispatcher dispatcher;
+  private final DomainTypes domainTypes;
 
-  EngineEventPublisher(EventDispatcher dispatcher) {
+  EngineEventPublisher(EventDispatcher dispatcher, DomainTypes domainTypes) {
     this.dispatcher = dispatcher;
+    this.domainTypes = domainTypes;
   }
 
   @Override
@@ -34,9 +37,9 @@ final class EngineEventPublisher implements EventPublisher {
     if (domainEvent == null) {
       throw new IllegalArgumentException("domainEvent must not be null");
     }
-    if (!domainEvent.getClass().isAnnotationPresent(DomainEvent.class)) {
+    if (!domainTypes.isDomainEvent(domainEvent.getClass())) {
       throw new IllegalArgumentException(
-          domainEvent.getClass().getName() + " is not annotated @DomainEvent");
+          domainTypes.notMarkedMessage(domainEvent.getClass(), DomainRole.DOMAIN_EVENT));
     }
     if (DomainEventScope.current().isPresent()) {
       DomainEvents.record(domainEvent);

@@ -4,6 +4,10 @@ All annotations are in `io.github.gkosharovdev.sagaforge.core.annotation` (`saga
 runtime and validated when the runtime starts; a violation stops startup with the message listed in
 [Validation rules](validation-rules.md) (rule ids `R1` to `R23` below).
 
+The aggregate, identifier, domain event, command and command handler annotations below are Saga Forge's vocabulary of
+domain markers. With `saga-forge-jmolecules`, jMolecules' markers fill the same roles and the domain needs none of
+them; the saga class always uses Saga Forge's annotations. See [Vocabularies](vocabularies.md).
+
 Other types a model uses:
 
 | Type | Package (`io.github.gkosharovdev.sagaforge.` + ) | Role |

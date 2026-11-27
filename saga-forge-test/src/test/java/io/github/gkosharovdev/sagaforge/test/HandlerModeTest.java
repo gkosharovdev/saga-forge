@@ -74,7 +74,10 @@ class HandlerModeTest {
       "a rolled-back unit of work leaves the stored aggregate as it was; handlers get a copy")
   void rollbackRestoresAggregates() {
     FixtureTransactions transactions = new FixtureTransactions();
-    AggregateStore store = new AggregateStore(java.util.Set.of(ShopOrder.class));
+    AggregateStore store =
+        new AggregateStore(
+            java.util.Set.of(ShopOrder.class),
+            io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes.builtIn());
     transactions.participant(store);
     ShopOrder seeded = ShopOrder.create("o-9", true);
     store.seed(seeded);

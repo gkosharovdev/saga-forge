@@ -70,7 +70,7 @@ building on unfinished work.
 | 014 | Publish once: Spring events reach sagas, saga events reach Spring (**done** 2026-11-26, `specs/014-publish-once`; container suites pending, G-014-06) | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery (**done** 2026-11-26, `specs/015-saga-operations`, without retry) | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05, G-013-05 | W10 | P1 |
 | 015b | Retry a failed saga from its failed step (split from 015; after 014 and 016) | SF-5 | new G-015-01 | W10 (rest) | P1 |
-| 016 | Marker SPI and jMolecules adapter (**next**) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
+| 016 | Marker SPI and jMolecules adapter (done 2026-11-27) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
 | 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
@@ -306,6 +306,11 @@ step's `@RetryPolicy` attempts restart. Whether `COMPENSATION_FAILED` has a retr
 the retry with operator and reason.
 
 ### 016: Marker SPI and jMolecules adapter
+
+**Status (2026-11-27).** Done by `specs/016-marker-spi-jmolecules`: the SPI is `core.spi.model.DomainTypeResolver`,
+composed by `DomainTypes`; `saga-forge-jmolecules`; `AggregateEventSource` with the runtime's harvest before the save.
+Narrowed after 014: the starter ships no Spring Data event source (Spring Data `@DomainEvents` reach sagas through 014's
+inbound route), and the jMolecules module ships none (jMolecules has no convention, G-016-03). Gaps G-016-01 to G-016-09.
 
 **Problem.** The model accepts only Saga Forge's own markers. A project that keeps framework types out of its domain
 must double-annotate aggregates or translate events in the application layer. Recording needs the static

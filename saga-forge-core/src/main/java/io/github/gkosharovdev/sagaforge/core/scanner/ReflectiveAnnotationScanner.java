@@ -1,14 +1,9 @@
 package io.github.gkosharovdev.sagaforge.core.scanner;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
-import io.github.gkosharovdev.sagaforge.core.annotation.AggregateIdentifier;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateLoader;
 import io.github.gkosharovdev.sagaforge.core.annotation.AggregateSaver;
-import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.annotation.DeadlineExpired;
-import io.github.gkosharovdev.sagaforge.core.annotation.DomainEvent;
 import io.github.gkosharovdev.sagaforge.core.annotation.EndSaga;
 import io.github.gkosharovdev.sagaforge.core.annotation.RetryPolicy;
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
@@ -20,6 +15,8 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -99,9 +96,39 @@ import java.util.TreeMap;
  *       aggregate
  *   <li>{@code validateInstanceHandlerCommandIdentifiers} — a command handled by an @Aggregate
  *       instance method declares an @AggregateIdentifier field
+ *   <li>{@code DomainTypeRules} — R30: the enabled vocabularies agree on each type's role and
+ *       identifiers; R31: each event and command of another vocabulary concerns a known aggregate
+ *       (specs/016-marker-spi-jmolecules)
  * </ul>
+ *
+ * <p>Domain markers ({@code @Aggregate}, {@code @AggregateIdentifier}, {@code @DomainEvent},
+ * {@code @Command}, {@code @CommandHandler}) are read through {@link DomainTypes}, so another
+ * vocabulary (jMolecules, an application's own) counts wherever the rules above name one. With Saga
+ * Forge's annotations only, every error text reads as it always has.
  */
 public class ReflectiveAnnotationScanner implements AnnotationScanner {
+
+  private final DomainTypes domainTypes;
+  private final DomainTypeRules domainTypeRules;
+
+  /** A scanner recognising Saga Forge's own domain annotations only. */
+  public ReflectiveAnnotationScanner() {
+    this(DomainTypes.builtIn());
+  }
+
+  /**
+   * A scanner recognising the domain markers of every vocabulary in {@code domainTypes}.
+   *
+   * @param domainTypes the enabled vocabularies
+   * @throws IllegalArgumentException if {@code domainTypes} is null
+   */
+  public ReflectiveAnnotationScanner(DomainTypes domainTypes) {
+    if (domainTypes == null) {
+      throw new IllegalArgumentException("domainTypes must not be null");
+    }
+    this.domainTypes = domainTypes;
+    this.domainTypeRules = new DomainTypeRules(domainTypes);
+  }
 
   @Override
   public SagaValidationResult validate(Class<?> sagaClass) {
@@ -213,11 +240,13 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
   private void validateNoCommandHandlers(Class<?> sagaClass, List<String> errors) {
     String className = sagaClass.getSimpleName();
     for (Method method : sortedByName(List.of(sagaClass.getDeclaredMethods()))) {
-      if (method.isAnnotationPresent(CommandHandler.class)) {
+      if (domainTypes.commandHandler(method).isPresent()) {
         errors.add(
             "@Saga class "
                 + className
-                + " must not declare @CommandHandler method "
+                + " must not declare "
+                + domainTypeRules.commandHandlerMarker(method)
+                + " method "
                 + method.getName());
       }
     }
@@ -271,8 +300,14 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
     validateUniqueAggregateMembers(hosts, AggregateSaver.class, modelErrors);
     validateInstanceHandlerCommandIdentifiers(hosts, modelErrors);
     validateOutboxCommands(passedIn, hosts, modelErrors);
+    domainTypeRules.validateVocabularies(toValidate, aggregatesOf(toValidate), modelErrors);
 
     return new ValidationReport(classResults, modelErrors);
+  }
+
+  /** The model's aggregates: validated types and hosts with the aggregate role. */
+  private List<Class<?>> aggregatesOf(Set<Class<?>> types) {
+    return types.stream().filter(domainTypes::isAggregate).toList();
   }
 
   private static Set<Class<?>> distinctClasses(Collection<Class<?>> classes) {
@@ -305,8 +340,8 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
       validateLoaders(type, errors);
       validateSavers(type, errors);
     }
-    validateIdentifierFields(type, errors);
-    validateEventAggregate(type, errors);
+    domainTypeRules.validateIdentifiers(type, errors);
+    domainTypeRules.validateEventAggregate(type, errors);
 
     return host || !errors.isEmpty() ? new SagaValidationResult(type, errors) : null;
   }
@@ -315,7 +350,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
    * A host is a non-{@code @Saga} class declaring a {@code @CommandHandler} method or constructor,
    * an {@code @AggregateLoader}, or an {@code @AggregateSaver}.
    */
-  private static boolean isHost(Class<?> type) {
+  private boolean isHost(Class<?> type) {
     if (type.isAnnotationPresent(Saga.class)) {
       return false;
     }
@@ -328,7 +363,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
    * The {@code @Aggregate}, {@code @DomainEvent}, and {@code @Command} types named by the step,
    * handler, loader, and saver signatures of {@code type}, in declaration-name order.
    */
-  private static Set<Class<?>> reachedTypes(Class<?> type) {
+  private Set<Class<?>> reachedTypes(Class<?> type) {
     Set<Class<?>> reached = new LinkedHashSet<>();
     if (type.isAnnotationPresent(Saga.class)) {
       for (Method step : annotatedMethods(type, SagaStep.class)) {
@@ -348,11 +383,9 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
     return reached;
   }
 
-  private static void addIfModelType(Set<Class<?>> reached, Class<?>... candidates) {
+  private void addIfModelType(Set<Class<?>> reached, Class<?>... candidates) {
     for (Class<?> candidate : candidates) {
-      if (candidate.isAnnotationPresent(Aggregate.class)
-          || candidate.isAnnotationPresent(DomainEvent.class)
-          || candidate.isAnnotationPresent(Command.class)) {
+      if (!domainTypes.markers(candidate).isEmpty()) {
         reached.add(candidate);
       }
     }
@@ -367,11 +400,14 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
       int commandCount = commandParameters(handler).size();
       if (commandCount != 1) {
         errors.add(
-            "@CommandHandler method "
+            domainTypeRules.commandHandlerMarker(handler)
+                + " method "
                 + memberName(handler)
                 + " in "
                 + type.getSimpleName()
-                + " must declare exactly one @Command parameter, found "
+                + " must declare exactly one "
+                + domainTypeRules.marked(DomainRole.COMMAND, "", "", " parameter")
+                + ", found "
                 + commandCount);
       }
     }
@@ -389,7 +425,8 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 + loader.getName()
                 + " in "
                 + type.getSimpleName()
-                + " must take exactly one parameter and return an @Aggregate type");
+                + " must take exactly one parameter and return "
+                + domainTypeRules.marked(DomainRole.AGGREGATE, "an ", "an ", " type"));
       }
     }
   }
@@ -406,45 +443,9 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 + saver.getName()
                 + " in "
                 + type.getSimpleName()
-                + " must take exactly one @Aggregate-typed parameter");
+                + " must take exactly one "
+                + domainTypeRules.marked(DomainRole.AGGREGATE, "", "", "-typed parameter"));
       }
-    }
-  }
-
-  /**
-   * Exactly one {@code @AggregateIdentifier} field on each {@code @Aggregate} and
-   * {@code @DomainEvent} type, at most one on each {@code @Command} type (002 FR-014). Only
-   * declared fields count; record components annotated {@code @AggregateIdentifier} count through
-   * their backing field.
-   */
-  private void validateIdentifierFields(Class<?> type, List<String> errors) {
-    int count = aggregateIdentifierCount(type);
-    if ((type.isAnnotationPresent(Aggregate.class) || type.isAnnotationPresent(DomainEvent.class))
-        && count != 1) {
-      errors.add(
-          type.getSimpleName()
-              + " must declare exactly one @AggregateIdentifier field, found "
-              + count);
-    }
-    if (type.isAnnotationPresent(Command.class) && count > 1) {
-      errors.add(
-          "@Command type "
-              + type.getSimpleName()
-              + " must declare at most one @AggregateIdentifier field, found "
-              + count);
-    }
-  }
-
-  /** {@code @DomainEvent(aggregate = X.class)} names an {@code @Aggregate} class (002 FR-014). */
-  private void validateEventAggregate(Class<?> type, List<String> errors) {
-    DomainEvent event = type.getAnnotation(DomainEvent.class);
-    if (event != null && !event.aggregate().isAnnotationPresent(Aggregate.class)) {
-      errors.add(
-          "@DomainEvent type "
-              + type.getSimpleName()
-              + " names aggregate "
-              + event.aggregate().getSimpleName()
-              + ", which is not annotated @Aggregate");
     }
   }
 
@@ -470,8 +471,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
     passedIn.stream()
         .filter(
             type ->
-                type.isAnnotationPresent(Command.class)
-                    && type.getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX)
+                domainTypes.isCommand(type) && domainTypes.delivery(type) == CommandDelivery.OUTBOX)
         .filter(type -> !handled.contains(type))
         .sorted(Comparator.comparing(Class::getSimpleName))
         .forEach(
@@ -479,7 +479,8 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 modelErrors.add(
                     "Command "
                         + type.getSimpleName()
-                        + " is delivered through the outbox but has no @CommandHandler"));
+                        + " is delivered through the outbox but has no "
+                        + domainTypeRules.commandHandlerLabel()));
   }
 
   private void validateUniqueCommandHandlers(List<Class<?>> hosts, List<String> modelErrors) {
@@ -494,7 +495,8 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         }
       }
     }
-    reportDuplicates(handlersByCommand, "Command ", "@CommandHandler", modelErrors);
+    reportDuplicates(
+        handlersByCommand, "Command ", domainTypeRules.commandHandlerLabel(), modelErrors);
   }
 
   /**
@@ -527,7 +529,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
   private void validateInstanceHandlerCommandIdentifiers(
       List<Class<?>> hosts, List<String> modelErrors) {
     for (Class<?> host : hosts) {
-      if (!host.isAnnotationPresent(Aggregate.class)) {
+      if (!domainTypes.isAggregate(host)) {
         continue;
       }
       for (Executable handler : handlerMembers(host)) {
@@ -535,15 +537,17 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
         if (handler instanceof Method
             && !Modifier.isStatic(handler.getModifiers())
             && commands.size() == 1
-            && aggregateIdentifierCount(commands.get(0)) == 0) {
+            && domainTypeRules.identifierCount(commands.get(0)) == 0) {
           modelErrors.add(
-              "@Command type "
-                  + commands.get(0).getSimpleName()
-                  + " is handled by @Aggregate instance method "
+              domainTypeRules.typeLabel(commands.get(0))
+                  + " is handled by "
+                  + domainTypeRules.aggregateMarker(host)
+                  + " instance method "
                   + host.getSimpleName()
                   + "."
                   + handler.getName()
-                  + " and must declare an @AggregateIdentifier field");
+                  + " and must declare "
+                  + DomainTypeRules.withArticle(domainTypes.describeIdentifier(commands.get(0))));
         }
       }
     }
@@ -579,30 +583,18 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
     }
   }
 
-  private static boolean isWellFormedLoader(Method loader) {
-    return loader.getParameterCount() == 1
-        && loader.getReturnType().isAnnotationPresent(Aggregate.class);
+  private boolean isWellFormedLoader(Method loader) {
+    return loader.getParameterCount() == 1 && domainTypes.isAggregate(loader.getReturnType());
   }
 
-  private static boolean isWellFormedSaver(Method saver) {
-    return saver.getParameterCount() == 1
-        && saver.getParameterTypes()[0].isAnnotationPresent(Aggregate.class);
+  private boolean isWellFormedSaver(Method saver) {
+    return saver.getParameterCount() == 1 && domainTypes.isAggregate(saver.getParameterTypes()[0]);
   }
 
-  private static int aggregateIdentifierCount(Class<?> type) {
-    int count = 0;
-    for (Field field : type.getDeclaredFields()) {
-      if (field.isAnnotationPresent(AggregateIdentifier.class)) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  private static List<Class<?>> commandParameters(Executable handler) {
+  private List<Class<?>> commandParameters(Executable handler) {
     List<Class<?>> commands = new ArrayList<>();
     for (Class<?> parameterType : handler.getParameterTypes()) {
-      if (parameterType.isAnnotationPresent(Command.class)) {
+      if (domainTypes.isCommand(parameterType)) {
         commands.add(parameterType);
       }
     }
@@ -613,14 +605,18 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
    * The {@code @CommandHandler} methods and constructors declared by {@code type}, ordered by
    * {@link #memberName}.
    */
-  private static List<Executable> handlerMembers(Class<?> type) {
+  private List<Executable> handlerMembers(Class<?> type) {
     List<Executable> handlers = new ArrayList<>();
     for (Constructor<?> constructor : type.getDeclaredConstructors()) {
-      if (constructor.isAnnotationPresent(CommandHandler.class)) {
+      if (domainTypes.commandHandler(constructor).isPresent()) {
         handlers.add(constructor);
       }
     }
-    handlers.addAll(annotatedMethods(type, CommandHandler.class));
+    for (Method method : type.getDeclaredMethods()) {
+      if (domainTypes.commandHandler(method).isPresent()) {
+        handlers.add(method);
+      }
+    }
     handlers.sort(Comparator.comparing(ReflectiveAnnotationScanner::memberName));
     return handlers;
   }
@@ -799,13 +795,14 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
       }
 
       Class<?> paramType = method.getParameterTypes()[0];
-      if (!paramType.isAnnotationPresent(DomainEvent.class)) {
+      if (!domainTypes.isDomainEvent(paramType)) {
         errors.add(
             "@SagaStep method "
                 + method.getName()
                 + " parameter type "
                 + paramType.getSimpleName()
-                + " must be annotated with @DomainEvent");
+                + " must be "
+                + domainTypeRules.marked(DomainRole.DOMAIN_EVENT, "annotated with ", "a ", ""));
       }
       if (method.getAnnotation(SagaStep.class).associationProperty().isBlank()) {
         errors.add(

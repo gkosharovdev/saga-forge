@@ -12,7 +12,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R29), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R31), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -82,6 +82,28 @@ R19 violations (after `has an invalid retry policy: `):
 | R17 | `@AggregateSaver method {m} in {H} must take exactly one @Aggregate-typed parameter` | Wrong saver signature. | `@AggregateSaver void save(Order order)`. |
 | R18 | `Aggregate {A} has more than one @AggregateLoader: {H1.m}, {H2.m}` (or `@AggregateSaver`) | Two loaders (or savers) for one aggregate. | Keep one of each per aggregate type. |
 | R23 | `Command {C} is delivered through the outbox but has no @CommandHandler` | An `@Command(delivery = OUTBOX)` type no registered class handles. | Add a handler, make sure its class is in the scanned packages (or a `SagaModelContributor`), or use `IN_UNIT_OF_WORK`. In `SagaFixture` record mode, `register(HandlerClass.class)`. |
+
+## Vocabularies of markers
+
+With a second vocabulary enabled (see [Vocabularies](vocabularies.md)), the texts above name the marker the model
+used instead of Saga Forge's annotation, and list every accepted marker where a role is missing. For jMolecules:
+
+| Instead of | The text reads |
+|---|---|
+| `@CommandHandler method {m} in {H} must declare exactly one @Command parameter, found {n}` | `jMolecules @CommandHandler method {m} in {H} must declare exactly one command parameter (@Command, or jMolecules @Command), found {n}` |
+| `{T} must declare exactly one @AggregateIdentifier field, found {n}` | `{T} (jMolecules @AggregateRoot) must declare exactly one jMolecules @Identity member, found {n}`; for an event, `exactly one jMolecules link member (Association, @Association or Identifier)` |
+| `@DomainEvent type {E} names aggregate {X}, which is not annotated @Aggregate` | `Domain event type {E} (jMolecules DomainEvent) names aggregate {X}, which is not an aggregate (@Aggregate, or jMolecules @AggregateRoot / AggregateRoot)` |
+| `@AggregateLoader method {m} in {H} must take exactly one parameter and return an @Aggregate type` | `... return an aggregate type (@Aggregate, or jMolecules @AggregateRoot / AggregateRoot)` (the saver likewise) |
+| `Command {C} is delivered through the outbox but has no @CommandHandler` | `Command {C} is delivered through the outbox but has no command handler` |
+
+Two rules exist only because a type can be marked by several vocabularies:
+
+| Rule | Error text | What it means | How to fix |
+|---|---|---|---|
+| R30 | `{T} is marked {marker1} ({role1}) and {marker2} ({role2}); a type has one role` | One class is, say, both an aggregate and a domain event, in one vocabulary or across two. | Give the class one role. |
+| R30 | `{T} names different identifiers: {marker1} {member1}, {marker2} {member2}` | Saga Forge's and jMolecules' identifier markers point at different members. | Mark the same member in both, or drop one marker. |
+| R31 | `{T} ({marker}) concerns no known aggregate: no known aggregate has identifier type {Id}. Name the aggregate on the link member, or give the aggregate its own identifier type` | A jMolecules event or command links by an identifier type no scanned aggregate uses. | Scan the aggregate's package, or name it: `@Association(aggregateType = A.class)` or `Association<A, ID>`. |
+| R31 | `... concerns no known aggregate: identifier type {Id} belongs to {A}, {B}. ...` | Two aggregates share the identifier type. | Name the aggregate on the link, or give each aggregate its own identifier type. |
 
 ## Runtime startup checks
 

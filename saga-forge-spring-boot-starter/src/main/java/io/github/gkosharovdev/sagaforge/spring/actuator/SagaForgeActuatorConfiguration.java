@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.spring.actuator;
 
+import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.transport.TransportProperties;
@@ -45,8 +47,15 @@ public class SagaForgeActuatorConfiguration {
   @Bean
   @ConditionalOnMissingBean
   @ConditionalOnAvailableEndpoint(endpoint = SagaForgeEndpoint.class)
-  public SagaForgeEndpoint sagaForgeEndpoint(InMemoryTransport transport) {
-    return new SagaForgeEndpoint(transport.queries(), transport::leadership);
+  public SagaForgeEndpoint sagaForgeEndpoint(
+      InMemoryTransport transport,
+      ObjectProvider<DomainTypes> domainTypes,
+      ObjectProvider<AggregateEventSource> eventSources) {
+    return new SagaForgeEndpoint(
+        transport.queries(),
+        transport::leadership,
+        domainTypes.getIfAvailable(DomainTypes::builtIn),
+        eventSources.orderedStream().toList());
   }
 
   /** The health indicator, when Spring Boot's health module is present. */

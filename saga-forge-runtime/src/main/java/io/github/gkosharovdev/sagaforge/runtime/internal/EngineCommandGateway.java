@@ -1,9 +1,6 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
-import io.github.gkosharovdev.sagaforge.core.annotation.Aggregate;
-import io.github.gkosharovdev.sagaforge.core.annotation.Command;
 import io.github.gkosharovdev.sagaforge.core.annotation.CommandDelivery;
-import io.github.gkosharovdev.sagaforge.core.annotation.CommandHandler;
 import io.github.gkosharovdev.sagaforge.core.command.AggregateNotFoundException;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
@@ -18,6 +15,8 @@ import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
+import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageKind;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -131,6 +130,7 @@ final class EngineCommandGateway implements CommandGateway {
   private final Diagnostics diagnostics;
   private final CommandInterceptor interceptor;
   private final SagaInstrumentation instrumentation;
+  private final DomainTypes domainTypes;
 
   private EngineCommandGateway(
       Map<Class<?>, CommandRoute> routes,
@@ -140,7 +140,8 @@ final class EngineCommandGateway implements CommandGateway {
       Consumer<Runnable> standaloneUnitsOfWork,
       Diagnostics diagnostics,
       CommandInterceptor interceptor,
-      SagaInstrumentation instrumentation) {
+      SagaInstrumentation instrumentation,
+      DomainTypes domainTypes) {
     this.routes = Map.copyOf(routes);
     this.transactions = transactions;
     this.outboxStoresCommands = outboxStoresCommands;
@@ -149,6 +150,7 @@ final class EngineCommandGateway implements CommandGateway {
     this.diagnostics = diagnostics;
     this.interceptor = interceptor;
     this.instrumentation = instrumentation;
+    this.domainTypes = domainTypes;
   }
 
   /** The runtime's instrumentation, built once per engine from its settings (010). */
@@ -189,7 +191,8 @@ final class EngineCommandGateway implements CommandGateway {
         handlerCall -> HandleCommand.run(settings, diagnostics, handlerCall),
         diagnostics,
         settings.commandInterceptor(),
-        new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics));
+        new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics),
+        settings.domainTypes());
   }
 
   @Override
@@ -354,8 +357,8 @@ final class EngineCommandGateway implements CommandGateway {
         });
   }
 
-  private static boolean isOutbox(Object command) {
-    return command.getClass().getAnnotation(Command.class).delivery() == CommandDelivery.OUTBOX;
+  private boolean isOutbox(Object command) {
+    return domainTypes.delivery(command.getClass()) == CommandDelivery.OUTBOX;
   }
 
   /**
@@ -433,13 +436,13 @@ final class EngineCommandGateway implements CommandGateway {
     }
   }
 
-  private static void requireCommand(Object command) {
+  private void requireCommand(Object command) {
     if (command == null) {
       throw new IllegalArgumentException("command must not be null");
     }
-    if (!command.getClass().isAnnotationPresent(Command.class)) {
+    if (!domainTypes.isCommand(command.getClass())) {
       throw new IllegalArgumentException(
-          command.getClass().getName() + " is not annotated @Command");
+          domainTypes.notMarkedMessage(command.getClass(), DomainRole.COMMAND));
     }
   }
 
@@ -459,32 +462,40 @@ final class EngineCommandGateway implements CommandGateway {
     private final AggregateAccess access;
     private final HandlerInstanceProvider instances;
     private final List<HandlerParameterResolver> parameterResolvers;
+    private final DomainTypes domainTypes;
+    private final EventHarvest harvest;
 
     private RouteFactory(AggregateAccess access, EngineSettings settings) {
       this.access = access;
       this.instances = settings.handlerInstances();
       this.parameterResolvers = settings.parameterResolvers();
+      this.domainTypes = settings.domainTypes();
+      this.harvest = new EventHarvest(settings.aggregateEventSources(), domainTypes);
     }
 
     Map<Class<?>, CommandRoute> routesOf(Class<?> host) {
       Map<Class<?>, CommandRoute> routes = new LinkedHashMap<>();
       for (Constructor<?> constructor :
-          Reflection.annotatedConstructors(host, CommandHandler.class)) {
+          Reflection.constructorsWhere(host, this::isCommandHandler)) {
         HandlerArguments arguments = argumentsOf(constructor);
         routes.put(
             arguments.commandType(),
             creation(arguments, values -> Reflection.construct(constructor, values)));
       }
-      for (Method method : Reflection.annotatedMethods(host, CommandHandler.class)) {
+      for (Method method : Reflection.methodsWhere(host, this::isCommandHandler)) {
         HandlerArguments arguments = argumentsOf(method);
         routes.put(arguments.commandType(), methodRoute(host, method, arguments));
       }
       return routes;
     }
 
+    private boolean isCommandHandler(Executable member) {
+      return domainTypes.commandHandler(member).isPresent();
+    }
+
     private CommandRoute methodRoute(Class<?> host, Method method, HandlerArguments arguments) {
       boolean isStatic = Modifier.isStatic(method.getModifiers());
-      if (host.isAnnotationPresent(Aggregate.class)) {
+      if (domainTypes.isAggregate(host)) {
         return isStatic
             ? creation(arguments, values -> Reflection.invoke(method, null, values))
             : aggregateInstance(host, method, arguments);
@@ -497,12 +508,13 @@ final class EngineCommandGateway implements CommandGateway {
     private CommandRoute aggregateInstance(
         Class<?> aggregateType, Method method, HandlerArguments arguments) {
       return command -> {
-        Object id = Reflection.aggregateIdentifier(command);
+        Object id = domainTypes.identifierValue(command);
         Object aggregate =
             access
                 .load(aggregateType, id)
                 .orElseThrow(() -> new AggregateNotFoundException(aggregateType, id));
         Reflection.invoke(method, aggregate, arguments.forCommand(command));
+        harvest.harvest(aggregate);
         access.save(aggregate);
       };
     }
@@ -514,12 +526,13 @@ final class EngineCommandGateway implements CommandGateway {
           throw new IllegalStateException(
               "Creation @CommandHandler " + arguments.handlerName() + " returned null");
         }
+        harvest.harvest(created);
         access.save(created);
       };
     }
 
     private HandlerArguments argumentsOf(Executable handler) {
-      return HandlerArguments.of(handler, parameterResolvers);
+      return HandlerArguments.of(handler, parameterResolvers, domainTypes);
     }
   }
 
@@ -542,13 +555,14 @@ final class EngineCommandGateway implements CommandGateway {
       this.resolvers = resolvers;
     }
 
-    static HandlerArguments of(Executable handler, List<HandlerParameterResolver> candidates) {
+    static HandlerArguments of(
+        Executable handler, List<HandlerParameterResolver> candidates, DomainTypes domainTypes) {
       Parameter[] parameters = handler.getParameters();
       int commandPosition = -1;
       List<Optional<HandlerParameterResolver>> resolvers = new ArrayList<>();
       for (int position = 0; position < parameters.length; position++) {
         Parameter parameter = parameters[position];
-        if (commandPosition < 0 && parameter.getType().isAnnotationPresent(Command.class)) {
+        if (commandPosition < 0 && domainTypes.isCommand(parameter.getType())) {
           commandPosition = position;
           resolvers.add(Optional.empty());
         } else if (COMMAND_ID.supports(handler, parameter)) {
