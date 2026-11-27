@@ -1118,7 +1118,9 @@ Noted only; nothing is bumped until the starter feature decides.
   its diagnostic lines, and relies on the log backend's own OpenTelemetry or Micrometer Tracing integration for MDC
   fields. A switch to SLF4J (G-GOV-01 candidate) would allow MDC directly.
 - **Origin**: `specs/010-otel-observability/research.md` §6.
-- **Status**: open (accepted).
+- **Status**: open (accepted); partly addressed by 019: with `saga-forge.metadata.mdc-keys` the starter puts the
+  saga's process metadata in the MDC around every unit of work and relay delivery, so log lines written there carry
+  it. The runtime's own diagnostics still go through `System.Logger` and carry trace ids as keys.
 
 ### G-010-05: Saga metrics through the OpenTelemetry API may miss Micrometer-only Spring setups
 - **Description**: 010 records metrics with OpenTelemetry's `Meter`. A Spring Boot application that exports metrics
@@ -1161,7 +1163,7 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
 8. 018 versioned schema migrations (G-003-25) - done 2026-11-27 (`specs/018-versioned-schema-migrations`)
-9. 019 process metadata (G-ADOPT-05)
+9. 019 process metadata (G-ADOPT-05) - done 2026-11-27 (`specs/019-process-metadata`)
 10. 020 Spring context tests without a database (G-009-01; needs a scope decision, Principle IV)
 
 Order revised 2026-11-26 (user): 014, then 016, then 015b. booking-service needs deadlines, so it runs Saga Forge's
@@ -1391,8 +1393,9 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
 - **Description**: an instance records no correlation data, and steps and handlers do not see the triggering
   request's context. Only OpenTelemetry trace context travels on messages (010).
 - **Origin**: booking-service feedback SF-10 (W15); relates to G-010-04.
-- **Status**: open (roadmap feature 019: a generic metadata map, MDC restore in the starter; no fixed "initiator"
-  field).
+- **Status**: closed 2026-11-27 by `specs/019-process-metadata`: `SagaMetadata` on instances, history entries and
+  messages, the `MetadataAccessor` SPI, a `SagaMetadata` saga field and handler parameter, and the starter's MDC
+  accessor (`saga-forge.metadata.mdc-keys`). No fixed "initiator" field.
 
 ### G-ADOPT-06: `CommandId` is random outside a saga step
 - **Description**: `CommandId.unscoped` is random, so a command sent while handling a delivered message outside a
@@ -1838,3 +1841,75 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   report, whose `describe()` is the logged text, instead of on the log.
 - **Origin**: `specs/018-versioned-schema-migrations/tasks.md` T034.
 - **Status**: open (align the JUnit version with Spring Boot's, then assert on logs where it matters).
+
+## Process metadata (019)
+
+### G-019-01: A step cannot add or change metadata
+- **Description**: an instance's metadata is fixed at its start (019 D2); a step that learns a value later (a tenant
+  resolved from the aggregate, say) cannot add it, so later messages and log lines lack it.
+- **Origin**: `specs/019-process-metadata/spec.md` D2.
+- **Status**: open (revisit with a use case; would need a write in the unit of work and a rule for history).
+
+### G-019-02: No query of instances by a metadata value
+- **Description**: operators can read an instance's metadata but cannot list the instances of one correlation id; the
+  `metadata` columns have no index.
+- **Origin**: `specs/019-process-metadata/spec.md` D10, research R8.
+- **Status**: open (would add a `SagaInstanceQuery` filter and a GIN index in a later migration).
+
+### G-019-03: Spring Modulith's own republication threads do not see metadata
+- **Description**: under interop the metadata is in Saga Forge's delivery records, not in Modulith's publication
+  registry, so a listener that Modulith itself republishes to runs without it (as G-010-03 for traces).
+- **Origin**: `specs/019-process-metadata/research.md` R9.
+- **Status**: open (accepted).
+
+### G-019-04: `EventReceiver` decorators must forward `receive(EventDelivery)`
+- **Description**: the new default method falls back to `receive(event[, source])`, which captures from the thread; a
+  decorator that does not forward it loses explicit delivery metadata (014 has the same rule for the source id).
+- **Origin**: `specs/019-process-metadata/research.md` R3.
+- **Status**: open (documented in the SPI's Javadoc and the guide).
+
+### G-019-05: The Kafka transport must carry metadata
+- **Description**: like the trace context (G-010-01), a Kafka transport must put metadata on its records and hand it to
+  the runtime through `EventDelivery`.
+- **Origin**: `specs/019-process-metadata/research.md` R13.
+- **Status**: open (with the Kafka transport).
+
+### G-019-07: The in-memory transport duplicates the runtime's metadata scope handling
+- **Description**: the relay captures and restores metadata with its own private helpers (a failing accessor is logged,
+  never fails a delivery), mirroring the runtime's package-private `MetadataScopes`. The two copies must keep the same
+  rules; a Kafka transport would make a third (see G-007-06 for the relay logic in general).
+- **Origin**: `specs/019-process-metadata/tasks.md` T022.
+- **Status**: open (move the helper to a shared place when a second transport exists).
+
+### G-019-08: The Spring example has no outbox command
+- **Description**: every command of `saga-forge-example-spring` runs in the sending unit of work, so its
+  `MetadataContainerTest` proves the MDC across the stored start event, a restart, steps, handlers and the refund
+  compensation, but not across an outbox command hop. That hop is covered by the runtime's `MetadataPropagationTest`,
+  the transport's acceptance suite and `saga-forge-example`'s `CheckoutMetadataTest` (plain Java).
+- **Origin**: `specs/019-process-metadata/tasks.md` T033 (planned with an outbox hop the example does not have).
+- **Status**: open (accepted; add one if the Spring example gains an outbox command).
+
+### G-019-09: `CommandInvocation.metadata()` is a new default SPI method
+- **Description**: the fixture needs the metadata a handler sees to record it on `RecordedCommand`, so core's
+  `CommandInvocation` gained a default `metadata()` (empty), overridden by the runtime. An interceptor written against
+  another engine sees empty metadata. Not in the planned contracts; added during T040.
+- **Origin**: `specs/019-process-metadata/tasks.md` T040.
+- **Status**: open (accepted; record it in contracts/metadata-spi.md).
+
+### G-019-10: Some planned propagation cases had no metadata test (closed)
+- **Description**: T020 listed, besides the cases `MetadataPropagationTest` covers (start, later event, in-transaction and
+  outbox commands, retry, `@StartCompensation`, operator repair, scope unwinding, `NONE`, a failing accessor), a failed
+  outbox command's compensation (012), a recovery sweep (015), a fan-out start (014) and a recorded-event listener inside
+  the scope. These paths run through the same `UnitOfWork` restore and `Correlation` stamping, but no test asserts
+  metadata on them. Deadlines are covered by the fixture's `FixtureMetadataTest`.
+- **Origin**: `specs/019-process-metadata/tasks.md` T020.
+- **Status**: closed 2026-11-27. `MetadataPropagationTest` now covers a failed outbox command's compensation, a recovery
+  sweep resuming a stalled compensation, a saga started from another saga's recorded event (fan-out, the fixture's
+  `LabelSaga`) and an outbox that observes recorded events: each sees the instance's metadata restored, records it on its
+  entries and puts the calling thread's state back.
+
+### G-019-06: Metadata is stored and shown unredacted
+- **Description**: the application chooses the keys; Saga Forge stores them in three tables and shows them in the
+  `sagas` endpoint without redaction or a switch to hide them (relates to G-ADOPT-03).
+- **Origin**: `specs/019-process-metadata/spec.md` D10.
+- **Status**: open (add an exposure switch if a user needs one).

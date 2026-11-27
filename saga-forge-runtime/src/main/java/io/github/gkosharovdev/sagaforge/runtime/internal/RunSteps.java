@@ -4,6 +4,7 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateReference;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.PendingRetry;
@@ -82,8 +83,17 @@ import java.util.function.Supplier;
  */
 final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
 
-  /** What triggered the steps, for which instance. */
-  record Trigger(SagaModel saga, Step step, Object event, String sagaId, boolean started) {}
+  /**
+   * What triggered the steps, for which instance, and the metadata it was delivered with ({@code
+   * null} for none, 019).
+   */
+  record Trigger(
+      SagaModel saga,
+      Step step,
+      Object event,
+      String sagaId,
+      boolean started,
+      SagaMetadata metadata) {}
 
   /** How one attempt ended, for the {@link AttemptLoop} (005 contracts/attempt-loop.md). */
   sealed interface AttemptResult {}
@@ -173,7 +183,10 @@ final class RunSteps implements UnitOfWork.Work<Void, RunSteps.AttemptResult> {
    */
   static AttemptResult attempt(
       Collaborators with, Trigger trigger, int attempt, boolean firstOfCall) {
-    Correlation about = Correlation.of(trigger.event()).forSaga(trigger.saga().typeName());
+    Correlation about =
+        Correlation.of(trigger.event())
+            .forSaga(trigger.saga().typeName())
+            .delivered(trigger.metadata());
     UnitOfWork unitOfWork = UnitOfWork.forInstance(with, trigger.saga(), trigger.sagaId(), about);
     RunSteps work = new RunSteps(trigger, with, attempt, firstOfCall, unitOfWork.correlation());
     return switch (unitOfWork.run(work)) {

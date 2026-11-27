@@ -15,6 +15,7 @@ import io.github.gkosharovdev.sagaforge.core.annotation.StartSaga;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainRole;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import java.lang.annotation.Annotation;
@@ -45,6 +46,7 @@ import java.util.TreeMap;
  *
  * <ul>
  *   <li>{@code validateClassLevel} — R1: @Saga present, class is concrete
+ *   <li>{@code validateSagaMetadataField} — R32: at most one SagaMetadata field (019)
  *   <li>{@code validateSagaIdField} — R2: exactly one @SagaId field of type String
  *   <li>{@code validateSagaContextField} — at most one field of type {@code SagaContext} (optional)
  *   <li>{@code validateCommandGatewayField} — at most one field of type {@code CommandGateway}
@@ -142,6 +144,7 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
     validateSagaIdField(sagaClass, errors);
     validateSagaContextField(sagaClass, errors);
     validateCommandGatewayField(sagaClass, errors);
+    validateSagaMetadataField(sagaClass, errors);
     Map<String, Method> stepMethods = validateSagaSteps(sagaClass, errors);
     validateStepReturnTypes(sagaClass, stepMethods, errors);
     validateUniqueStepEventTypes(sagaClass, stepMethods, errors);
@@ -174,6 +177,26 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
           "@Saga class "
               + sagaClass.getSimpleName()
               + " must declare at most one CommandGateway field, found "
+              + count);
+    }
+  }
+
+  /**
+   * R32: at most one field of type {@link SagaMetadata} ({@code specs/019-process-metadata}). The
+   * field is optional and recognized by its declared type only, like the {@code CommandGateway}.
+   */
+  private void validateSagaMetadataField(Class<?> sagaClass, List<String> errors) {
+    int count = 0;
+    for (Field field : sagaClass.getDeclaredFields()) {
+      if (field.getType().equals(SagaMetadata.class)) {
+        count++;
+      }
+    }
+    if (count > 1) {
+      errors.add(
+          "@Saga class "
+              + sagaClass.getSimpleName()
+              + " must declare at most one SagaMetadata field, found "
               + count);
     }
   }
@@ -409,6 +432,23 @@ public class ReflectiveAnnotationScanner implements AnnotationScanner {
                 + domainTypeRules.marked(DomainRole.COMMAND, "", "", " parameter")
                 + ", found "
                 + commandCount);
+      }
+      int metadataCount = 0;
+      for (Class<?> parameterType : handler.getParameterTypes()) {
+        if (parameterType.equals(SagaMetadata.class)) {
+          metadataCount++;
+        }
+      }
+      if (metadataCount > 1) {
+        // R33 (specs/019-process-metadata)
+        errors.add(
+            domainTypeRules.commandHandlerMarker(handler)
+                + " method "
+                + memberName(handler)
+                + " in "
+                + type.getSimpleName()
+                + " must declare at most one SagaMetadata parameter, found "
+                + metadataCount);
       }
     }
   }

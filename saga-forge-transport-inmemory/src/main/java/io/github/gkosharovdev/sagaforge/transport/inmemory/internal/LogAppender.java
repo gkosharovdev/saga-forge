@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.transport.inmemory.internal;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
@@ -26,7 +27,7 @@ final class LogAppender {
   /**
    * One entry per event, in recording order, then one per outbox command, in send order, then one
    * per scheduled message ({@code specs/017-saga-deadlines}): its own id, no ordering key, held
-   * back until its {@code notBefore}.
+   * back until its {@code notBefore}. Every entry carries the batch's metadata (019).
    */
   List<NewMessage> entries(OutgoingMessages batch, Instant now, Map<String, String> traceContext) {
     List<NewMessage> entries = new ArrayList<>(batch.events().size() + batch.commands().size());
@@ -35,31 +36,33 @@ final class LogAppender {
       Object event = events.get(index);
       entries.add(
           new NewMessage(
-              batch.unitOfWorkId() + ":" + index,
-              MessageKind.EVENT,
-              event.getClass().getName(),
-              event,
-              null,
-              orderingKeys.ofEvent(event),
-              batch.sagaType(),
-              batch.sagaId(),
-              now,
-              traceContext));
+                  batch.unitOfWorkId() + ":" + index,
+                  MessageKind.EVENT,
+                  event.getClass().getName(),
+                  event,
+                  null,
+                  orderingKeys.ofEvent(event),
+                  batch.sagaType(),
+                  batch.sagaId(),
+                  now,
+                  traceContext)
+              .withMetadata(batch.metadata()));
     }
     for (OutgoingCommand outgoing : batch.commands()) {
       Object command = outgoing.command();
       entries.add(
           new NewMessage(
-              outgoing.commandId().value(),
-              MessageKind.COMMAND,
-              command.getClass().getName(),
-              command,
-              outgoing.commandId(),
-              orderingKeys.ofCommand(command, outgoing.commandId()),
-              batch.sagaType(),
-              batch.sagaId(),
-              now,
-              traceContext));
+                  outgoing.commandId().value(),
+                  MessageKind.COMMAND,
+                  command.getClass().getName(),
+                  command,
+                  outgoing.commandId(),
+                  orderingKeys.ofCommand(command, outgoing.commandId()),
+                  batch.sagaType(),
+                  batch.sagaId(),
+                  now,
+                  traceContext)
+              .withMetadata(batch.metadata()));
     }
     batch
         .scheduled()
@@ -68,33 +71,39 @@ final class LogAppender {
               Object payload = scheduled.payload();
               entries.add(
                   new NewMessage(
-                      scheduled.messageId(),
-                      scheduled.kind(),
-                      payload.getClass().getName(),
-                      payload,
-                      scheduled.commandId(),
-                      null,
-                      batch.sagaType(),
-                      batch.sagaId(),
-                      now,
-                      traceContext,
-                      scheduled.notBefore()));
+                          scheduled.messageId(),
+                          scheduled.kind(),
+                          payload.getClass().getName(),
+                          payload,
+                          scheduled.commandId(),
+                          null,
+                          batch.sagaType(),
+                          batch.sagaId(),
+                          now,
+                          traceContext,
+                          scheduled.notBefore())
+                      .withMetadata(batch.metadata()));
             });
     return entries;
   }
 
-  /** The entry of an event published outside any unit of work. */
-  NewMessage published(Object event, Instant now, Map<String, String> traceContext) {
+  /**
+   * The entry of an event published outside any unit of work, with the metadata captured on the
+   * publishing thread ({@code specs/019-process-metadata}).
+   */
+  NewMessage published(
+      Object event, Instant now, Map<String, String> traceContext, SagaMetadata metadata) {
     return new NewMessage(
-        UUID.randomUUID().toString(),
-        MessageKind.EVENT,
-        event.getClass().getName(),
-        event,
-        null,
-        orderingKeys.ofEvent(event),
-        null,
-        null,
-        now,
-        traceContext);
+            UUID.randomUUID().toString(),
+            MessageKind.EVENT,
+            event.getClass().getName(),
+            event,
+            null,
+            orderingKeys.ofEvent(event),
+            null,
+            null,
+            now,
+            traceContext)
+        .withMetadata(metadata);
   }
 }

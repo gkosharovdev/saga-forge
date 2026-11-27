@@ -3,8 +3,10 @@ package io.github.gkosharovdev.sagaforge.spring.actuator;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
+import io.github.gkosharovdev.sagaforge.spring.metadata.SagaForgeMetadataConfiguration;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipStatus;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.MessageStoreQueries;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,7 @@ public class SagaForgeEndpoint {
   private final DomainTypes domainTypes;
   private final List<String> eventSources;
   private final Supplier<Map<String, Object>> schema;
+  private final Map<String, Object> metadata;
 
   /**
    * An endpoint reporting Saga Forge's annotations as the only vocabulary.
@@ -65,6 +68,31 @@ public class SagaForgeEndpoint {
       DomainTypes domainTypes,
       List<? extends AggregateEventSource> eventSources,
       Supplier<Map<String, Object>> schema) {
+    this(
+        queries,
+        leadership,
+        domainTypes,
+        eventSources,
+        schema,
+        SagaForgeMetadataConfiguration.describe(null));
+  }
+
+  /**
+   * @param leadership this instance's view of the leadership, read on every request
+   * @param domainTypes the vocabularies the runtime recognises, listed by name
+   * @param eventSources the aggregate event sources the runtime asks, in order, listed by class
+   * @param schema the {@code schema} object, or {@code null} when there is no schema initializer
+   * @param metadata the {@code metadata} object ({@code specs/019-process-metadata}): the accessor
+   *     the runtime uses, and the MDC keys when it is the MDC accessor
+   */
+  public SagaForgeEndpoint(
+      MessageStoreQueries queries,
+      Supplier<LeadershipStatus> leadership,
+      DomainTypes domainTypes,
+      List<? extends AggregateEventSource> eventSources,
+      Supplier<Map<String, Object>> schema,
+      Map<String, Object> metadata) {
+    this.metadata = Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     this.schema = schema;
     this.queries = queries;
     this.leadership = leadership;
@@ -83,6 +111,7 @@ public class SagaForgeEndpoint {
     payload.put("leadership", leadership(leadership.get()));
     payload.put("vocabularies", domainTypes.vocabularies());
     payload.put("eventSources", eventSources);
+    payload.put("metadata", metadata);
     Map<String, Object> schemaView = schema.get();
     if (schemaView != null) {
       payload.put("schema", schemaView);

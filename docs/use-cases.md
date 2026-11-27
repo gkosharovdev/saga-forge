@@ -238,6 +238,15 @@ Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/examp
 Each ending also publishes an outcome event (`SagaCompleted`, `SagaCompensated`, `SagaFailed`) that listeners use,
 for example to e-mail the customer.
 
+### Following one checkout across services
+
+The web request that places the order carries a correlation id. With process metadata (see the guide's
+[Process metadata](guide/metadata.md) page) the checkout keeps it from that request on: both sagas the order starts
+keep it, every message they store carries it, and while their steps, handlers and compensations run it is back on the
+thread, in the MDC with the Spring starter, so every log line of the checkout names it, hours later and after a
+restart. Logistics receives it with the shipment booking, through a `SagaMetadata` parameter on its handler of
+`RequestShipmentCommand`, so a support query at Logistics leads back to the request that placed the order.
+
 ### Testing it
 
 The saga test fixture plays the other services. In record-and-answer mode the test publishes the events Inventory or

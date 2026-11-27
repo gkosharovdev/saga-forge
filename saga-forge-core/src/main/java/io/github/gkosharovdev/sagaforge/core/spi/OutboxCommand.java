@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import java.util.function.Consumer;
 
 /**
@@ -15,9 +16,21 @@ import java.util.function.Consumer;
  * @param inTransaction called once after the handler returned and before the handling unit of work
  *     commits, with that unit of work's transaction, so a transport can mark the message consumed
  *     atomically with the handler's effects; non-null
+ * @param metadata the process metadata of the command's message ({@code
+ *     specs/019-process-metadata}): the handling unit of work runs with it; {@code null} becomes
+ *     empty
  */
 public record OutboxCommand(
-    CommandId commandId, Object command, Consumer<LocalTransaction> inTransaction) {
+    CommandId commandId,
+    Object command,
+    Consumer<LocalTransaction> inTransaction,
+    SagaMetadata metadata) {
+
+  /** A delivery without metadata, as before {@code specs/019-process-metadata}. */
+  public OutboxCommand(
+      CommandId commandId, Object command, Consumer<LocalTransaction> inTransaction) {
+    this(commandId, command, inTransaction, SagaMetadata.empty());
+  }
 
   public OutboxCommand {
     if (commandId == null) {
@@ -29,5 +42,6 @@ public record OutboxCommand(
     if (inTransaction == null) {
       throw new IllegalArgumentException("inTransaction must not be null");
     }
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
   }
 }

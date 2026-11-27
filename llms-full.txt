@@ -574,7 +574,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R31), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R33), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -617,6 +617,7 @@ starter's configuration checks.
 | R27 | `@Saga class {S}: @DeadlineExpired step {m} must take no parameter or one DeadlineReached` / `must not declare an associationProperty` | The timeout step's shape. | `@SagaStep` with no `associationProperty`; take nothing or `DeadlineReached`. |
 | R28 | `@Saga class {S}: @DeadlineExpired step {m} cannot also be @StartSaga` | A deadline cannot start an instance. | Use a separate start step. |
 | R29 | `@Saga class {S}: step {m} starts deadline '{d}' but also leaves RUNNING, so it would be cancelled at once` | A deadline on an `@EndSaga` or `@StartCompensation` step. | Start it on a step the saga keeps running after. |
+| R32 | `@Saga class {S} must declare at most one SagaMetadata field, found {n}` | Two fields of type `SagaMetadata` on one saga. | Keep one; it holds the instance's process metadata (see [Process metadata](metadata.md)). |
 
 R19 violations (after `has an invalid retry policy: `):
 
@@ -644,6 +645,7 @@ R19 violations (after `has an invalid retry policy: `):
 | R17 | `@AggregateSaver method {m} in {H} must take exactly one @Aggregate-typed parameter` | Wrong saver signature. | `@AggregateSaver void save(Order order)`. |
 | R18 | `Aggregate {A} has more than one @AggregateLoader: {H1.m}, {H2.m}` (or `@AggregateSaver`) | Two loaders (or savers) for one aggregate. | Keep one of each per aggregate type. |
 | R23 | `Command {C} is delivered through the outbox but has no @CommandHandler` | An `@Command(delivery = OUTBOX)` type no registered class handles. | Add a handler, make sure its class is in the scanned packages (or a `SagaModelContributor`), or use `IN_UNIT_OF_WORK`. In `SagaFixture` record mode, `register(HandlerClass.class)`. |
+| R33 | `@CommandHandler method {m} in {H} must declare at most one SagaMetadata parameter, found {n}` | A handler takes `SagaMetadata` twice. | Take it once, beside the command and an optional `CommandId`. |
 
 ## Vocabularies of markers
 
@@ -1716,6 +1718,171 @@ order the runtime asks them). Error texts name the marker the model used, for ex
 `jMolecules @CommandHandler method handle in NoCommandHandler must declare exactly one command parameter (@Command, or jMolecules @Command), found 0`;
 see [Validation rules](validation-rules.md#vocabularies-of-markers).
 
+<!-- docs/guide/metadata.md -->
+
+# Process metadata
+
+A saga often runs long after the request that started it, on other threads and after restarts. Process metadata is a
+small map of strings (a correlation id, a tenant, a request id) that Saga Forge takes from the code that starts a saga
+or publishes an event, keeps with the saga instance and its messages, and gives back to the saga's code wherever it
+runs: in its steps, its command handlers (in the same unit of work or delivered through the outbox later), its
+compensations and its timeout steps.
+
+Saga Forge does not interpret the map. You choose the keys; Saga Forge stores them, carries them and puts them back.
+
+## How it travels
+
+- **When a saga starts**, its instance takes the metadata of the event that started it, and keeps it for its whole
+  life. A later event with different metadata does not change it.
+- **Every message a saga's unit of work stores** (an event it records, an outbox command, a deadline, a scheduled
+  command) carries the instance's metadata. An event published outside any saga carries what was captured from the
+  publishing thread.
+- **Each history entry** records the metadata of the delivery that caused it: the step a later event triggered keeps
+  that event's metadata, so the history shows which request moved the saga on. Entries of operator repairs, recovery
+  sweeps and command-failure reactions keep the instance's.
+- **While saga code runs**, the instance's metadata is put back on the thread (for example in the MDC) for the whole
+  unit of work, and the thread's previous state is restored afterwards, also when the unit of work fails.
+
+Metadata is not added to outcome events (`SagaCompleted`, `SagaFailed`, `SagaCompensated`); a listener that needs it
+reads the instance through `SagaOperations`.
+
+## Spring Boot: SLF4J's MDC
+
+Name the MDC keys to carry:
+
+```properties
+saga-forge.metadata.mdc-keys=correlationId
+```
+
+Source: `saga-forge-example-spring/src/main/resources/application.properties`.
+
+With the property set and SLF4J on the class path, the starter captures those keys from the MDC when an order is
+placed, stores them with the saga, and puts them back in the MDC while the saga's steps, handlers and compensations
+run, on the relay's threads too and after a restart. Only the configured keys are read or written; other MDC keys are
+left alone. Without SLF4J the property is ignored with a startup warning. An application bean of type
+`MetadataAccessor` replaces the MDC accessor.
+
+The `sagas` endpoint shows each instance's `metadata` and each history entry's; the `sagaforge` endpoint's `metadata`
+object names the accessor in use (`none`, `mdc` with its `mdcKeys`, or the class of your own).
+
+## Plain Java: your own accessor
+
+A `MetadataAccessor` reads the thread's current values (`capture`) and makes metadata current for a while (`restore`,
+whose `Scope` puts back what was there when closed). This one wraps an application's own request context:
+
+```java
+  static final class RequestContext implements MetadataAccessor {
+
+    private static final ThreadLocal<Map<String, String>> CURRENT =
+        ThreadLocal.withInitial(Map::of);
+
+    static void set(Map<String, String> values) {
+      CURRENT.set(Map.copyOf(values));
+    }
+
+    static Map<String, String> current() {
+      return CURRENT.get();
+    }
+
+    @Override
+    public Map<String, String> capture() {
+      return CURRENT.get();
+    }
+
+    @Override
+    public Scope restore(SagaMetadata metadata) {
+      if (metadata == null) {
+        throw new IllegalArgumentException("metadata must not be null");
+      }
+      Map<String, String> previous = CURRENT.get();
+      CURRENT.set(metadata.asMap());
+      return () -> CURRENT.set(previous);
+    }
+  }
+```
+
+Give the same accessor to the runtime and to the transport:
+
+```java
+  private final InMemoryTransport transport =
+      InMemoryTransport.builder()
+          .messageStore(new InMemoryMessageStore())
+          .transactions(boundary)
+          .metadataAccessor(requestContext)
+          .build();
+```
+
+and `SagaRuntime.builder() ... .metadataAccessor(requestContext)`.
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/checkout/CheckoutMetadataTest.java`.
+
+Without an accessor (`MetadataAccessor.NONE`, the default) nothing is captured, but metadata a transport delivers is
+still stored and handed to saga code.
+
+## Reading it in saga code
+
+A command handler takes a `SagaMetadata` parameter, beside its command and an optional `CommandId`. Logistics books a
+shipment with the checkout's correlation id, so its support can trace the booking back to the request:
+
+```java
+  @CommandHandler
+  public void handle(RequestShipmentCommand command, CommandId commandId, SagaMetadata metadata) {
+    bookings.putIfAbsent(commandId.value(), command);
+    metadata
+        .get("correlationId")
+        .ifPresent(correlationId -> correlationIds.putIfAbsent(commandId.value(), correlationId));
+  }
+```
+
+Source: `saga-forge-example/src/main/java/io/github/gkosharovdev/sagaforge/example/checkout/LogisticsService.java`.
+
+A saga reads it through a field of type `SagaMetadata`, recognised by its type like the `SagaContext` field:
+
+```java
+  @Saga
+  public static final class ParcelSaga {
+
+    @SagaId private String sagaId;
+    private CommandGateway commandGateway;
+    private SagaMetadata metadata;
+```
+
+Source: `saga-forge-runtime/src/test/java/io/github/gkosharovdev/sagaforge/runtime/fixtures/metadata/MetadataModel.java`.
+
+A saga declares at most one such field (rule R32) and a handler at most one such parameter (rule R33); see
+[Validation rules](validation-rules.md). `SagaMetadata` is immutable: a step cannot add or change entries.
+
+## Limits and failures
+
+- At most 32 entries; keys up to 128 characters, values up to 1,024. An entry over a bound, or with a blank key or
+  `null` value, is dropped and logged as `saga.metadata.entry.dropped key=...`, never with its value.
+- An accessor that throws never fails a saga: a failing capture starts the saga with empty metadata
+  (`saga.metadata.capture.failed`); a failing restore or scope close lets the unit of work run and commit
+  (`saga.metadata.restore.failed`).
+- Metadata is stored as JSON in `saga_instance`, `saga_lifecycle_history` and `saga_message_store` (schema V6; see
+  [Database schema](schema.md)) and shown unredacted. Don't put secrets or personal data in it.
+
+## Testing
+
+`SagaFixture` takes metadata with the event, `when(event, metadata)` or `given(metadata, events...)`, or an accessor
+with `Builder.metadataAccessor(...)`; `expectMetadata(...)`, `InstanceView.metadata()` and `RecordedCommand.metadata()`
+check what the instance kept and what each command saw:
+
+```java
+  void correlationIdStaysWithTheSaga() {
+    SagaMetadata request = SagaMetadata.of(Map.of("correlationId", "c-1"));
+
+    SagaFixture.of(OrderProcessingSaga.class)
+        .build()
+        .given(request, new OrderCreatedEvent("o-1", AMOUNT))
+        .when(new PaymentProcessedEvent("payment-1", "o-1", AMOUNT))
+        .expectCommands(new ReserveStockCommand("o-1"))
+        .expectMetadata(request);
+  }
+```
+
+Source: `saga-forge-example/src/test/java/io/github/gkosharovdev/sagaforge/example/OrderProcessingSagaFixtureTest.java`.
+
 <!-- docs/guide/testing.md -->
 
 # Testing with `SagaFixture`
@@ -2472,6 +2639,7 @@ copy Saga Forge's DDL into your own migrations, and Saga Forge's version numbers
 | V3 saga deadlines | the message store's due time and the `CANCELLED` status | 0.4.0 |
 | V4 active standby relay | the leadership table; drops the heartbeat table | 0.4.0 |
 | V5 saga operations | resolutions, compensation rounds, operator columns and indexes | 0.5.0 |
+| V6 process metadata | a `metadata` JSONB column on the instance, history and message-store tables | 0.5.0 |
 
 The migrations live at `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration`, and Flyway records them
 in `saga_forge_schema_history`. A released version is never changed: a later schema change is always a new version.
@@ -2498,7 +2666,7 @@ the jar expects, by meaning, not by text:
 A failure lists every difference, one per line:
 
 ```text
-Saga Forge's schema does not match V5 (saga operations): 1 failure, 0 warnings.
+Saga Forge's schema does not match V6 (process metadata): 1 failure, 0 warnings.
   FAILURE saga_context: column last_modified_at is missing (expected timestamp with time zone NOT NULL)
 ```
 
@@ -2529,7 +2697,7 @@ then checks the result, then starts the runtime. Your Flyway settings (`spring.f
 apply each version and the others find it applied.
 
 Because your tables are already in the schema, Saga Forge's history starts with a baseline row at version 0, then
-records V1 to V5:
+records V1 to V6:
 
 ```text
  version | description             | type
@@ -2537,7 +2705,7 @@ records V1 to V5:
  0       | << Flyway Baseline >>   | BASELINE
  1       | base schema             | SQL
  ...
- 5       | saga operations         | SQL
+ 6       | process metadata        | SQL
 ```
 
 Never copy Saga Forge's migrations into your own migration location: the numbers would clash with yours, and each
@@ -2656,6 +2824,13 @@ status in later releases.
 | 11 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |
 
 Further constraints of the model:
+
+- **Process metadata** (see [Process metadata](metadata.md)): an instance's metadata is fixed when it starts, and a
+  step cannot add or change entries (G-019-01); operators can read an instance's metadata but cannot list instances by
+  a metadata value (G-019-02); under Spring Modulith interop, listeners that Modulith republishes to run without it
+  (G-019-03); an `EventReceiver` decorator must forward `receive(EventDelivery)`, or delivered metadata is lost and the
+  thread's is captured instead (G-019-04); metadata is stored and shown in the `sagas` endpoint unredacted, so keep
+  secrets and personal data out of it (G-019-06).
 
 - **jMolecules domains** (see [Vocabularies](vocabularies.md)): an outbox command still needs Saga Forge's
   `@Command(delivery = OUTBOX)` beside jMolecules' `@Command` (G-016-01); a fixture test sees no Spring-published

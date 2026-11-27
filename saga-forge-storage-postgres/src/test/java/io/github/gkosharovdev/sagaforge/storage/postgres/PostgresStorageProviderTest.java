@@ -127,6 +127,64 @@ class PostgresStorageProviderTest {
 
     @Test
     @DisplayName(
+        "019: an instance's metadata and each history entry's metadata survive a restart; none"
+            + " stays empty")
+    void metadataSurvivesRestart() {
+      io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata metadata =
+          io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata.of(
+              Map.of("correlationId", "c-1", "tenant", "t-9"));
+      io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata delivery =
+          io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata.of(
+              Map.of("correlationId", "c-2"));
+      SagaInstance running =
+          new SagaInstance(
+                  "s-1",
+                  SAGA_TYPE,
+                  Map.of(),
+                  Map.of("orderId", "o-1"),
+                  SagaStatus.RUNNING,
+                  CREATED_AT,
+                  MODIFIED_AT,
+                  Map.of("handleOrderCreated", StepRecord.notRun()),
+                  null,
+                  null)
+              .withMetadata(metadata);
+      SagaInstance plain =
+          new SagaInstance(
+              "s-2",
+              SAGA_TYPE,
+              Map.of(),
+              Map.of("orderId", "o-2"),
+              SagaStatus.RUNNING,
+              CREATED_AT,
+              MODIFIED_AT,
+              Map.of("handleOrderCreated", StepRecord.notRun()),
+              null,
+              null);
+
+      provider.save(
+          running,
+          List.of(
+              new io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry(
+                      "s-1",
+                      io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEventKind.CREATED,
+                      null,
+                      List.of(),
+                      null,
+                      null,
+                      CREATED_AT)
+                  .withMetadata(delivery)));
+      provider.save(plain);
+
+      assertThat(restarted().findById("s-1")).get().isEqualTo(running);
+      assertThat(restarted().findById("s-2").orElseThrow().metadata().isEmpty()).isTrue();
+      assertThat(restarted().history("s-1"))
+          .extracting(io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry::metadata)
+          .containsExactly(delivery);
+    }
+
+    @Test
+    @DisplayName(
         "005: attempts, handled command identities, a pending retry and a classified failure survive a"
             + " restart")
     void retryFieldsSurviveRestart() {

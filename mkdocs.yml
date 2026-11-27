@@ -37,6 +37,7 @@ nav:
   - Recipes: recipes.md
   - Deadlines: deadlines.md
   - Vocabularies: vocabularies.md
+  - Process metadata: metadata.md
   - Testing: testing.md
   - Operations: operations.md
   - Database schema: schema.md

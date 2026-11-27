@@ -29,11 +29,13 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentConfi
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RenewalSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RequestPayment;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShipmentBooked;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ShippingService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.SubscriptionCancelled;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.SubscriptionStarted;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -99,6 +101,24 @@ public abstract class TransportAcceptanceSuite {
     PaymentService payments();
 
     CardService cards();
+
+    /**
+     * @return whether the setup wires a metadata accessor ({@code specs/019-process-metadata}), so
+     *     {@link #publish(Object, Map)} and {@link #instanceMetadata(Class)} work
+     */
+    default boolean propagatesMetadata() {
+      return false;
+    }
+
+    /** Publishes {@code event} with {@code metadata} as the publishing thread's metadata (019). */
+    default void publish(Object event, Map<String, String> metadata) {
+      throw new UnsupportedOperationException("this setup does not propagate metadata");
+    }
+
+    /** The metadata of the one instance of {@code sagaType} (019). */
+    default Map<String, String> instanceMetadata(Class<?> sagaType) {
+      throw new UnsupportedOperationException("this setup does not propagate metadata");
+    }
 
     @Override
     void close();
@@ -376,6 +396,36 @@ public abstract class TransportAcceptanceSuite {
               assertThat(message.lastFailure()).isNotNull();
               assertThat(message.sourceSagaType()).isEqualTo(PackingSaga.class.getName());
             });
+  }
+
+  @Test
+  @DisplayName(
+      "019: metadata published with an event reaches its instance, every message it produces and"
+          + " a saga started downstream, across a restart")
+  void metadataTravels() {
+    assumeTrue(setup.propagatesMetadata(), "the setup propagates metadata");
+    Map<String, String> c1 = Map.of("correlationId", "c-1");
+    setup.publish(new OrderPlaced("o-1"), c1);
+    await(() -> setup.hasInstance(FulfilmentSaga.class, "RUNNING"), WAIT, "the saga to start");
+
+    setup.restart();
+    setup.publish(new PaymentConfirmed("o-1"), Map.of("correlationId", "c-2"));
+
+    await(
+        () -> setup.hasInstance(DeliverySaga.class, "RUNNING"), WAIT, "the delivery saga to start");
+    awaitQuiet();
+    assertThat(setup.instanceMetadata(FulfilmentSaga.class)).isEqualTo(c1);
+    assertThat(setup.instanceMetadata(DeliverySaga.class)).isEqualTo(c1);
+    assertThat(messagesOf(OrderPlaced.class))
+        .extracting(message -> message.metadata().asMap())
+        .containsOnly(c1);
+    assertThat(messagesOf(PaymentConfirmed.class))
+        .extracting(message -> message.metadata().asMap())
+        .containsOnly(Map.of("correlationId", "c-2"));
+    assertThat(messagesOf(ShipmentBooked.class))
+        .isNotEmpty()
+        .extracting(message -> message.metadata().asMap())
+        .containsOnly(c1);
   }
 
   private static void consumedOutcome(StoredMessage message) {

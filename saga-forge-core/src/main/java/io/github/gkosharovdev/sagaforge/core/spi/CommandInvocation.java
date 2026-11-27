@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 
 /**
  * One handling of a command, as handed to a {@link CommandInterceptor} ({@code
@@ -20,6 +21,18 @@ public interface CommandInvocation {
    * same value.
    */
   CommandId commandId();
+
+  /**
+   * The process metadata a {@code SagaMetadata} handler parameter receives for this handling
+   * ({@code specs/019-process-metadata}): the sending saga instance's metadata, the delivered
+   * message's for an outbox command, or what was captured for a command sent outside any saga. This
+   * default returns empty metadata.
+   *
+   * @return the metadata; never {@code null}
+   */
+  default SagaMetadata metadata() {
+    return SagaMetadata.empty();
+  }
 
   /** {@code true} if a {@code @CommandHandler} route exists for the command's exact type. */
   boolean hasHandler();

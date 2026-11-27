@@ -1,10 +1,13 @@
 package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.annotation.Saga;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
@@ -128,6 +131,18 @@ public final class SagaFixture {
   }
 
   /**
+   * Publishes history as {@link #given(Object...)}, each event delivered with {@code metadata}, as
+   * a message carrying it would be ({@code specs/019-process-metadata}).
+   *
+   * @throws IllegalArgumentException if {@code metadata} is {@code null}
+   * @throws SagaExpectationError if a step stored a {@code SagaContext} value durable storage
+   *     cannot persist
+   */
+  public Given given(SagaMetadata metadata, Object... events) {
+    return new Given(this).given(metadata, events);
+  }
+
+  /**
    * Seeds aggregates into the in-memory store (handler mode only).
    *
    * @throws IllegalStateException outside handler mode
@@ -146,6 +161,18 @@ public final class SagaFixture {
    */
   public Then when(Object event) {
     return new Then(this, publish(event), null);
+  }
+
+  /**
+   * Publishes the event under test, delivered with {@code metadata}, as a message carrying it would
+   * be ({@code specs/019-process-metadata}): a saga it starts keeps {@code metadata}.
+   *
+   * @throws IllegalArgumentException if {@code event} or {@code metadata} is {@code null}
+   * @throws SagaExpectationError if a step stored a {@code SagaContext} value durable storage
+   *     cannot persist
+   */
+  public Then when(Object event, SagaMetadata metadata) {
+    return new Then(this, publish(event, metadata), null);
   }
 
   /**
@@ -245,6 +272,21 @@ public final class SagaFixture {
         event,
         (reports, outboxFailures) -> {
           reports.add(runtime.receive(event));
+          transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
+        });
+  }
+
+  synchronized EventResult publish(Object event, SagaMetadata metadata) {
+    if (event == null) {
+      throw new IllegalArgumentException("event must not be null");
+    }
+    if (metadata == null) {
+      throw new IllegalArgumentException("metadata must not be null");
+    }
+    return record(
+        event,
+        (reports, outboxFailures) -> {
+          reports.add(runtime.receive(new EventDelivery(event, null, metadata)));
           transport.drain(runtime, interceptor, reports::add, outboxFailures::add);
         });
   }
@@ -409,6 +451,7 @@ public final class SagaFixture {
     private DomainTypes domainTypes = DomainTypes.builtIn();
     private final List<AggregateEventSource> aggregateEventSources = new ArrayList<>();
     private final Map<String, String> properties = new LinkedHashMap<>();
+    private MetadataAccessor metadataAccessor = MetadataAccessor.NONE;
 
     private Builder() {}
 
@@ -632,6 +675,21 @@ public final class SagaFixture {
     }
 
     /**
+     * Optional: the accessor that captures and restores process metadata, as {@code
+     * SagaRuntime.Builder.metadataAccessor} ({@code specs/019-process-metadata}); the default
+     * {@link MetadataAccessor#NONE} captures nothing. With an accessor, {@link #when(Object)}
+     * starts a saga with what the accessor holds on the test thread, and saga code sees it
+     * restored.
+     *
+     * @throws IllegalArgumentException if {@code metadataAccessor} is {@code null}
+     */
+    public Builder metadataAccessor(MetadataAccessor metadataAccessor) {
+      requireNonNull(metadataAccessor, "metadataAccessor");
+      this.metadataAccessor = metadataAccessor;
+      return this;
+    }
+
+    /**
      * Builds the runtime over the fixture's plug-ins and starts it, validating the model as the
      * runtime's startup does (FR-003).
      *
@@ -669,7 +727,8 @@ public final class SagaFixture {
           new FixtureCommandInterceptor(transactions, rules, handledTypes);
       ScheduledMessages scheduled = new ScheduledMessages();
       transactions.participant(scheduled);
-      LoopBackTransport transport = new LoopBackTransport(outboxCommandAttempts, scheduled);
+      LoopBackTransport transport =
+          new LoopBackTransport(outboxCommandAttempts, scheduled, metadataAccessor);
       FixtureLogger logger = new FixtureLogger(System.getLogger(SagaRuntime.DEFAULT_LOGGER_NAME));
       FixtureObjects objects = new FixtureObjects(sagaFactories, hosts);
       Map<String, Map<String, String>> compensations = new LinkedHashMap<>();
@@ -701,6 +760,7 @@ public final class SagaFixture {
               .outcomeEvents(outcomeEvents)
               .recovery(recovery.withEnabled(false))
               .propertyResolver(key -> Optional.ofNullable(properties.get(key)))
+              .metadataAccessor(metadataAccessor)
               .logger(logger);
       if (maxTotalRetryBackoff != null) {
         runtime.maxTotalRetryBackoff(maxTotalRetryBackoff);

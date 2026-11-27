@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.example.jmolecules;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.gkosharovdev.sagaforge.core.event.DomainEvents;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.example.jmolecules.application.OrderEventSource;
@@ -17,6 +18,7 @@ import io.github.gkosharovdev.sagaforge.example.jmolecules.domain.ReserveStock;
 import io.github.gkosharovdev.sagaforge.jmolecules.JMoleculesDomainTypeResolver;
 import io.github.gkosharovdev.sagaforge.test.SagaFixture;
 import java.math.BigDecimal;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -86,5 +88,18 @@ class OrderProcessingSagaFixtureTest {
 
     fixture.when(new OrderCreated(ORDER, BigDecimal.ZERO)).expectStatus(SagaStatus.FAILED);
     assertThat(payments.charges()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("process metadata: the request's correlation id stays with the order's saga")
+  void correlationIdStaysWithTheSaga() {
+    SagaMetadata request = SagaMetadata.of(Map.of("correlationId", "c-1"));
+    SagaFixture fixture = fixture();
+    fixture.givenAggregates(Order.place(ORDER, true));
+
+    fixture
+        .when(new OrderCreated(ORDER, AMOUNT), request)
+        .expectEndedWith("completeOrder")
+        .expectMetadata(request);
   }
 }

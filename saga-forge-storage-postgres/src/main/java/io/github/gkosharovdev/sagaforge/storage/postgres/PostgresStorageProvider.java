@@ -67,7 +67,7 @@ public final class PostgresStorageProvider implements StorageProvider {
       "INSERT INTO saga_instance ("
           + String.join(", ", SagaInstanceRows.COLUMNS)
           + ") "
-          + "VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?) "
+          + "VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?::jsonb) "
           + "ON CONFLICT (saga_id) DO UPDATE SET "
           + SagaInstanceRows.COLUMNS.stream()
               .filter(column -> !column.equals("saga_id"))

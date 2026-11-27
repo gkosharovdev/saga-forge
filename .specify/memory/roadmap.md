@@ -73,7 +73,7 @@ building on unfinished work.
 | 016 | Marker SPI and jMolecules adapter (done 2026-11-27) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations (**done** 2026-11-27, `specs/018-versioned-schema-migrations`) | SF-7 | G-003-25 | — (W11 was attributed to booking-service in error: it never adopted Saga Forge) | P2 |
-| 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
+| 019 | Process metadata propagation (**done** 2026-11-27, `specs/019-process-metadata`; W15 is a reported need: booking-service never adopted Saga Forge) | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
 | 020 | Spring context tests without a database | SF-12 | G-009-01 | W12 | P2 |
 | later | Derived command ids; extra associations | SF-9, SF-13 | new G-ADOPT-06, G-ADOPT-07 | W14 | P3 |
 
@@ -415,6 +415,13 @@ that triggered them. Only OpenTelemetry trace context travels (010).
 
 **Acceptance.** A correlation id set in the MDC of an HTTP request appears in the MDC of every step, handler and
 compensation of the saga it starts, across transport hops and a restart.
+
+**Status (2026-11-27).** Done by `specs/019-process-metadata`. The SPI is `MetadataAccessor` (`capture`/`restore` with
+a `Scope`), not `MetadataProvider`, since it must also put metadata back. The instance keeps its start metadata; each
+history entry the delivery's; every stored message the unit of work's. Outcome events carry none (D6). Saga code reads
+it through a `SagaMetadata` field or handler parameter (D7, rules R32/R33, Property 50). Postgres V6 adds the columns.
+The acceptance is `saga-forge-example-spring`'s `MetadataContainerTest`; its example has no outbox command
+(G-019-08).
 
 ### 020: Spring context tests without a database
 

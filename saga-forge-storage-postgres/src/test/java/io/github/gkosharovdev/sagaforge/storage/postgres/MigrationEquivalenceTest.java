@@ -17,7 +17,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Every path to the current schema ends at the same tables, columns, defaults, constraints and
- * indexes (specs/018 FR-003, SC-003): the migrations V1 to V5, the current {@code schema.sql}, and
+ * indexes (specs/018 FR-003, SC-003): the migrations V1 to V6, the current {@code schema.sql}, and
  * each released {@code schema.sql} plus the upgrade scripts written after it, in the order their
  * changes reached {@code schema.sql}.
  */
@@ -32,7 +32,8 @@ class MigrationEquivalenceTest {
           "schema-upgrade-011.sql",
           "schema-upgrade-017.sql",
           "schema-upgrade-013.sql",
-          "schema-upgrade-015.sql");
+          "schema-upgrade-015.sql",
+          "schema-upgrade-019.sql");
 
   @Test
   @DisplayName("the migrations end at the current schema.sql")

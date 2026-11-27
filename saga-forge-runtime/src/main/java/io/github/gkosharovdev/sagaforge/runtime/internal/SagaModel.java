@@ -11,6 +11,7 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaContext;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Reflection.PropertyReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -81,7 +82,8 @@ final class SagaModel {
   record Compensation(String name, Method method, String forStep, boolean takesTrigger) {}
 
   /** The values the engine sets on a fresh saga object, overwriting whatever the object held. */
-  record Injection(String sagaId, SagaContext context, CommandGateway gateway) {}
+  record Injection(
+      String sagaId, SagaContext context, CommandGateway gateway, SagaMetadata metadata) {}
 
   private final Class<?> type;
   private final List<Step> steps;
@@ -93,6 +95,7 @@ final class SagaModel {
   private final Field sagaIdField;
   private final Optional<Field> contextField;
   private final Optional<Field> gatewayField;
+  private final Optional<Field> metadataField;
   private final Optional<Constructor<?>> noArgumentConstructor;
   private final Map<String, Compensation> compensationsByStep;
 
@@ -123,6 +126,7 @@ final class SagaModel {
     this.sagaIdField = Reflection.sagaIdField(type);
     this.contextField = Reflection.fieldOfType(type, SagaContext.class);
     this.gatewayField = Reflection.fieldOfType(type, CommandGateway.class);
+    this.metadataField = Reflection.fieldOfType(type, SagaMetadata.class);
     this.noArgumentConstructor = Reflection.noArgumentConstructor(type);
   }
 
@@ -274,6 +278,7 @@ final class SagaModel {
     Reflection.write(sagaIdField, saga, injection.sagaId());
     contextField.ifPresent(field -> Reflection.write(field, saga, injection.context()));
     gatewayField.ifPresent(field -> Reflection.write(field, saga, injection.gateway()));
+    metadataField.ifPresent(field -> Reflection.write(field, saga, injection.metadata()));
   }
 
   /**

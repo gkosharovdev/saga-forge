@@ -249,7 +249,8 @@ final class AttemptLoop {
   private static Correlation compensationCorrelation(Trigger trigger) {
     return Correlation.of(trigger.event())
         .forSaga(trigger.saga().typeName())
-        .instance(trigger.sagaId());
+        .instance(trigger.sagaId())
+        .delivered(trigger.metadata());
   }
 
   /** One attempt inside a {@code saga_forge.attempt} span (010 research §2). */

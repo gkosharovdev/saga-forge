@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.spring.transport;
 
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
@@ -66,7 +67,8 @@ public class InMemoryTransportConfiguration {
       ThreadPoolTaskExecutor sagaForgeTransportExecutor,
       ObjectProvider<SagaForgeTelemetry> telemetry,
       ObjectProvider<Clock> clock,
-      ObjectProvider<DomainTypes> domainTypes) {
+      ObjectProvider<DomainTypes> domainTypes,
+      ObjectProvider<MetadataAccessor> metadataAccessor) {
     SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
     return InMemoryTransport.builder()
         .messageStore(messageStore)
@@ -77,6 +79,7 @@ public class InMemoryTransportConfiguration {
         .openTelemetry(resolved.openTelemetry())
         .telemetry(resolved.settings())
         .domainTypes(domainTypes.getIfAvailable(DomainTypes::builtIn))
+        .metadataAccessor(metadataAccessor.getIfAvailable(() -> MetadataAccessor.NONE))
         .build();
   }
 

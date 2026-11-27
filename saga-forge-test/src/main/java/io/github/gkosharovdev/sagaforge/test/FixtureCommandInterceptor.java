@@ -45,12 +45,16 @@ final class FixtureCommandInterceptor implements CommandInterceptor {
                     .count();
     for (CommandFailureRule rule : rules) {
       if (rule.matches(command)) {
-        record(new RecordedCommand(command, invocation.commandId(), delivery, attempt, false));
+        record(
+            new RecordedCommand(
+                command, invocation.commandId(), delivery, attempt, false, invocation.metadata()));
         throw rule.fail();
       }
     }
     boolean handle = invocation.hasHandler() && handledTypes.contains(command.getClass());
-    record(new RecordedCommand(command, invocation.commandId(), delivery, attempt, handle));
+    record(
+        new RecordedCommand(
+            command, invocation.commandId(), delivery, attempt, handle, invocation.metadata()));
     if (handle) {
       invocation.proceed();
     }

@@ -1,10 +1,13 @@
 package io.github.gkosharovdev.sagaforge.transport.inmemory.internal;
 
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
@@ -57,10 +60,10 @@ import java.util.function.Supplier;
  *   <li>A coordinator thread leases due messages when signalled or every poll interval, and hands
  *       each to a keyed worker lane; the store lets only the head of each ordering key be leased,
  *       so at most one message per key is in flight.
- *   <li>An event is delivered to {@link EventReceiver#receive(Object)}, or to {@link
- *       EventReceiver#receive(Object, String)} with its source instance when it has one (014), and
- *       then marked consumed in a transaction of its own; a command goes to {@link
- *       CommandReceiver#receive(OutboxCommand)} and is marked consumed inside the handler's
+ *   <li>An event is delivered to {@link EventReceiver#receive(EventDelivery)} with its source
+ *       instance when it has one (014) and its metadata (019), with the metadata restored on the
+ *       delivering thread, and then marked consumed in a transaction of its own; a command goes to
+ *       {@link CommandReceiver#receive(OutboxCommand)} and is marked consumed inside the handler's
  *       transaction.
  *   <li>A failure records the attempt and makes the message due again after a growing backoff; at
  *       {@code maxAttempts} it is set aside. An unreadable payload is set aside at once.
@@ -85,6 +88,7 @@ public final class Relay {
 
   static final String MAX_ATTEMPTS = "MAX_ATTEMPTS";
 
+  private final MetadataAccessor metadataAccessor;
   private final LogAppender appender;
   private final MessageStore messageStore;
   private final TransactionBoundary transactions;
@@ -133,7 +137,8 @@ public final class Relay {
         hostExecutor,
         instrumentation,
         LeaderElector.backgroundScheduling(),
-        DomainTypes.builtIn());
+        DomainTypes.builtIn(),
+        MetadataAccessor.NONE);
   }
 
   /**
@@ -150,6 +155,35 @@ public final class Relay {
       TransportInstrumentation instrumentation,
       Supplier<ScheduledExecutorService> leaderScheduling,
       DomainTypes domainTypes) {
+    this(
+        messageStore,
+        transactions,
+        settings,
+        clock,
+        logger,
+        hostExecutor,
+        instrumentation,
+        leaderScheduling,
+        domainTypes,
+        MetadataAccessor.NONE);
+  }
+
+  /**
+   * @param metadataAccessor captures the metadata of published events and restores each delivered
+   *     message's around its delivery ({@code specs/019-process-metadata}); pass the runtime's
+   */
+  public Relay(
+      MessageStore messageStore,
+      TransactionBoundary transactions,
+      TransportSettings settings,
+      Clock clock,
+      Logger logger,
+      Executor hostExecutor,
+      TransportInstrumentation instrumentation,
+      Supplier<ScheduledExecutorService> leaderScheduling,
+      DomainTypes domainTypes,
+      MetadataAccessor metadataAccessor) {
+    this.metadataAccessor = metadataAccessor;
     this.appender = new LogAppender(domainTypes);
     this.messageStore = messageStore;
     this.transactions = transactions;
@@ -216,7 +250,9 @@ public final class Relay {
     if (event == null) {
       throw new IllegalArgumentException("domainEvent must not be null");
     }
-    NewMessage entry = appender.published(event, clock.instant(), instrumentation.currentContext());
+    NewMessage entry =
+        appender.published(
+            event, clock.instant(), instrumentation.currentContext(), captureMetadata());
     var active = transactions.current();
     if (active.isPresent()) {
       messageStore.append(active.get(), List.of(entry));
@@ -449,18 +485,59 @@ public final class Relay {
   // ----- delivery
   // ------------------------------------------------------------------------------------------
 
+  /**
+   * The publishing thread's metadata, sanitised; empty if the accessor throws (019 FR-019). Logs
+   * keys only, never values.
+   */
+  private SagaMetadata captureMetadata() {
+    Map<String, String> captured;
+    try {
+      captured = metadataAccessor.capture();
+    } catch (RuntimeException failure) {
+      logger.log(Level.WARNING, "saga.metadata.capture.failed", failure);
+      return SagaMetadata.empty();
+    }
+    return SagaMetadata.sanitized(
+        captured, key -> logger.log(Level.WARNING, () -> "saga.metadata.entry.dropped key=" + key));
+  }
+
+  /** Restores {@code metadata} on this thread; a failing restore or close is logged only. */
+  private MetadataAccessor.Scope restoreMetadata(SagaMetadata metadata) {
+    MetadataAccessor.Scope opened;
+    try {
+      opened = metadataAccessor.restore(metadata);
+    } catch (RuntimeException failure) {
+      logger.log(Level.WARNING, "saga.metadata.restore.failed", failure);
+      return MetadataAccessor.Scope.NOOP;
+    }
+    if (opened == null) {
+      return MetadataAccessor.Scope.NOOP;
+    }
+    return () -> {
+      try {
+        opened.close();
+      } catch (RuntimeException failure) {
+        logger.log(Level.WARNING, "saga.metadata.restore.failed", failure);
+      }
+    };
+  }
+
+  /** Delivers {@code message} with its metadata restored on this thread (019). */
   private void deliver(StoredMessage message) {
+    try (MetadataAccessor.Scope restored = restoreMetadata(message.metadata())) {
+      deliverRestored(message);
+    }
+  }
+
+  private void deliverRestored(StoredMessage message) {
     TransportInstrumentation.Delivery span = instrumentation.startDelivery(message);
     try {
       if (message.kind() == MessageKind.EVENT) {
         // 014: an event recorded in a unit of work names its source instance, which the runtime
         // leaves out when it ran the event in process (Property 47).
-        String source = message.sourceSagaId();
-        if (source == null) {
-          events.receive(message.payload());
-        } else {
-          events.receive(message.payload(), source);
-        }
+        // 019: the stored metadata, not a capture on the relay thread, is the delivery's.
+        events.receive(
+            new EventDelivery(message.payload(), message.sourceSagaId(), message.metadata()));
         messageStore.markConsumed(consumerId, message.messageId(), clock.instant());
         notifyDelivered(message);
       } else {
@@ -475,8 +552,8 @@ public final class Relay {
                 message.commandId(),
                 message.payload(),
                 tx ->
-                    messageStore.markConsumed(
-                        tx, consumerId, message.messageId(), clock.instant())));
+                    messageStore.markConsumed(tx, consumerId, message.messageId(), clock.instant()),
+                message.metadata()));
       }
       logger.log(Level.DEBUG, () -> "saga.transport.delivered message=" + message.messageId());
     } catch (LeaseLostException lost) {

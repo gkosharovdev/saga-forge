@@ -27,7 +27,7 @@ Requires Java 21 and Spring Boot 4.1.
 | Aggregate event sources | every `AggregateEventSource` bean, asked in `@Order` order after each aggregate command handler; none by default (Spring Data `@DomainEvents` reach sagas through the inbound route) | — (define or omit the beans) |
 | Lifecycle | the runtime starts after the context refreshed, then the transport; on shutdown the transport stops first | — |
 | Spring Modulith | with its event publication registry present, the transport stores its messages there: one outbox | `saga-forge.transport.modulith-interop=false` |
-| Actuator | with Actuator present, a read-only `sagaforge` endpoint (counts, leadership, `vocabularies`, `eventSources`) and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
+| Actuator | with Actuator present, a read-only `sagaforge` endpoint (counts, leadership, `vocabularies`, `eventSources`, `metadata`) and a `sagaforge` health indicator (`DOWN` while messages are set aside, `DEGRADED` while no relay leads) | Spring Boot's `management.*` properties |
 | OpenTelemetry | the application's `OpenTelemetry` bean (Spring Boot's OpenTelemetry setup, or Micrometer Tracing's OpenTelemetry bridge) handed to the runtime and the transport: saga spans inside the request's trace, saga metrics, trace context stored with every message | `SagaForgeTelemetry`, or `saga-forge.telemetry.*` |
 
 Every bean backs off when the application defines one of the same type. Two `SagaRuntime` beans fail startup.
@@ -230,11 +230,13 @@ unconsumed message. `CANCELLED` counts deadlines and scheduled commands cancelle
   "leadership": { "role": "ACTIVE", "relayId": "7f3c…",
     "leader": { "holderId": "7f3c…", "holderHost": "orders-1", "fencingToken": 12,
                 "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } },
-  "schema": { "mode": "migrate", "version": "V5 (saga operations)", "check": "PASSED", "failures": 0, "warnings": 0 } }
+  "metadata": { "accessor": "mdc", "mdcKeys": ["correlationId"] },
+  "schema": { "mode": "migrate", "version": "V6 (process metadata)", "check": "PASSED", "failures": 0, "warnings": 0 } }
 ```
 
 With Postgres storage, `schema` shows the `initialize-schema` mode, the version in Saga Forge's history and the
-startup schema check's result.
+startup schema check's result. `metadata` names the process-metadata accessor: `none`, `mdc` with the configured
+`mdcKeys` (`saga-forge.metadata.mdc-keys`), or the class of an application `MetadataAccessor` bean.
 
 The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator,
 `DEGRADED` while no relay has led the message store for longer than one leadership lease, and `UP` otherwise. Its
@@ -254,7 +256,8 @@ management.endpoints.web.exposure.include=health,sagaforge,sagas
   returns one page of instances (oldest modified first), the `next` cursor and the counts per status. A bad parameter
   is a 400.
 - `GET /actuator/sagas/{sagaId}` returns the instance and its lifecycle history; 404 if unknown. The saga's business
-  state is never shown, and its context values only with `saga-forge.operations.expose-context-values=true`.
+  state is never shown, and its context values only with `saga-forge.operations.expose-context-values=true`. The
+  instance and every history entry show their process `metadata` (`{}` when none was captured), unredacted.
 - `POST /actuator/sagas/{sagaId}/{action}` with `{"reason": "…"}` repairs one instance: `resume-compensation`
   (a `COMPENSATION_FAILED` or stalled `COMPENSATING` saga), `compensate` (a `CREATED`, `RUNNING` or `FAILED` saga) or
   `resolve` (marks a `FAILED` or `COMPENSATION_FAILED` saga as handled by hand). The authenticated principal's name is
@@ -323,7 +326,7 @@ instance delivers.
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
 | `saga-forge.storage.postgres.initialize-schema` | `never` | `migrate` applies Saga Forge's versioned migrations with Flyway, then checks the schema; `validate` checks it and fails on a missing or different table, column or constraint; `always` creates the tables in an empty database; `never` fails startup if they are missing and logs other differences. |
 | `saga-forge.storage.postgres.migration.history-table` | `saga_forge_schema_history` | Saga Forge's own Flyway history table, apart from the application's. |
-| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version (1 to 5) an existing database without Saga Forge's history is at; replaces detection. |
+| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version (1 to 6) an existing database without Saga Forge's history is at; replaces detection. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.jmolecules.enabled` | `true` | Whether jMolecules' aggregate, event, command and command handler markers are recognised when `saga-forge-jmolecules` is on the class path. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
@@ -356,6 +359,7 @@ instance delivers.
 | `saga-forge.recovery.abandonment-age` | `15m` | How long a created saga with no completed step waits before a sweep handles it. |
 | `saga-forge.recovery.abandoned-start-policy` | `report` | `report` logs and counts an abandoned start; `fail` ends it `FAILED`. |
 | `saga-forge.operations.expose-context-values` | `false` | Whether the `sagas` endpoint shows a saga's context values; they may hold personal data. |
+| `saga-forge.metadata.mdc-keys` | (none) | SLF4J MDC keys captured into a saga's metadata when it starts or a message is sent, and put back in the MDC while its steps, handlers and compensations run. Empty means no metadata is captured. |
 
 Your IDE completes all of them from the starter's configuration metadata.
 

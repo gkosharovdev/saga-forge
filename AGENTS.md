@@ -261,6 +261,30 @@
   `SagaSchemaFailureAnalyzer`; the `sagaforge` endpoint's `schema` object. Guide page `docs/guide/schema.md`.
 - With 018 (versioned schema migrations) the whole build, container suites included (`mvn -Pcontainer-tests verify`), passed
   on 2026-11-27 (2,317 tests, 0 failures; 6 skipped, as with 015); the release build `-P release` with Javadoc also passes.
+- Implemented and tested, including container suites, added by `specs/019-process-metadata` (closes G-ADOPT-05, partly
+  G-010-04): process metadata. Core gains `core.metadata.SagaMetadata` (immutable string map, 32 entries, keys up to 128
+  and values up to 1,024 characters; `of` strict, `sanitized` drops invalid entries by key), the SPI
+  `core.spi.MetadataAccessor` (`capture()` → `Map`, `restore(SagaMetadata)` → `Scope`, `NONE`), `EventDelivery` with the
+  default `EventReceiver.receive(EventDelivery)`, the default `CommandInvocation.metadata()`, and a `metadata` component
+  on `SagaInstance`, `SagaLifecycleEntry`, `OutgoingMessages`, `OutboxCommand`, `NewMessage`/`StoredMessage` (old
+  constructors give empty). Saga code reads it through a `SagaMetadata` field (at most one, R32) or `@CommandHandler`
+  parameter (at most one, R33); Property 50. The runtime (`SagaRuntime.Builder.metadataAccessor`, package-private
+  `MetadataScopes`) fixes an instance's metadata at its creation write from the start delivery, stamps every batch with
+  the unit of work's and every history entry with the triggering delivery's (else the instance's), and restores it
+  around each unit of work (also the after-release outbox handoff); a failing accessor is reported
+  (`saga.metadata.capture.failed`, `saga.metadata.restore.failed`, `saga.metadata.entry.dropped key=`), never fatal.
+  Outcome events carry none (D6). The in-memory transport (`InMemoryTransport.Builder.metadataAccessor`) stores it on
+  messages and restores it around each delivery. Postgres V6 (`V6__process_metadata`, `schema-upgrade-019.sql`) adds
+  `metadata JSONB NOT NULL DEFAULT '{}'` to `saga_instance`, `saga_lifecycle_history` and `saga_message_store`. Starter:
+  `saga-forge.metadata.mdc-keys` registers `MdcMetadataAccessor` (SLF4J optional; `SagaForgeMetadataConfiguration`,
+  backs off for an application `MetadataAccessor`); the `sagas` endpoint shows instance and entry `metadata`, the
+  `sagaforge` endpoint a `metadata` object. Fixture: `when(event, SagaMetadata)`, `given(SagaMetadata, events...)`,
+  `Builder.metadataAccessor`, `InstanceView.metadata()`, `RecordedCommand.metadata()`, `Then.expectMetadata`. Examples:
+  the checkout's `LogisticsService` takes `SagaMetadata`; the Spring example sets `mdc-keys=correlationId`
+  (`MetadataContainerTest`). Guide page `docs/guide/metadata.md`.
+- With 019 (process metadata) the whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on
+  2026-11-27 (2,424 tests, 0 failures; 8 skipped, among them `TelemetryOverheadTest` and the five Modulith scheduling cases); the release build `-P release`
+  with Javadoc also passes.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -274,7 +298,7 @@
 - `saga-forge-core` — annotations (`@Saga`, `@SagaId`, `@SagaStep`, `@StartSaga`, `@EndSaga`,
   `@SagaCompensation`, `@DomainEvent`, `@Command`, `@CommandHandler`, `@Aggregate`, `@AggregateIdentifier`,
   `@AggregateLoader`, `@AggregateSaver`), scanner, `SagaContext`/`SagaLifecycle` contracts, `CommandGateway`,
-  `DomainEvents`/`EventPublisher`, `core.operations` (`SagaOperations`, `SagaInstanceQuery`/`PageCursor`/
+  `DomainEvents`/`EventPublisher`, `core.metadata.SagaMetadata` (019), `core.operations` (`SagaOperations`, `SagaInstanceQuery`/`PageCursor`/
   `SagaInstancePage`, `OperatorRequest`, `RepairResult`, `SagaResolution`, `InstanceCounts`, `RecoveryReport`), SPI
   (`core.spi.model` `DomainTypes`/`DomainTypeResolver`, `AggregateEventSource`, 016). Zero dependencies.
 - `saga-forge-runtime` — the saga runtime; depends on the JDK, `saga-forge-core` and `opentelemetry-api` (010) only. Public surface:
@@ -287,6 +311,7 @@
 - `saga-forge-spring-boot-starter` — auto-configuration (008), see its `README.md`: `SagaRuntimeConfiguration`
   (`SagaModelCollector`, the runtime, `CommandGateway`/`EventPublisher` beans, `SagaRuntimeLifecycle`),
   `SpringTransactionConfiguration`, `PostgresStorageConfiguration` (`SchemaInitializer`), `SpringHostConfiguration`,
+  `SagaForgeMetadataConfiguration`/`MdcMetadataAccessor` (019, SLF4J optional),
   `ApplicationEventsConfiguration`, `SagaForgeActuatorConfiguration`, `SagasEndpointConfiguration` (`SagasEndpoint`, 015), the failure analyzers, `SagaForgeProperties`;
   plus 007's transport wiring (`InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`,
   `ApplicationEventBridge`, `ModulithInteropConfiguration`/`ModulithMessageStore`), and 018's `SchemaInitializer`/
@@ -488,6 +513,13 @@
   built-in markers (G-016-04); plain-typed identifiers are never links (G-016-05); a by-type event is keyed by its
   identifier type (G-016-06); no Modulith-interop or `@TransactionalEventListener` harvest test (G-016-07); no
   invalid-variant equivalence property (G-016-08); package scanning loads each candidate class (G-016-09).
+
+- Process metadata (019), see memory.md G-019-01 to G-019-09: an instance's metadata is fixed at its start (G-019-01);
+  no query by a metadata value (G-019-02); Modulith's own republication threads do not see it (G-019-03); an
+  `EventReceiver` decorator must forward `receive(EventDelivery)` (G-019-04); a Kafka transport must carry it (G-019-05);
+  stored and shown unredacted (G-019-06); the relay duplicates the runtime's scope handling (G-019-07); the Spring
+  example has no outbox command (G-019-08). MDC stays in the starter (Principle I); never add metadata to outcome events
+  without revisiting D6.
 
 - Versioned schema migrations (018), see memory.md G-018-01 to G-018-08: Flyway only, no Liquibase (G-018-01);
   detection cannot see data rewrites (G-018-02); snapshots taken on Postgres 16 (G-018-03); rolling-deploy compatibility

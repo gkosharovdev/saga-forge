@@ -6,6 +6,7 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.command.NoCommandHandlerException;
 import io.github.gkosharovdev.sagaforge.core.command.ScheduledCommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInvocation;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
@@ -32,7 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
@@ -122,11 +123,36 @@ final class EngineCommandGateway implements CommandGateway {
         }
       };
 
+  /**
+   * Supplies a {@code SagaMetadata} handler parameter: the metadata of the unit of work handling
+   * the command ({@code specs/019-process-metadata} contracts/saga-code.md). Consulted before the
+   * host's resolvers, never asking them.
+   */
+  private static final HandlerParameterResolver SAGA_METADATA =
+      new HandlerParameterResolver() {
+
+        @Override
+        public boolean supports(Executable handler, Parameter parameter) {
+          return parameter.getType() == SagaMetadata.class;
+        }
+
+        @Override
+        public Object resolve(Executable handler, Parameter parameter) {
+          return currentMetadata();
+        }
+      };
+
+  /** The metadata of the unit of work bound to this thread, or empty outside one. */
+  private static SagaMetadata currentMetadata() {
+    return BoundUnitOfWork.current().map(BoundUnitOfWork::metadata).orElse(SagaMetadata.empty());
+  }
+
   private final Map<Class<?>, CommandRoute> routes;
   private final TransactionBoundary transactions;
   private final boolean outboxStoresCommands;
   private final boolean outboxSchedules;
-  private final Consumer<Runnable> standaloneUnitsOfWork;
+  private final BiConsumer<SagaMetadata, Runnable> standaloneUnitsOfWork;
+  private final MetadataScopes metadataScopes;
   private final Diagnostics diagnostics;
   private final CommandInterceptor interceptor;
   private final SagaInstrumentation instrumentation;
@@ -137,7 +163,8 @@ final class EngineCommandGateway implements CommandGateway {
       TransactionBoundary transactions,
       boolean outboxStoresCommands,
       boolean outboxSchedules,
-      Consumer<Runnable> standaloneUnitsOfWork,
+      BiConsumer<SagaMetadata, Runnable> standaloneUnitsOfWork,
+      MetadataScopes metadataScopes,
       Diagnostics diagnostics,
       CommandInterceptor interceptor,
       SagaInstrumentation instrumentation,
@@ -147,6 +174,7 @@ final class EngineCommandGateway implements CommandGateway {
     this.outboxStoresCommands = outboxStoresCommands;
     this.outboxSchedules = outboxSchedules;
     this.standaloneUnitsOfWork = standaloneUnitsOfWork;
+    this.metadataScopes = metadataScopes;
     this.diagnostics = diagnostics;
     this.interceptor = interceptor;
     this.instrumentation = instrumentation;
@@ -164,6 +192,15 @@ final class EngineCommandGateway implements CommandGateway {
    */
   static boolean isCommandIdParameter(Executable handler, Parameter parameter) {
     return COMMAND_ID.supports(handler, parameter);
+  }
+
+  /**
+   * Whether {@code parameter} of {@code handler} is a parameter the engine supplies itself: a
+   * {@code CommandId} (005 FR-003) or a {@code SagaMetadata} (019 FR-013); startup checks count it
+   * as resolvable.
+   */
+  static boolean isEngineSuppliedParameter(Executable handler, Parameter parameter) {
+    return COMMAND_ID.supports(handler, parameter) || SAGA_METADATA.supports(handler, parameter);
   }
 
   /**
@@ -188,7 +225,8 @@ final class EngineCommandGateway implements CommandGateway {
         settings.transactions(),
         settings.outbox().supportsCommands(),
         settings.outbox().supportsScheduling(),
-        handlerCall -> HandleCommand.run(settings, diagnostics, handlerCall),
+        (metadata, handlerCall) -> HandleCommand.run(settings, diagnostics, metadata, handlerCall),
+        new MetadataScopes(settings.metadataAccessor(), diagnostics),
         diagnostics,
         settings.commandInterceptor(),
         new SagaInstrumentation(settings.openTelemetry(), settings.telemetry(), diagnostics),
@@ -203,7 +241,7 @@ final class EngineCommandGateway implements CommandGateway {
       return;
     }
     requireCommand(command);
-    standaloneUnitsOfWork.accept(() -> send(command));
+    standaloneUnitsOfWork.accept(metadataScopes.capture(), () -> send(command));
   }
 
   private void sendWithin(BoundUnitOfWork unitOfWork, Object command) {
@@ -264,7 +302,8 @@ final class EngineCommandGateway implements CommandGateway {
     }
     requireCommand(command);
     AtomicReference<ScheduledCommandId> scheduled = new AtomicReference<>();
-    standaloneUnitsOfWork.accept(() -> scheduled.set(schedule(command, at)));
+    standaloneUnitsOfWork.accept(
+        metadataScopes.capture(), () -> scheduled.set(schedule(command, at)));
     return scheduled.get();
   }
 
@@ -284,7 +323,7 @@ final class EngineCommandGateway implements CommandGateway {
       return bound.get().cancelScheduled(id.value());
     }
     AtomicBoolean cancelled = new AtomicBoolean();
-    standaloneUnitsOfWork.accept(() -> cancelled.set(cancel(id)));
+    standaloneUnitsOfWork.accept(metadataScopes.capture(), () -> cancelled.set(cancel(id)));
     return cancelled.get();
   }
 
@@ -343,6 +382,7 @@ final class EngineCommandGateway implements CommandGateway {
     }
     CommandRoute route = routes.get(command.getClass());
     standaloneUnitsOfWork.accept(
+        delivery.metadata(),
         () -> {
           intercept(command, delivery.commandId(), route, "outbox");
           LocalTransaction transaction =
@@ -416,6 +456,11 @@ final class EngineCommandGateway implements CommandGateway {
     @Override
     public CommandId commandId() {
       return commandId;
+    }
+
+    @Override
+    public SagaMetadata metadata() {
+      return currentMetadata();
     }
 
     @Override
@@ -567,6 +612,8 @@ final class EngineCommandGateway implements CommandGateway {
           resolvers.add(Optional.empty());
         } else if (COMMAND_ID.supports(handler, parameter)) {
           resolvers.add(Optional.of(COMMAND_ID));
+        } else if (SAGA_METADATA.supports(handler, parameter)) {
+          resolvers.add(Optional.of(SAGA_METADATA));
         } else {
           resolvers.add(
               candidates.stream()

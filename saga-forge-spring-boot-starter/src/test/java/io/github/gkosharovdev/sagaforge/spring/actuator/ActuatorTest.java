@@ -4,12 +4,14 @@ import static io.github.gkosharovdev.sagaforge.transport.inmemory.support.Transp
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.ThreadLocalMetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.jmolecules.JMoleculesDomainTypeResolver;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.spring.SagaForgeProperties.SchemaInitialization;
+import io.github.gkosharovdev.sagaforge.spring.metadata.SagaForgeMetadataConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
 import io.github.gkosharovdev.sagaforge.spring.storage.SchemaStatus;
 import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresSchema;
@@ -104,6 +106,35 @@ class ActuatorTest {
         .asInstanceOf(InstanceOfAssertFactories.LIST)
         .last()
         .isEqualTo("jMolecules");
+  }
+
+  @Test
+  @DisplayName(
+      "the metadata object names the accessor, and the MDC keys for the MDC accessor (019)")
+  void metadataView() {
+    InMemoryTransport transport = transport();
+
+    assertThat(new SagaForgeEndpoint(transport.queries(), transport::leadership).status())
+        .containsEntry("metadata", Map.of("accessor", "none"));
+    assertThat(
+            new SagaForgeEndpoint(
+                    transport.queries(),
+                    transport::leadership,
+                    DomainTypes.builtIn(),
+                    List.of(),
+                    () -> null,
+                    SagaForgeMetadataConfiguration.describe(new ThreadLocalMetadataAccessor()))
+                .status())
+        .containsEntry("metadata", Map.of("accessor", ThreadLocalMetadataAccessor.class.getName()));
+    runner
+        .withConfiguration(AutoConfigurations.of(SagaForgeMetadataConfiguration.class))
+        .withPropertyValues("saga-forge.metadata.mdc-keys=correlationId,tenant")
+        .run(
+            context ->
+                assertThat(context.getBean(SagaForgeEndpoint.class).status())
+                    .containsEntry(
+                        "metadata",
+                        Map.of("accessor", "mdc", "mdcKeys", List.of("correlationId", "tenant"))));
   }
 
   @Test
@@ -271,7 +302,7 @@ class ActuatorTest {
                 .view())
         .containsExactly(
             Map.entry("mode", "migrate"),
-            Map.entry("version", "V5 (saga operations)"),
+            Map.entry("version", "V6 (process metadata)"),
             Map.entry("check", "PASSED"),
             Map.entry("failures", 0),
             Map.entry("warnings", 1));

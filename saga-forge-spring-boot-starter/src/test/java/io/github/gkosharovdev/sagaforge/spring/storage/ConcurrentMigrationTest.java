@@ -88,7 +88,7 @@ class ConcurrentMigrationTest {
     try {
       assertThat(contexts).hasSize(APPLICATIONS).allMatch(ConfigurableApplicationContext::isActive);
       assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-          .containsExactly("1", "2", "3", "4", "5");
+          .containsExactly("1", "2", "3", "4", "5", "6");
       assertThat(
               new PostgresSchemaValidator(MigrationSchemas.dataSource(schema)).validate().passed())
           .isTrue();
@@ -109,9 +109,9 @@ class ConcurrentMigrationTest {
     try {
       assertThat(contexts).hasSize(APPLICATIONS).allMatch(ConfigurableApplicationContext::isActive);
       assertThat(MigrationSchemas.types(schema, SAGA_FORGE_HISTORY))
-          .containsExactly("BASELINE", "SQL", "SQL", "SQL", "SQL");
+          .containsExactly("BASELINE", "SQL", "SQL", "SQL", "SQL", "SQL");
       assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-          .containsExactly("1", "2", "3", "4", "5");
+          .containsExactly("1", "2", "3", "4", "5", "6");
       assertThat(MigrationSchemas.count(schema, "saga_instance")).isEqualTo(2);
       assertThat(MigrationSchemas.count(schema, "saga_association")).isEqualTo(2);
       assertThat(MigrationSchemas.count(schema, "saga_context")).isEqualTo(1);

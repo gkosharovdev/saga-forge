@@ -9,12 +9,12 @@ import org.junit.jupiter.api.Test;
 class SchemaVersionTest {
 
   @Test
-  @DisplayName("the shipped versions are V1 to V5, oldest first")
+  @DisplayName("the shipped versions are V1 to V6, oldest first")
   void shippedVersions() {
     assertThat(PostgresSchema.versions())
         .extracting(SchemaVersion::number)
-        .containsExactly(1, 2, 3, 4, 5);
-    assertThat(PostgresSchema.currentVersion()).hasToString("V5 (saga operations)");
+        .containsExactly(1, 2, 3, 4, 5, 6);
+    assertThat(PostgresSchema.currentVersion()).hasToString("V6 (process metadata)");
     assertThat(SchemaVersion.of(2)).isEqualTo(new SchemaVersion(2, "saga outcome events"));
     assertThat(SchemaVersion.of(1)).isLessThan(SchemaVersion.of(4));
   }
@@ -24,7 +24,7 @@ class SchemaVersionTest {
   void unknownVersion() {
     assertThatThrownBy(() -> SchemaVersion.of(9))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Saga Forge ships no schema version 9; the known versions are 1 to 5");
+        .hasMessage("Saga Forge ships no schema version 9; the known versions are 1 to 6");
     assertThatThrownBy(() -> new SchemaVersion(0, "x"))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new SchemaVersion(1, " "))

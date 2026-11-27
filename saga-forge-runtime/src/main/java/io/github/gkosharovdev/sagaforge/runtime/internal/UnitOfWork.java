@@ -3,13 +3,16 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaConcurrencyConflictException;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
+import io.github.gkosharovdev.sagaforge.core.spi.SagaLifecycleEntry;
 import io.github.gkosharovdev.sagaforge.core.spi.ScheduledMessage;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
@@ -97,7 +100,8 @@ final class UnitOfWork implements BoundUnitOfWork {
       Diagnostics diagnostics,
       SagaInstrumentation instrumentation,
       EventSubscriptions subscriptions,
-      EventAggregates eventAggregates) {}
+      EventAggregates eventAggregates,
+      MetadataScopes metadata) {}
 
   /**
    * What runs inside one unit of work.
@@ -210,6 +214,7 @@ final class UnitOfWork implements BoundUnitOfWork {
   }
 
   private final Scope scope;
+  private final MetadataScopes metadataScopes;
   private final EngineSettings settings;
   private final Diagnostics diagnostics;
   private final CommandGateway gateway;
@@ -233,9 +238,12 @@ final class UnitOfWork implements BoundUnitOfWork {
   private Optional<SagaOutcome> outcome = Optional.empty();
   private boolean writing;
   private Throwable firstFailure;
+  private SagaMetadata metadata;
 
   private UnitOfWork(
       Scope scope,
+      MetadataScopes metadataScopes,
+      SagaMetadata metadata,
       EngineSettings settings,
       Diagnostics diagnostics,
       CommandGateway gateway,
@@ -247,6 +255,8 @@ final class UnitOfWork implements BoundUnitOfWork {
       Correlation correlation,
       EngineSagaLifecycle lifecycle) {
     this.scope = scope;
+    this.metadataScopes = metadataScopes;
+    this.metadata = metadata;
     this.instrumentation = instrumentation;
     this.subscriptions = subscriptions;
     this.settings = settings;
@@ -274,6 +284,8 @@ final class UnitOfWork implements BoundUnitOfWork {
         about.unitOfWorkId() != null ? about.unitOfWorkId() : settings.sources().newUnitOfWorkId();
     return new UnitOfWork(
         Scope.INSTANCE,
+        with.metadata(),
+        SagaMetadata.empty(),
         settings,
         with.diagnostics(),
         with.gateway(),
@@ -294,6 +306,8 @@ final class UnitOfWork implements BoundUnitOfWork {
       Collaborators with, SagaModel saga, EngineSagaLifecycle lifecycle, String sagaId) {
     return new UnitOfWork(
         Scope.NEW_INSTANCE,
+        with.metadata(),
+        lifecycle.metadata(),
         with.settings(),
         with.diagnostics(),
         with.gateway(),
@@ -306,11 +320,19 @@ final class UnitOfWork implements BoundUnitOfWork {
         lifecycle);
   }
 
-  /** A unit of work outside any saga instance, with a fresh unit of work id. */
-  static UnitOfWork standalone(EngineSettings settings, Diagnostics diagnostics) {
+  /**
+   * A unit of work outside any saga instance, with a fresh unit of work id.
+   *
+   * @param metadata the metadata of the work: the outbox command's, or a capture on the sending
+   *     thread (019)
+   */
+  static UnitOfWork standalone(
+      EngineSettings settings, Diagnostics diagnostics, SagaMetadata metadata) {
     String id = settings.sources().newUnitOfWorkId();
     return new UnitOfWork(
         Scope.STANDALONE,
+        new MetadataScopes(settings.metadataAccessor(), diagnostics),
+        metadata == null ? SagaMetadata.empty() : metadata,
         settings,
         diagnostics,
         null,
@@ -344,6 +366,16 @@ final class UnitOfWork implements BoundUnitOfWork {
   }
 
   /**
+   * The metadata of this unit of work (019): the instance's, read under the lock in instance scope,
+   * the new instance's, or the work's in standalone scope. Empty before an instance unit of work
+   * locked its instance.
+   */
+  @Override
+  public SagaMetadata metadata() {
+    return metadata;
+  }
+
+  /**
    * The correlation of this unit of work: saga type, instance and unit of work id as far as known.
    */
   Correlation correlation() {
@@ -374,7 +406,11 @@ final class UnitOfWork implements BoundUnitOfWork {
             commandIds);
     LocalTransaction transaction = settings.transactions().begin();
     ReentrancyGuard.enter();
+    MetadataAccessor.Scope restored = MetadataAccessor.Scope.NOOP;
     try {
+      if (scope != Scope.INSTANCE) {
+        restored = metadataScopes.restore(metadata);
+      }
       if (scope == Scope.INSTANCE) {
         Optional<SagaInstance> locked = lockOrRollBack(transaction);
         if (toRun.admit(locked) instanceof Admission.Skip<R> skip) {
@@ -389,6 +425,8 @@ final class UnitOfWork implements BoundUnitOfWork {
                             + toRun.getClass().getSimpleName()
                             + " admitted the missing instance "
                             + sagaId)));
+        metadata = locked.get().metadata();
+        restored = metadataScopes.restore(metadata);
       }
       T value;
       try {
@@ -403,8 +441,9 @@ final class UnitOfWork implements BoundUnitOfWork {
       } catch (RuntimeException | Error failure) {
         return failed(transaction, failure);
       }
-      return new Committed<>(value, unitOfWorkId, this::afterRelease);
+      return new Committed<>(value, unitOfWorkId, this::afterReleaseInScope);
     } finally {
+      restored.close();
       ReentrancyGuard.exit();
     }
   }
@@ -509,7 +548,7 @@ final class UnitOfWork implements BoundUnitOfWork {
         settings.outbox().cancel(List.copyOf(toCancel));
       }
       writing = true;
-      settings.storage().save(write.instance(), write.entries());
+      settings.storage().save(write.instance(), stamped(write.entries()));
       writing = false;
     }
     batch = buffered();
@@ -573,6 +612,25 @@ final class UnitOfWork implements BoundUnitOfWork {
    * committed transaction untouched and is logged and returned, with its suppressed exceptions (004
    * FR-031).
    */
+  /**
+   * Each entry with the metadata of the delivery that caused this unit of work, else the unit of
+   * work's own (019 contracts/propagation.md "History entry").
+   */
+  private List<SagaLifecycleEntry> stamped(List<SagaLifecycleEntry> entries) {
+    SagaMetadata entryMetadata = correlation.delivery() != null ? correlation.delivery() : metadata;
+    return entries.stream().map(entry -> entry.withMetadata(entryMetadata)).toList();
+  }
+
+  /** {@link #afterRelease()} with this unit of work's metadata restored (019). */
+  private List<Throwable> afterReleaseInScope() {
+    if (batch.isEmpty()) {
+      return List.of();
+    }
+    try (MetadataAccessor.Scope restored = metadataScopes.restore(metadata)) {
+      return afterRelease();
+    }
+  }
+
   private List<Throwable> afterRelease() {
     if (batch.isEmpty()) {
       return List.of();
@@ -642,6 +700,7 @@ final class UnitOfWork implements BoundUnitOfWork {
             events,
             List.copyOf(outboxCommands),
             recordedEvents,
-            List.copyOf(scheduled)));
+            List.copyOf(scheduled),
+            metadata));
   }
 }

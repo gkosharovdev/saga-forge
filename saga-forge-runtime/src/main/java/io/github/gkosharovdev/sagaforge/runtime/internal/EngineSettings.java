@@ -6,6 +6,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
@@ -53,6 +54,8 @@ import java.util.function.Function;
  *     DomainTypes#builtIn()} by default (specs/016-marker-spi-jmolecules)
  * @param aggregateEventSources take the events aggregates hold after their handlers, first
  *     supporting wins; none by default (specs/016-marker-spi-jmolecules)
+ * @param metadataAccessor captures and restores process metadata on the host's threads; {@link
+ *     MetadataAccessor#NONE} by default (specs/019-process-metadata)
  */
 public record EngineSettings(
     StorageProvider storage,
@@ -73,7 +76,8 @@ public record EngineSettings(
     boolean outcomeEvents,
     Function<String, Optional<String>> properties,
     DomainTypes domainTypes,
-    List<AggregateEventSource> aggregateEventSources) {
+    List<AggregateEventSource> aggregateEventSources,
+    MetadataAccessor metadataAccessor) {
 
   /**
    * @throws IllegalArgumentException if a component is {@code null} or a list holds {@code null}
@@ -94,9 +98,54 @@ public record EngineSettings(
     requireNonNull(telemetry, "telemetry");
     requireNonNull(properties, "properties");
     requireNonNull(domainTypes, "domainTypes");
+    requireNonNull(metadataAccessor, "metadataAccessor");
     aggregateResolvers = copyOf(aggregateResolvers, "aggregateResolvers");
     parameterResolvers = copyOf(parameterResolvers, "parameterResolvers");
     aggregateEventSources = copyOf(aggregateEventSources, "aggregateEventSources");
+  }
+
+  /** Settings without a metadata accessor, as before specs/019-process-metadata. */
+  public EngineSettings(
+      StorageProvider storage,
+      SagaContextStore contextStore,
+      TransactionBoundary transactions,
+      EventDispatcher dispatcher,
+      HandlerInstanceProvider handlerInstances,
+      List<AggregateResolver> aggregateResolvers,
+      List<HandlerParameterResolver> parameterResolvers,
+      Optional<SagaObjectProvider> sagaObjects,
+      Outbox outbox,
+      Outbox.Timing outboxTiming,
+      TimeAndIdentity sources,
+      RetrySettings retry,
+      CommandInterceptor commandInterceptor,
+      OpenTelemetry openTelemetry,
+      SagaTelemetrySettings telemetry,
+      boolean outcomeEvents,
+      Function<String, Optional<String>> properties,
+      DomainTypes domainTypes,
+      List<AggregateEventSource> aggregateEventSources) {
+    this(
+        storage,
+        contextStore,
+        transactions,
+        dispatcher,
+        handlerInstances,
+        aggregateResolvers,
+        parameterResolvers,
+        sagaObjects,
+        outbox,
+        outboxTiming,
+        sources,
+        retry,
+        commandInterceptor,
+        openTelemetry,
+        telemetry,
+        outcomeEvents,
+        properties,
+        domainTypes,
+        aggregateEventSources,
+        MetadataAccessor.NONE);
   }
 
   /** Settings with Saga Forge's own domain annotations only (016). */

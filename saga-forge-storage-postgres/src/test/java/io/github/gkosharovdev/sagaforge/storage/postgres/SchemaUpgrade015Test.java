@@ -77,7 +77,11 @@ class SchemaUpgrade015Test {
         for (String table : List.of("saga_instance", "saga_lifecycle_history")) {
           assertThat(columns(statement, UPGRADED, table))
               .as(table)
-              .containsExactlyInAnyOrderElementsOf(columns(statement, FRESH, table));
+              .containsExactlyInAnyOrderElementsOf(
+                  columns(statement, FRESH, table).stream()
+                      // 019 added the metadata column after 015.
+                      .filter(column -> !column.startsWith("metadata "))
+                      .toList());
         }
         assertThat(
                 single(

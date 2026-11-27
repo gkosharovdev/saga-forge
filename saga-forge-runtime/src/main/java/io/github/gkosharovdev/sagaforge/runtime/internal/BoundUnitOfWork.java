@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventRecorder;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
@@ -20,6 +21,11 @@ interface BoundUnitOfWork extends DomainEventRecorder {
 
   /** Reports a failure inside this unit of work; the first report is kept and fails it. */
   void failed(Throwable failure);
+
+  /** The metadata of this unit of work ({@code specs/019-process-metadata}). */
+  default SagaMetadata metadata() {
+    return SagaMetadata.empty();
+  }
 
   /**
    * The identity of the next command of {@code commandType} sent in this unit of work (005 FR-001).

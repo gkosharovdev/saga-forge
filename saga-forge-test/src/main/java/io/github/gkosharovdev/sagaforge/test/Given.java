@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.test;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
+
 /**
  * The history of a fixture scenario: events already published and aggregates already stored. Given
  * events run as published events do but do not count towards expectations (FR-004).
@@ -30,6 +32,27 @@ public final class Given {
   }
 
   /**
+   * Publishes more history, in order, each event delivered with {@code metadata} ({@code
+   * specs/019-process-metadata}).
+   *
+   * @throws IllegalArgumentException if {@code metadata} or {@code events} is {@code null}
+   * @throws SagaExpectationError if a step stored a {@code SagaContext} value durable storage
+   *     cannot persist
+   */
+  public Given given(SagaMetadata metadata, Object... events) {
+    if (metadata == null) {
+      throw new IllegalArgumentException("metadata must not be null");
+    }
+    if (events == null) {
+      throw new IllegalArgumentException("events must not be null");
+    }
+    for (Object event : events) {
+      last = fixture.publish(event, metadata);
+    }
+    return this;
+  }
+
+  /**
    * Seeds aggregates into the in-memory store (handler mode only).
    *
    * @throws IllegalStateException outside handler mode
@@ -47,6 +70,16 @@ public final class Given {
    */
   public Then when(Object event) {
     return new Then(fixture, fixture.publish(event), null);
+  }
+
+  /**
+   * Publishes the event under test, delivered with {@code metadata}, as {@link
+   * SagaFixture#when(Object, SagaMetadata)}.
+   *
+   * @throws IllegalArgumentException if {@code event} or {@code metadata} is {@code null}
+   */
+  public Then when(Object event, SagaMetadata metadata) {
+    return new Then(fixture, fixture.publish(event, metadata), null);
   }
 
   /**

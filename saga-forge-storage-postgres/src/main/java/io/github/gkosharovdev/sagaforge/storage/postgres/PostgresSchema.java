@@ -34,7 +34,8 @@ public final class PostgresSchema {
           new SchemaVersion(2, "saga outcome events"),
           new SchemaVersion(3, "saga deadlines"),
           new SchemaVersion(4, "active standby relay"),
-          new SchemaVersion(5, "saga operations"));
+          new SchemaVersion(5, "saga operations"),
+          new SchemaVersion(6, "process metadata"));
 
   private PostgresSchema() {}
 
