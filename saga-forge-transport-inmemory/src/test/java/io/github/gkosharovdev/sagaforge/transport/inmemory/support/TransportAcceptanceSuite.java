@@ -19,7 +19,12 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ChargeCard;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.DeliverySaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.FulfilmentSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.InvoiceIssued;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.LabelSaga;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.OrderPlaced;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PackParcel;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PackingRequested;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PackingSaga;
+import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.ParcelPacked;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentConfirmed;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.PaymentService;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.fixtures.RenewalSaga;
@@ -47,12 +52,15 @@ public abstract class TransportAcceptanceSuite {
     DeliverySaga.class,
     BillingSaga.class,
     RenewalSaga.class,
+    PackingSaga.class,
+    LabelSaga.class,
     PaymentService.class,
     ShippingService.class,
     CardService.class,
     RequestPayment.class,
     BookShipment.class,
-    ChargeCard.class
+    ChargeCard.class,
+    PackParcel.class
   };
 
   protected static final Duration WAIT = Duration.ofSeconds(10);
@@ -344,6 +352,29 @@ public abstract class TransportAcceptanceSuite {
             message -> {
               assertThat(message.status()).isEqualTo(MessageStatus.SET_ASIDE);
               assertThat(message.setAsideReason()).isEqualTo("FINAL_FAILURE");
+            });
+  }
+
+  @Test
+  @DisplayName(
+      "014 Property 47: an event its own saga ran in process also starts another saga type, once")
+  void recordedEventFansOut() {
+    setup.failDeliveriesOf(ParcelPacked.class, 1);
+
+    setup.publish(new PackingRequested("p-1"));
+
+    await(() -> setup.hasInstance(LabelSaga.class, "RUNNING"), WAIT, "the label saga to start");
+    awaitQuiet();
+    assertThat(setup.hasInstance(PackingSaga.class, "COMPLETED")).isTrue();
+    assertThat(setup.instanceCount(PackingSaga.class)).isEqualTo(1);
+    assertThat(setup.instanceCount(LabelSaga.class)).isEqualTo(1);
+    assertThat(messagesOf(ParcelPacked.class))
+        .singleElement()
+        .satisfies(
+            message -> {
+              assertThat(message.status()).isEqualTo(MessageStatus.CONSUMED);
+              assertThat(message.lastFailure()).isNotNull();
+              assertThat(message.sourceSagaType()).isEqualTo(PackingSaga.class.getName());
             });
   }
 

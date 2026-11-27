@@ -32,7 +32,8 @@ Saga Forge uses DDD / EventStorming terms (full glossary in
 - **Command**: an instruction to change state, handled by exactly one `@CommandHandler`. A saga step sends it through
   `CommandGateway`; a step never returns one.
 - **Domain event**: a fact about one aggregate that already happened. Recorded by handlers with
-  `DomainEvents.record(...)`, or published by application code with `EventPublisher`.
+  `DomainEvents.record(...)`, or published by application code through Spring's `ApplicationEventPublisher` (or
+  Saga Forge's `EventPublisher`).
 - **Aggregate**: the consistency boundary a command changes. Marked `@Aggregate`, identified by one
   `@AggregateIdentifier` field; its persistence is your code (a Spring Data repository or an
   `@AggregateLoader`/`@AggregateSaver`).

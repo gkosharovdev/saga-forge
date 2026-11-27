@@ -73,8 +73,11 @@ class RecordedEventsTest {
                   .hasSize(3)
                   .startsWith(new CaseClosed("case-1"), new CaseEscalated("case-1"));
               assertThat(batch.recordedEvents().get(2)).isInstanceOf(SagaCompleted.class);
-              assertThat(batch.events()).hasSize(2).startsWith(new CaseEscalated("case-1"));
-              assertThat(batch.events().get(1)).isSameAs(batch.recordedEvents().get(2));
+              // 014 Property 47: CaseClosed ran in process, but ReviewSaga has a step for it too.
+              assertThat(batch.events())
+                  .hasSize(3)
+                  .startsWith(new CaseClosed("case-1"), new CaseEscalated("case-1"));
+              assertThat(batch.events().get(2)).isSameAs(batch.recordedEvents().get(2));
             });
   }
 

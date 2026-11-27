@@ -1,6 +1,6 @@
 # Saga Forge Roadmap: next features
 
-**Date**: 2026-11-19, updated 2026-11-24 after 011 | **Input**: booking-service feedback on 0.1.0
+**Date**: 2026-11-19, updated 2026-11-24 after 011, 2026-11-26 after 015 | **Input**: booking-service feedback on 0.1.0
 (`booking-service/specs/060-saga-forge-migration/saga-forge-feedback.md`) | **Register**: gap IDs refer to
 `.specify/memory/memory.md`
 
@@ -47,7 +47,9 @@ The feedback's numbers (SF-n, W-n) are kept so the adopter can trace them.
    delivery, 007). Reporting its failure back completes that model, and it is also the way to make a remote call from a
    saga. (a) would add a second boundary concept.
 2. **SF-4: one bus?** Yes. With Modulith interop the publication registry is the one outbox. Whether
-   `ApplicationEventBridge` stays is decided in feature 014. The direction is to make it unnecessary.
+   `ApplicationEventBridge` stays is decided in feature 014. The direction is to make it unnecessary. Revised
+   2026-11-26: deadlines need Saga Forge's own log, so booking-service runs two logs; 014 is rescoped to "publish
+   once" (see its brief).
 3. **SF-6: multi-node story for the in-memory transport?** Active/standby: correct with any number of replicas and safe
    for rolling deploys, but only one node relays. Scale-out delivery is the Kafka transport's job. The engine side is
    already database-locked (`findByIdAndLock` is the first storage call of every unit of work). The single-instance
@@ -65,10 +67,10 @@ building on unfinished work.
 | 011 | Saga outcome events, `COMPENSATION_FAILED` rename, one unit of work (**done**, PR #18) | SF-1 | G-ADOPT-01, G-011-02 | W1, W2 | P1 |
 | 012 | Outbox command failure feedback (**done**, `specs/012-outbox-command-failure-feedback`) | SF-2(b) | new G-ADOPT-02 | W3, W4 | P1 |
 | 013 | Active/standby relay (**done**, `specs/013-active-standby-relay`) | SF-6 | G-007-09 | W9 | P1 |
-| 014 | One event bus with Spring Modulith | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
+| 014 | Publish once: Spring events reach sagas, saga events reach Spring (**done** 2026-11-26, `specs/014-publish-once`; container suites pending, G-014-06) | SF-4 | G-008-03, G-ENG-24 | W7, W8 | P1 |
 | 015 | Saga operations: query, repair, recovery (**done** 2026-11-26, `specs/015-saga-operations`, without retry) | SF-5 | G-006-03, G-008-02, G-006-05, G-ENG-05, G-013-05 | W10 | P1 |
-| 015b | Retry a failed saga from its failed step (split from 015; **next**) | SF-5 | new G-015-01 | W10 (rest) | P1 |
-| 016 | Marker SPI and jMolecules adapter | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
+| 015b | Retry a failed saga from its failed step (split from 015; after 014 and 016) | SF-5 | new G-015-01 | W10 (rest) | P1 |
+| 016 | Marker SPI and jMolecules adapter (**next**) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
 | 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
 | 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
@@ -188,31 +190,60 @@ commit, or abort). Whether the Modulith interop store needs the same lease.
 **Acceptance.** Two application instances on one database, with a burst of events on one association, never run a step
 twice and never reorder. Killing the active node hands over within the lease time.
 
-### 014: One event bus with Spring Modulith
+### 014: Publish once: Spring events reach sagas, saga events reach Spring
 
-**Problem.** Three publication routes behave differently. Events recorded in a unit of work reach Modulith listeners
-durably. `EventPublisher.publish` outside a unit of work reaches them only through the non-transactional
-`ApplicationEventBridge`, after consumption. Events published with Spring's `ApplicationEventPublisher` never reach
-sagas (G-008-03). An event that continues its own instance never reaches other saga types (G-ENG-24). Applications end
-up with two publishing paths and rules about which events may start a saga.
+**Implemented** (2026-11-26, `specs/014-publish-once`), tested without containers; the container suites still have to
+run (G-014-06).
+
+**Rescoped** (user decision, 2026-11-26). booking-service needs deadlines, which Modulith's publication registry cannot
+hold (G-017-01), so it runs with `saga-forge.transport.modulith-interop=false`: Saga Forge keeps its own message log
+and Modulith keeps its registry. A common outbox with Modulith is no longer a goal of 014; the interop mode stays as it
+is, neither removed nor extended. Order: 014, then 016, then 015b (the adopter's stack is Spring Modulith and
+jMolecules; 015b's operator retry has a workaround in 015's compensate and mark-resolved).
+
+**Problem.** With two logs, an event reaches sagas and module listeners only when it is published the right way:
+
+| Published by | `@ApplicationModuleListener`s | Sagas |
+|---|---|---|
+| A saga step or handler (`DomainEvents.record`) | yes, in the unit of work's transaction | yes |
+| Application code through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents` on save) | yes | no (G-008-03) |
+| Application code through Saga Forge's `EventPublisher` | only in `after-delivery` mode, outside a transaction | yes |
+| An event a step of its own instance consumes | yes | not by other saga types (G-ENG-24) |
+
+Code outside sagas publishes twice and has to know which events start a saga.
 
 **Scope.**
-- `EventPublisher.publish` inside a Spring transaction also publishes through Spring in that transaction, like
-  `ApplicationEventPublishingOutbox` (same `saga-forge.application-events.mode`).
-- Opt-in inbound route: events published through `ApplicationEventPublisher` whose type is a saga event (`@DomainEvent`
-  or a marker from 016) are stored for saga delivery in the publishing transaction. With Modulith interop it is the same
-  publication row.
-- Runtime: hand every recorded event that another saga type has a step for to the outbox, while the owning instance
-  keeps in-process delivery (G-ENG-24).
-- Decide `ApplicationEventBridge`: keep, restrict or deprecate, so no listener sees an event twice.
+1. Inbound route: an event published through Spring whose type some saga has a step for is stored in Saga Forge's log
+   in the publishing transaction. Events no saga handles are not stored.
+2. `EventPublisher.publish` inside a Spring transaction also publishes through Spring in that transaction, like
+   `ApplicationEventPublishingOutbox` (same `saga-forge.application-events.mode`).
+3. Runtime: a recorded event a step of the owning instance consumes in process is also handed to the outbox for every
+   other saga type with a step for it (G-ENG-24).
+4. No event stored or delivered twice: events `ApplicationEventPublishingOutbox` publishes to Spring do not come back
+   through route 1; decide `ApplicationEventBridge` (keep, restrict or deprecate).
+5. The starter keeps Saga Forge's own log when the model declares a deadline instead of failing startup under the
+   interop default (G-017-01).
 
-**Out of scope.** Modulith event externalization and `Scenario` support (G-008-01).
+**Keep options open.** Saga Forge's log stays a saga transport, not the application's integration-event bus (only
+event types a saga handles are stored; whether a later Kafka transport publishes integration events is open,
+G-014-02). The ordering key stays the event's `@AggregateIdentifier` on every route, so a Kafka transport can
+partition on it. Route 1 is a starter adapter over `Outbox`/`MessageStore`; core gains nothing Spring-specific. The
+ordering limits of two logs are recorded (G-014-01).
 
-**Constitution.** Spring code stays in the starter. The G-ENG-24 change is a runtime rule (Principle III: fan-out
-property revised).
+**Out of scope.** A common outbox with Modulith; Modulith event externalization and `Scenario` support (G-008-01);
+the Kafka transport; deadlines under interop (G-017-01 accepted).
+
+**Constitution.** Spring code stays in the starter (Principle I). The G-ENG-24 change is a runtime rule (Principle
+III: fan-out property revised).
+
+**Spec questions.** Route 1 opt-in or on by default; whether it needs an active Spring transaction or relies on the
+transport's `IN_TRANSACTION` outbox joining it; how route 4's check recognises an event Saga Forge published itself;
+interplay with 016 (Spring Data `@DomainEvents` reach sagas through route 1, so 016 narrows to markers and non-Spring
+harvesting).
 
 **Acceptance.** An event published by any of the three routes reaches a saga step and an `@ApplicationModuleListener`
-exactly once each, durably, after commit.
+exactly once each, durably, after commit; a recorded event that continues its own saga also starts another saga type
+with a step for it.
 
 ### 015: Saga operations: query, repair, recovery
 

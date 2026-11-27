@@ -25,10 +25,21 @@ public final class FlakyReceiver implements EventReceiver {
 
   @Override
   public HandlingReport receive(Object domainEvent) {
+    failIfChosen(domainEvent);
+    return delegate.receive(domainEvent);
+  }
+
+  /** Forwards the source (014), so the engine still leaves out the instance that ran the event. */
+  @Override
+  public HandlingReport receive(Object domainEvent, String sourceSagaId) {
+    failIfChosen(domainEvent);
+    return delegate.receive(domainEvent, sourceSagaId);
+  }
+
+  private void failIfChosen(Object domainEvent) {
     AtomicInteger left = failures.get(domainEvent.getClass());
     if (left != null && left.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
       throw new IllegalStateException("injected delivery failure of " + domainEvent);
     }
-    return delegate.receive(domainEvent);
   }
 }

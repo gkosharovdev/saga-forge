@@ -14,7 +14,6 @@ import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.PaymentTaken;
 import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.ReserveStock;
 import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.ShopOrder;
 import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.ShopSaga;
-import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.StockReserved;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -104,8 +103,8 @@ class CorrelationTest {
 
   @Test
   @DisplayName(
-      "G-ENG-24: an event a step of its own instance runs is not handed to other saga types")
-  void eventRunInProcessStaysWithItsInstance() {
+      "014 Property 47 (closes G-ENG-24): an event its own instance runs also reaches other saga types")
+  void eventRunInProcessAlsoReachesOtherSagaTypes() {
     SagaFixture both =
         SagaFixture.of(ShopSaga.class, AuditSaga.class)
             .handlers(new PaymentDesk())
@@ -117,8 +116,6 @@ class CorrelationTest {
         .instance(ShopSaga.class, "o-1")
         .expectEndedWith(Shop.RESERVED)
         .instance(AuditSaga.class, "o-1")
-        .expectStatus(SagaStatus.RUNNING);
-
-    both.when(new StockReserved("o-1")).instance(AuditSaga.class, "o-1").expectEndedWith("closed");
+        .expectEndedWith("closed");
   }
 }

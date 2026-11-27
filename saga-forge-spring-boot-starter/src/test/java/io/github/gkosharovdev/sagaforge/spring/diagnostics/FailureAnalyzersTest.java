@@ -65,7 +65,8 @@ class FailureAnalyzersTest {
 
     FailureAnalysis analysis =
         new DeadlinesRequireOwnLogFailureAnalyzer(
-                new org.springframework.mock.env.MockEnvironment())
+                new org.springframework.mock.env.MockEnvironment()
+                    .withProperty("saga-forge.transport.modulith-interop", "true"))
             .analyze(new IllegalStateException("failed", cause));
 
     assertThat(analysis.getDescription())
@@ -84,6 +85,13 @@ class FailureAnalyzersTest {
     assertThat(
             new DeadlinesRequireOwnLogFailureAnalyzer(
                     new org.springframework.mock.env.MockEnvironment())
+                .analyze(cause))
+        .as("014 D9: interop not set keeps the own log, so this analyzer has nothing to explain")
+        .isNull();
+    assertThat(
+            new DeadlinesRequireOwnLogFailureAnalyzer(
+                    new org.springframework.mock.env.MockEnvironment()
+                        .withProperty("saga-forge.transport.modulith-interop", "true"))
                 .analyze(
                     new SagaRuntimeStartupException(
                         new StartupReport(

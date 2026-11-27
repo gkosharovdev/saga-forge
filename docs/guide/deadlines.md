@@ -130,8 +130,9 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
 - **An `IN_TRANSACTION` outbox that can schedule messages**: the in-memory transport over the Postgres message store
   (the Spring Boot starter's default setup). With the default `ImmediateDispatchOutbox`, a saga that declares a deadline
   fails startup, and `schedule` throws `UnsupportedOperationException`.
-- **Not with Spring Modulith interop**: Modulith's publication registry has no due time, so the starter refuses
-  deadlines while `saga-forge.transport.modulith-interop` is on. Set it to `false` to keep Saga Forge's own log.
+- **Not with Spring Modulith interop**: Modulith's publication registry has no due time. When a saga declares a
+  deadline and `saga-forge.transport.modulith-interop` is not set, the starter keeps Saga Forge's own log beside
+  Modulith's registry (and logs `saga.transport.modulithInterop.skipped`); an explicit `true` refuses to start.
 - **One clock**: the runtime and the transport read the same `java.time.Clock` (in Spring Boot, a `Clock` bean, or
   the UTC system clock).
 - **Postgres**: an existing database applies `schema-upgrade-017.sql` (see [Operations](operations.md#schema-and-upgrades)).

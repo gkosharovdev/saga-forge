@@ -144,6 +144,22 @@ public final class TestTransport implements EventDispatcher {
     return report;
   }
 
+  /**
+   * Delivers an event recorded by the unit of work of {@code sourceSagaId}, as a transport
+   * delivering a stored message with a source would ({@code specs/014-publish-once}).
+   *
+   * @throws IllegalStateException if no receiver is connected
+   */
+  public HandlingReport deliver(Object event, String sourceSagaId) {
+    EventReceiver connected = receiver;
+    if (connected == null) {
+      throw new IllegalStateException("no EventReceiver connected");
+    }
+    HandlingReport report = connected.receive(event, sourceSagaId);
+    reports.add(report);
+    return report;
+  }
+
   @Override
   public void dispatch(Object domainEvent) {
     if (domainEvent == null) {

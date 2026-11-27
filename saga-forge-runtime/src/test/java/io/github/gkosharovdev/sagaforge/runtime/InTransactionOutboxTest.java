@@ -154,9 +154,13 @@ class InTransactionOutboxTest {
         .singleElement()
         .satisfies(
             batch -> {
-              assertThat(batch.events()).hasSize(2).first().isEqualTo(new CaseEscalated(CASE));
+              // 014 Property 47: CaseClosed ran in process and ReviewSaga has a step for it too,
+              // so it is handed on in recording order before the still queued CaseEscalated.
+              assertThat(batch.events())
+                  .hasSize(3)
+                  .startsWith(new CaseClosed(CASE), new CaseEscalated(CASE));
               // 011: the outcome event comes last.
-              assertThat(batch.events().get(1)).isInstanceOf(SagaCompleted.class);
+              assertThat(batch.events().get(2)).isInstanceOf(SagaCompleted.class);
             });
   }
 

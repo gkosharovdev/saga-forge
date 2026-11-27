@@ -12,7 +12,7 @@ Other types a model uses:
 | `CommandGateway` | `core.command` | `send(Object command)`: how a step (or any code) dispatches a command |
 | `CommandId` | `core.command` | the stable identity of a command, injected into a handler that declares it |
 | `DomainEvents` | `core.event` | static `record(Object event)`: how handlers and aggregates record events |
-| `EventPublisher` | `core.event` | `publish(Object event)`: how application code publishes events (a Spring bean) |
+| `EventPublisher` | `core.event` | `publish(Object event)`: publishes an event to sagas from application code, outside Spring (in Spring Boot, Spring's `ApplicationEventPublisher` reaches sagas too, and this bean also publishes to Spring) |
 | `CompensationTrigger` | `core.compensation` | why compensation started; optional parameter of a compensation |
 | `TransientFailure`, `FinalFailure` | `core.failure` | marker interfaces for exception classes: retry, or compensate without retry |
 | `SagaStatus`, `HandlingOutcome` | `core.spi` | instance status and per-event outcome (used in tests and operations) |

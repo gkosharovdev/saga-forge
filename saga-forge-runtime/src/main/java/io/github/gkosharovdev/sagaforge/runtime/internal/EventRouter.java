@@ -111,7 +111,11 @@ final class EventRouter {
     this.deadlines = new DeadlineDelivery(sagas, with, instanceLocks);
   }
 
-  HandlingReport receive(Object event) {
+  /**
+   * @param source the instance whose unit of work recorded {@code event}, when the transport knows
+   *     it ({@code specs/014-publish-once} contracts/event-receiver-source.md SR1 to SR3)
+   */
+  HandlingReport receive(Object event, Optional<String> source) {
     ReentrancyGuard.requireNotRunning();
     if (event instanceof SagaOutcome) {
       // 011 FR-017: outcome events are framework events; no saga reacts to one, and it is no error.
@@ -134,7 +138,7 @@ final class EventRouter {
       return new HandlingReport(event, List.of());
     }
     Attempts attempts = new Attempts();
-    reactions.forEach(reaction -> handle(reaction, attempts));
+    reactions.forEach(reaction -> handle(reaction, source, attempts));
     HandlingReport report = new HandlingReport(event, attempts.results);
     if (!attempts.failures.isEmpty()) {
       throw notHandled(event, report, attempts.failures);
@@ -154,7 +158,7 @@ final class EventRouter {
     return reactions;
   }
 
-  private void handle(Reaction reaction, Attempts attempts) {
+  private void handle(Reaction reaction, Optional<String> source, Attempts attempts) {
     if (reaction.step().start()) {
       attempts
           .attempt(() -> traced(reaction, null, () -> start(reaction)))
@@ -162,8 +166,37 @@ final class EventRouter {
     } else {
       attempts
           .attempt(() -> correlatedInstances(reaction))
-          .ifPresent(correlated -> resume(reaction, correlated, attempts));
+          .ifPresent(
+              correlated -> {
+                List<SagaInstance> others = withoutSourceThatRanIt(reaction, correlated, source);
+                if (others.isEmpty() && !correlated.isEmpty()) {
+                  // SR2: only the source instance correlates, and it ran the event in process.
+                  return;
+                }
+                resume(reaction, others, attempts);
+              });
     }
+  }
+
+  /**
+   * {@code correlated} without the source instance when its step for the event has completed: that
+   * instance ran the event in process, in the unit of work that recorded it, and the event was
+   * handed on only for other saga types (Property 47). A {@code COMPLETED} step never reverts, so
+   * the unlocked read decides; a source whose step has not completed (for example {@code
+   * COMPENSATING}) is handled as usual (SR3).
+   */
+  private static List<SagaInstance> withoutSourceThatRanIt(
+      Reaction reaction, List<SagaInstance> correlated, Optional<String> source) {
+    if (source.isEmpty()) {
+      return correlated;
+    }
+    String sourceId = source.get();
+    return correlated.stream()
+        .filter(
+            instance ->
+                !(instance.sagaId().equals(sourceId)
+                    && RunSteps.isCompleted(instance, reaction.step().name())))
+        .toList();
   }
 
   /**

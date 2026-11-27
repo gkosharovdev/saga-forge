@@ -95,7 +95,8 @@ final class UnitOfWork implements BoundUnitOfWork {
       EngineSettings settings,
       CommandGateway gateway,
       Diagnostics diagnostics,
-      SagaInstrumentation instrumentation) {}
+      SagaInstrumentation instrumentation,
+      EventSubscriptions subscriptions) {}
 
   /**
    * What runs inside one unit of work.
@@ -211,6 +212,7 @@ final class UnitOfWork implements BoundUnitOfWork {
   private final Diagnostics diagnostics;
   private final CommandGateway gateway;
   private final SagaInstrumentation instrumentation;
+  private final EventSubscriptions subscriptions;
   private final SagaModel saga;
   private final String sagaId;
   private final String unitOfWorkId;
@@ -236,6 +238,7 @@ final class UnitOfWork implements BoundUnitOfWork {
       Diagnostics diagnostics,
       CommandGateway gateway,
       SagaInstrumentation instrumentation,
+      EventSubscriptions subscriptions,
       SagaModel saga,
       String sagaId,
       String unitOfWorkId,
@@ -243,6 +246,7 @@ final class UnitOfWork implements BoundUnitOfWork {
       EngineSagaLifecycle lifecycle) {
     this.scope = scope;
     this.instrumentation = instrumentation;
+    this.subscriptions = subscriptions;
     this.settings = settings;
     this.diagnostics = diagnostics;
     this.gateway = gateway;
@@ -272,6 +276,7 @@ final class UnitOfWork implements BoundUnitOfWork {
         with.diagnostics(),
         with.gateway(),
         with.instrumentation(),
+        with.subscriptions(),
         saga,
         sagaId,
         id,
@@ -291,6 +296,7 @@ final class UnitOfWork implements BoundUnitOfWork {
         with.diagnostics(),
         with.gateway(),
         with.instrumentation(),
+        with.subscriptions(),
         saga,
         sagaId,
         null,
@@ -305,6 +311,7 @@ final class UnitOfWork implements BoundUnitOfWork {
         Scope.STANDALONE,
         settings,
         diagnostics,
+        null,
         null,
         null,
         null,
@@ -592,12 +599,23 @@ final class UnitOfWork implements BoundUnitOfWork {
    * {@code recordedEvents}). Empty if there is neither an event to hand on nor a command, unless
    * the outbox observes recorded events and some were recorded.
    */
+  /**
+   * {@code true} if a saga type other than this unit of work's has a step for {@code event}'s exact
+   * class, so an event a step of this instance ran in process is handed on too ({@code
+   * specs/014-publish-once} Property 47, closes G-ENG-24).
+   */
+  private boolean handledByOtherSagaTypes(Object event) {
+    return saga != null
+        && subscriptions != null
+        && subscriptions.otherSagaTypesHandle(event.getClass(), saga.typeName());
+  }
+
   private Optional<OutgoingMessages> buffered() {
     List<Object> events = new ArrayList<>();
     List<Object> recordedEvents = new ArrayList<>();
     recorded.forEach(
         entry -> {
-          if (!entry.ranHere) {
+          if (!entry.ranHere || handledByOtherSagaTypes(entry.event)) {
             events.add(entry.event);
           }
           recordedEvents.add(entry.event);

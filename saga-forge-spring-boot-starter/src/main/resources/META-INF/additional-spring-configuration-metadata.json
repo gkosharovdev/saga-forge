@@ -111,7 +111,7 @@
         },
         {
           "value": "after-delivery",
-          "description": "Publish an event as an application event when the transport delivers it, after the recording transaction committed."
+          "description": "Deprecated (014): publish an event as an application event when the transport delivers it, after the recording transaction committed. Refused while saga-forge.application-events.inbound.enabled is true."
         },
         {
           "value": "none",

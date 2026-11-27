@@ -56,9 +56,11 @@ import java.util.function.Supplier;
  *   <li>A coordinator thread leases due messages when signalled or every poll interval, and hands
  *       each to a keyed worker lane; the store lets only the head of each ordering key be leased,
  *       so at most one message per key is in flight.
- *   <li>An event is delivered to {@link EventReceiver#receive(Object)} and then marked consumed in
- *       a transaction of its own; a command goes to {@link CommandReceiver#receive(OutboxCommand)}
- *       and is marked consumed inside the handler's transaction.
+ *   <li>An event is delivered to {@link EventReceiver#receive(Object)}, or to {@link
+ *       EventReceiver#receive(Object, String)} with its source instance when it has one (014), and
+ *       then marked consumed in a transaction of its own; a command goes to {@link
+ *       CommandReceiver#receive(OutboxCommand)} and is marked consumed inside the handler's
+ *       transaction.
  *   <li>A failure records the attempt and makes the message due again after a growing backoff; at
  *       {@code maxAttempts} it is set aside. An unreadable payload is set aside at once.
  *   <li>A failed command is classified by its markers ({@code FailureClassification.of}): a {@code
@@ -446,7 +448,14 @@ public final class Relay {
     TransportInstrumentation.Delivery span = instrumentation.startDelivery(message);
     try {
       if (message.kind() == MessageKind.EVENT) {
-        events.receive(message.payload());
+        // 014: an event recorded in a unit of work names its source instance, which the runtime
+        // leaves out when it ran the event in process (Property 47).
+        String source = message.sourceSagaId();
+        if (source == null) {
+          events.receive(message.payload());
+        } else {
+          events.receive(message.payload(), source);
+        }
         messageStore.markConsumed(consumerId, message.messageId(), clock.instant());
         notifyDelivered(message);
       } else {

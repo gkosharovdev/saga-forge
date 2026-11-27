@@ -390,8 +390,9 @@ With `CardService` throwing `CardDeclined`, `ChargeCard` is handled once, `Billi
 only, no broker.
 
 **Pattern**: each module exposes its commands and events as its API; the saga lives in the module that owns the
-process; handlers record events with `DomainEvents.record`; application code publishes start events through Saga
-Forge's `EventPublisher`; other modules listen to saga events with Spring Modulith's `@ApplicationModuleListener`.
+process; handlers record events with `DomainEvents.record`; application code publishes events the usual Spring way
+(`ApplicationEventPublisher`, or a Spring Data aggregate's `@DomainEvents`), and sagas receive those whose type they
+have a step for; other modules listen to saga events with Spring Modulith's `@ApplicationModuleListener`.
 The starter scans the packages of the `@SpringBootApplication`, so nothing is registered by hand. Events are delivered
 through the in-memory transport's message store in your Postgres database (at least once, per-aggregate order,
 survives restarts).
@@ -525,26 +526,30 @@ Starting the process from application code, in the same transaction as your own 
 @Transactional
 public void place(String orderId, BigDecimal amount, boolean inStock) {
     orders.save(Order.create(orderId, inStock));
-    events.publish(new OrderCreatedEvent(orderId, amount));
+    events.publishEvent(new OrderCreatedEvent(orderId, amount));
 }
 ```
 
 Source: `saga-forge-example-spring/src/main/java/io/github/gkosharovdev/sagaforge/example/spring/OrderPlacement.java`
-(`events` is the injected `io.github.gkosharovdev.sagaforge.core.event.EventPublisher`).
+(`events` is the injected `org.springframework.context.ApplicationEventPublisher`).
 
 Rules for this setup:
 
-- **Publish saga events with `EventPublisher` or `DomainEvents.record`, never with Spring's
-  `ApplicationEventPublisher`**: events published through Spring do not reach sagas.
+- **Publish each event once**, by whichever route suits the code: Spring's `ApplicationEventPublisher` (or Spring
+  Data `@DomainEvents`), `DomainEvents.record` in a handler, or Saga Forge's `EventPublisher`. Each saga step and each
+  Spring listener receives it once. Inside a saga step or handler, an event published through Spring is recorded in
+  that unit of work like `DomainEvents.record`. Don't publish the same event both through Spring and through
+  `EventPublisher`: it would be stored twice. Switch the Spring route off with
+  `saga-forge.application-events.inbound.enabled=false`.
 - Saga events are also published as Spring application events inside the unit of work
   (`saga-forge.application-events.mode=in-transaction`). A plain `@EventListener` therefore runs **inside** the saga's
   transaction and its failure rolls the saga back; other modules should use `@ApplicationModuleListener` or
   `@TransactionalEventListener`.
 - With Spring Modulith's JDBC event publication registry on the classpath (`spring-modulith-starter-jdbc`), the
   transport keeps its messages there: one outbox for the application, and
-  `ApplicationModules.of(App.class).verify()` keeps passing.
-- An event that continues a saga instance is not handed to a *different* saga type that also reacts to it; give the
-  second saga an event of its own.
+  `ApplicationModules.of(App.class).verify()` keeps passing. A model with deadlines keeps Saga Forge's own log beside
+  the registry instead (two logs, written in the same transaction).
+- An event that continues a saga instance also reaches every *other* saga type that reacts to it, once.
 - Run one application instance per database for now (see [Limitations](limitations.md)).
 
 ## 6. Reacting to how a saga ended
