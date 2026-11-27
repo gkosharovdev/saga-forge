@@ -6,7 +6,7 @@ are in the [agent skill](saga-forge/SKILL.md) and the [guide](../guide/README.md
 ```markdown
 ## Saga Forge (sagas)
 
-This application uses Saga Forge 0.4.0 (`io.github.gkosharovdev:saga-forge-*`) with the Spring Boot starter, Postgres
+This application uses Saga Forge 0.5.0 (`io.github.gkosharovdev:saga-forge-*`) with the Spring Boot starter, Postgres
 storage and the in-memory transport. Guide: https://github.com/gkosharovdev/saga-forge/blob/master/llms-full.txt;
 startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/validation-rules.md.
 
