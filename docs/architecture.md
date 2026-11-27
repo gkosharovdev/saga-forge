@@ -31,6 +31,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Publish once ([014](../specs/014-publish-once/spec.md)): events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) reach sagas, `EventPublisher` publishes to Spring, a recorded event its own instance ran in process also reaches other saga types (Property 47, `EventReceiver.receive(event, sourceSagaId)`) | Implemented in core, the runtime, the in-memory transport, the starter and the fixture, tested without containers; the starter's `PublishOnceContainerTest` is written and compiles, not yet run against Postgres |
 | Vocabularies of domain markers and harvested events ([016](../specs/016-marker-spi-jmolecules/spec.md)): `core.spi.model` (`DomainTypes`, `DomainTypeResolver`, `DomainRole`, `Marker`, `IdentifierMember`), rules R30 and R31, Properties 48 and 49; `saga-forge-jmolecules` (`JMoleculesDomainTypeResolver`); `core.spi.AggregateEventSource` | Implemented in core, the runtime, the in-memory transport, the starter (`saga-forge.jmolecules.enabled`, event source beans) and the fixture, tested, including the jMolecules example's container test; no Modulith-interop harvest test (G-016-07) |
 | Saga operations (`SagaRuntime.operations()`: instance queries, `resumeCompensation`/`compensate`/`markResolved` with `OperatorRequest`, `recover()`; recovery sweeps with `RecoverySettings`/`AbandonedStartPolicy`; stranded-start adoption; `SagaResolution`, `compensationRound`; the starter's `sagas` Actuator endpoint) | Implemented in core, the runtime, Postgres, the starter and the fixture, tested, including container suites ([015](../specs/015-saga-operations/spec.md)); no retry of a failed step (G-015-01) |
+| Versioned schema migrations ([018](../specs/018-versioned-schema-migrations/spec.md)): Flyway migrations V1 to V5 at `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration` under their own history table `saga_forge_schema_history`; `PostgresSchemaValidator` (check by meaning against per-version catalog snapshots, version detection for a database without history); starter `initialize-schema=migrate`/`validate` | Implemented in the Postgres module (no Flyway dependency) and the starter (Flyway optional), tested, including container suites; Flyway only, no Liquibase (G-018-01) |
 
 ## Module responsibilities
 
@@ -86,6 +87,13 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
   `SagaContextStore` for one backend, and persists the lifecycle entries the runtime hands over
   (`SagaLifecycleEntry`: creation, step completions, terminal outcome), numbered in hand-over order, for direct
   data-store inspection only. Only Postgres exists so far.
+  Postgres ships its DDL as versioned Flyway migrations, one version per schema change, applied under Saga Forge's
+  own history table so the numbers never meet the application's; a released version never changes. The module does
+  not depend on Flyway: the starter runs them (`initialize-schema=migrate`) after the application's own database
+  initialisers, and `PostgresSchemaValidator` checks a database against the expected version by meaning (missing or
+  different tables, columns and constraints fail, indexes only warn, extras are ignored) for `migrate`, `validate`
+  and the logged check of `never`. `schema.sql` and the `schema-upgrade-NNN.sql` scripts remain for hosts that apply
+  the DDL themselves.
   Exactly one should be on the classpath per application. These are the only three storage backends in
   scope; adding a fourth is a scope decision, not an implementation detail.
 - **`saga-forge-transport-{inmemory,kafka}`** — each implements `EventDispatcher`. In-memory (007) is a

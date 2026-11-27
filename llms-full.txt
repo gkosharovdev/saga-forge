@@ -24,6 +24,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Vocabularies](vocabularies.md) | drive sagas from a domain marked only with jMolecules, or hand aggregate-held events to sagas |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
+| [Database schema](schema.md) | create and upgrade Saga Forge's tables with its versioned migrations, or check a schema you manage |
 | [Limitations](limitations.md) | know what to design around in 0.4.0 |
 
 API reference: the Javadoc of every published module is on
@@ -122,14 +123,18 @@ Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_
 `saga_message_store`, `saga_message_store_leader`) are defined in the classpath resource
 `io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql` inside `saga-forge-storage-postgres`.
 
-- **Development**: let the starter create them in an empty database:
-  `saga-forge.storage.postgres.initialize-schema=always`. It never alters existing tables.
-- **Production**: copy `schema.sql` into your Flyway or Liquibase migrations and keep
-  `initialize-schema=never` (the default). With `never`, startup fails if the tables are missing:
-  `Saga Forge's tables [...] do not exist in the database.`
+- **Production**: let the starter apply Saga Forge's versioned migrations with Flyway, under its own history table
+  `saga_forge_schema_history`, beside your own migrations. Add `org.flywaydb:flyway-core` and
+  `org.flywaydb:flyway-database-postgresql` (versions from Spring Boot) and set
+  `saga-forge.storage.postgres.initialize-schema=migrate`. A database created earlier from `schema.sql` is taken over
+  at its version.
+- **Schema managed elsewhere** (Liquibase, a DBA): set `initialize-schema=validate`; startup fails on any missing or
+  different table, column or constraint and names it.
+- **Development**: `initialize-schema=always` creates the tables from `schema.sql` in an empty database. It never
+  alters existing tables.
 
-A database created from the current `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
-[Operations](operations.md#schema-and-upgrades) for when they apply.
+With `never` (the default), startup fails if the tables are missing: `Saga Forge's tables [...] do not exist in the
+database.` [Database schema](schema.md) explains each mode, the takeover of an existing database and plain Java.
 
 ## 3. A saga
 
@@ -688,8 +693,11 @@ Reported by the starter's failure analyzers with a *Description* and an *Action*
 | `The [postgres] storage module is on the class path, but no storage was assembled: it needs a DataSource and a PlatformTransactionManager bean.` | Configure `spring.datasource.*` with `spring-boot-starter-jdbc`. |
 | `Several Saga Forge storage modules are on the class path: ...` | Set `saga-forge.storage.type`, or remove the others. |
 | `saga-forge.storage.type is {x}, but {artifact} is not on the class path ...` | Add the artifact or change the property. |
-| `Saga Forge's tables [...] do not exist in the database.` | Apply `schema.sql` (Flyway/Liquibase), or set `saga-forge.storage.postgres.initialize-schema=always` in development. |
-| `Saga Forge's schema is incomplete: tables [...] are missing while others exist.` | Apply the matching `schema-upgrade-NNN.sql` scripts. |
+| `Saga Forge's tables [...] do not exist in the database.` | Set `saga-forge.storage.postgres.initialize-schema=migrate` (with Flyway), or `always` in development; see [Database schema](schema.md). |
+| `Saga Forge's schema is incomplete: tables [...] are missing while others exist.` | Use `initialize-schema=migrate`, or apply the matching `schema-upgrade-NNN.sql` scripts. |
+| `Saga Forge's schema does not match V<N> (...): N failures, M warnings.` and one line per difference | Apply the missing migrations (`initialize-schema=migrate`) or repair the listed tables, columns and constraints. |
+| `Saga Forge's tables exist but match no released schema version. Closest: V<N> (...).` | Repair the listed differences, or set `saga-forge.storage.postgres.migration.baseline-version` to the version the database is at. |
+| `saga-forge.storage.postgres.initialize-schema=migrate needs Flyway, but [...] is not on the class path.` | Add `org.flywaydb:flyway-core` and `org.flywaydb:flyway-database-postgresql`, or use `initialize-schema=validate`. |
 | `No TransactionBoundary is available.` | Configure a `DataSource` and a `PlatformTransactionManager`. |
 | `No Saga Forge transport was assembled.` | Keep `saga-forge-transport-inmemory` (comes with the starter) with a configured storage module. |
 | `Several SagaRuntime beans are defined: ...` | Keep one runtime per application. |
@@ -1460,7 +1468,9 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
   Modulith's registry (and logs `saga.transport.modulithInterop.skipped`); an explicit `true` refuses to start.
 - **One clock**: the runtime and the transport read the same `java.time.Clock` (in Spring Boot, a `Clock` bean, or
   the UTC system clock).
-- **Postgres**: an existing database applies `schema-upgrade-017.sql` (see [Operations](operations.md#schema-and-upgrades)).
+- **Postgres**: an existing database needs schema version V3, which `initialize-schema=migrate` applies (see
+  [Database schema](schema.md)); without Flyway, apply `schema-upgrade-017.sql` (see
+  [Operations](operations.md#schema-and-upgrades)).
 
 ## Timing
 
@@ -2022,7 +2032,9 @@ with your own bean.
 | `saga-forge.enabled` | `true` | Whether Saga Forge's auto-configuration is active. |
 | `saga-forge.scan-packages` | none | Packages scanned for saga model classes in addition to the application's packages. |
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
-| `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
+| `saga-forge.storage.postgres.initialize-schema` | `never` | `migrate` applies Saga Forge's versioned migrations with Flyway; `validate` checks the schema and fails on a difference; `always` creates the tables in an empty database; `never` fails startup if they are missing. See [Database schema](schema.md). |
+| `saga-forge.storage.postgres.migration.history-table` | `saga_forge_schema_history` | Saga Forge's own Flyway history table. |
+| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version an existing database without Saga Forge's history is at; replaces detection. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events, and events published through `EventPublisher`, are published as Spring application events inside the transaction. `after-delivery` (deprecated, refused while the inbound route is on): published when the transport delivers them, after the commit. `none`: not published. |
@@ -2058,6 +2070,9 @@ with your own bean.
 
 ## Schema and upgrades
 
+With Flyway, `initialize-schema=migrate` applies everything below for you, as versioned migrations: see
+[Database schema](schema.md). The scripts stay for hosts that apply the DDL themselves:
+
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
   `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`, `-015.sql`.
@@ -2074,8 +2089,8 @@ with your own bean.
   heartbeat table `saga_message_store_consumer`. Stop every instance before applying it.
 - `schema-upgrade-015.sql` (after `-013.sql`) adds an instance's `resolution` and `compensation_round`, the operator
   columns of `saga_lifecycle_history` and the indexes the instance listing and the recovery sweeps use.
-- Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
-  startup fails if tables are missing, naming them.
+- Without `migrate`, Saga Forge never alters existing tables. With `initialize-schema=never` (the default), startup
+  fails if tables are missing, naming them; `validate` also fails on a missing or different column or constraint.
 
 ## Actuator
 
@@ -2097,6 +2112,10 @@ management.endpoints.web.exposure.include=health,sagaforge
 
   `role` is this instance's (`ACTIVE` or `STANDBY`); `leader` is the leadership record as last seen, absent before
   any was seen.
+- **Schema version**: with Postgres storage, the payload also has a `schema` object with the configured mode, the
+  version in Saga Forge's history (with `migrate`) and the startup check's result:
+  `"schema": { "mode": "migrate", "version": "V5 (saga operations)", "check": "PASSED", "failures": 0, "warnings": 0 }`.
+  See [Database schema](schema.md).
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
   delivery that failed `saga-forge.transport.max-attempts` times), `DEGRADED` while no instance has led the message
   store for longer than one leadership lease, and `UP` otherwise. Its details carry `role`, `fencingToken` and, on a
@@ -2437,6 +2456,183 @@ The `sagaforge` health contributor carries `instances.compensationFailed` and `i
 change its status. Telemetry: a `saga_forge.operation` span and the `saga_forge.operations` counter per repair (action
 and result), the `saga_forge.recovery` counter per sweep result, and the `saga_forge.instances` gauge per status.
 
+<!-- docs/guide/schema.md -->
+
+# Database schema
+
+Saga Forge keeps its state in six Postgres tables: `saga_instance`, `saga_association`, `saga_context`,
+`saga_lifecycle_history`, `saga_message_store` and `saga_message_store_leader`. Since 0.5.0,
+`saga-forge-storage-postgres` ships them as **versioned Flyway migrations** with their own history table. You no longer
+copy Saga Forge's DDL into your own migrations, and Saga Forge's version numbers never meet yours.
+
+| Version | What it adds | First released in |
+|---|---|---|
+| V1 base schema | the six tables as of 0.1.0 (with the heartbeat table the relay used then) | 0.1.0 |
+| V2 saga outcome events | renames `REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` | 0.2.0 |
+| V3 saga deadlines | the message store's due time and the `CANCELLED` status | 0.4.0 |
+| V4 active standby relay | the leadership table; drops the heartbeat table | 0.4.0 |
+| V5 saga operations | resolutions, compensation rounds, operator columns and indexes | 0.5.0 |
+
+The migrations live at `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration`, and Flyway records them
+in `saga_forge_schema_history`. A released version is never changed: a later schema change is always a new version.
+
+## Choose a mode
+
+The starter's `saga-forge.storage.postgres.initialize-schema` decides what happens at startup:
+
+| Mode | Writes to the database | Fails startup when | Use it for |
+|---|---|---|---|
+| `never` (default) | never | a Saga Forge table is missing | schemas someone else manages; differences are only logged |
+| `always` | creates the tables from `schema.sql` in a database without them | only some tables exist | local development and tests |
+| `validate` | never | the schema check finds a missing or different table, column or constraint | Liquibase or DBA-managed schemas |
+| `migrate` | applies the missing versions under Saga Forge's history | Flyway is absent, the tables match no version, a version fails, or the check fails afterwards | production with Flyway |
+
+Every mode except `always` on an empty database runs the **schema check**. It compares the database with the version
+the jar expects, by meaning, not by text:
+
+- tables, columns (type and `NOT NULL`), primary keys, unique constraints, foreign keys (with their `ON DELETE`) and
+  check constraints must be there; any difference is a **failure**;
+- a missing or different index is only a **warning**: the library works without it, more slowly;
+- extra tables, columns, constraints and indexes are ignored, so you can add your own.
+
+A failure lists every difference, one per line:
+
+```text
+Saga Forge's schema does not match V5 (saga operations): 1 failure, 0 warnings.
+  FAILURE saga_context: column last_modified_at is missing (expected timestamp with time zone NOT NULL)
+```
+
+## `migrate`: Saga Forge's migrations beside your own
+
+Add Flyway's core and Postgres modules (Spring Boot manages their versions; an application that uses Flyway already
+has them):
+
+```xml
+<dependency>
+    <groupId>org.flywaydb</groupId>
+    <artifactId>flyway-core</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.flywaydb</groupId>
+    <artifactId>flyway-database-postgresql</artifactId>
+</dependency>
+```
+
+```properties
+saga-forge.storage.postgres.initialize-schema=migrate
+```
+
+At startup, Spring Boot's own database initialisers run first: your Flyway migrations (`flyway_schema_history`),
+Liquibase, `spring.sql.init`. Then Saga Forge runs its own Flyway instance on its own location and history table,
+then checks the result, then starts the runtime. Your Flyway settings (`spring.flyway.*`) don't apply to it, and
+`spring.flyway.enabled=false` doesn't stop it. Several instances starting at once are safe: Flyway's lock lets one
+apply each version and the others find it applied.
+
+Because your tables are already in the schema, Saga Forge's history starts with a baseline row at version 0, then
+records V1 to V5:
+
+```text
+ version | description             | type
+---------+-------------------------+----------
+ 0       | << Flyway Baseline >>   | BASELINE
+ 1       | base schema             | SQL
+ ...
+ 5       | saga operations         | SQL
+```
+
+Never copy Saga Forge's migrations into your own migration location: the numbers would clash with yours, and each
+upgrade of Saga Forge would mean copying again.
+
+| Property | Default | Meaning |
+|---|---|---|
+| `saga-forge.storage.postgres.migration.history-table` | `saga_forge_schema_history` | Saga Forge's Flyway history table. |
+| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version an existing database without Saga Forge's history is at; replaces detection. |
+
+## Taking over an existing database
+
+A database created before 0.5.0 (from `schema.sql`, the upgrade scripts, or your own copy of them in your migrations)
+has Saga Forge's tables but no Saga Forge history. The first start with `migrate` detects which released version the
+tables match, records it as the baseline, and applies only the later versions. Every row is kept; V2 renames
+`REQUIRES_INTERVENTION` to `COMPENSATION_FAILED` and V4 drops the heartbeat table, as the upgrade scripts did. If your
+own migrations created Saga Forge's tables, your history stays as it is.
+
+If the tables match no released version, for example because a column was dropped or a constraint changed by hand,
+startup fails before anything is written and names the closest version and the differences:
+
+```text
+Saga Forge's tables exist but match no released schema version. Closest: V4 (active standby relay). Saga Forge's
+schema does not match V4 (active standby relay): 1 failure, 0 warnings.
+  FAILURE saga_instance: column outcome is missing (expected text NULL)
+```
+
+Repair the listed differences, or set `saga-forge.storage.postgres.migration.baseline-version` to the version the
+database is at: Saga Forge then applies the later versions and checks the result.
+
+## `validate`: schemas you manage yourself
+
+With Liquibase, or with a DBA who applies DDL by hand, apply `schema.sql` for a new database or the matching
+`schema-upgrade-NNN.sql` scripts for an existing one (see [Operations](operations.md#schema-and-upgrades)), and set:
+
+```properties
+saga-forge.storage.postgres.initialize-schema=validate
+```
+
+Startup then fails on any missing or different table, column or constraint, listing each one, and logs a warning for a
+missing index. It never writes and never creates a history table.
+
+## Plain Java
+
+Without the starter, run the same migrations with your own Flyway and check the result with
+`PostgresSchemaValidator`:
+
+```java
+static void migrate(DataSource dataSource) {
+  PostgresSchemaValidator validator = new PostgresSchemaValidator(dataSource);
+  String history = PostgresSchema.DEFAULT_HISTORY_TABLE;
+
+  // A database built from schema.sql and the upgrade scripts has Saga Forge's tables but no
+  // history: record the version it is at as the baseline. Otherwise the baseline is 0, which
+  // lets Flyway start beside the application's own tables.
+  String baseline = "0";
+  if (validator.appliedVersion(history).isEmpty()) {
+    switch (validator.detectVersion()) {
+      case SchemaDetection.Matched matched ->
+          baseline = String.valueOf(matched.version().number());
+      case SchemaDetection.Unmatched unmatched -> throw SagaSchemaException.unmatched(unmatched);
+      case SchemaDetection.Empty empty -> {}
+    }
+  }
+
+  Flyway.configure()
+      .dataSource(dataSource)
+      .locations(PostgresSchema.MIGRATION_LOCATION)
+      .table(history)
+      .placeholderReplacement(false)
+      .baselineOnMigrate(true)
+      .baselineVersion(baseline)
+      .load()
+      .migrate();
+
+  SchemaValidationReport report = validator.validate();
+  if (!report.passed()) {
+    throw SagaSchemaException.failedCheck(report);
+  }
+}
+```
+
+Source: `saga-forge-storage-postgres/src/test/java/io/github/gkosharovdev/sagaforge/storage/postgres/PlainJavaMigrationExampleTest.java`.
+
+`saga-forge-storage-postgres` does not depend on Flyway: add `flyway-core` and `flyway-database-postgresql` to your own
+build.
+
+## Rolling deploys
+
+During a rolling deploy, instances of the old and the new release run against one database. The new release's first
+instance applies the new version; the old instances keep running on it only if that version keeps the previous
+release working. Each release's notes say whether its schema version does. When it doesn't, stop every instance
+before deploying, as the notes say. With `migrate`, an older jar against a newer database starts: Flyway ignores
+versions it doesn't know.
+
 <!-- docs/guide/limitations.md -->
 
 # Limitations to design around (0.4.0)
@@ -2454,7 +2650,7 @@ status in later releases.
 | 5 | **Two logs are not ordered against each other** (G-014-01): with Saga Forge's own log beside Modulith's registry, an aggregate's events in one log have no order against those in the other. Saga Forge's log orders its events per aggregate on every publishing route. | If you send an aggregate's events on to a broker, send them through one of the two, keyed by the aggregate id, and give consumers an aggregate version to drop stale events. |
 | 6 | **An event published inside a host transaction waits for the relay's next poll** (G-014-05), up to `saga-forge.transport.poll-interval`, whether published through Spring or through `EventPublisher`. | Keep the poll interval short where saga start latency matters. |
 | 7 | **An abandoned start is only reported by default** (`abandoned-start-policy=report`): a crash between creating an instance and its first unit of work leaves it `CREATED` until its start event is redelivered, which adopts it. The report is deduplicated per process, so each instance logs it again after a restart (G-015-07). | Alert on `saga.recovery.startAbandoned` or the `saga_forge.recovery{kind=start_reported}` counter; choose `fail` when the start event will not come again. |
-| 8 | **No migration tool**; you apply `schema.sql` and upgrade scripts (G-003-25). | Add Saga Forge's DDL to your Flyway/Liquibase migrations. |
+| 8 | **Schema migrations need Flyway** (G-018-01): `initialize-schema=migrate` runs Saga Forge's versioned migrations with Flyway only; there are no Liquibase changesets. | With Liquibase or DBA-managed DDL, apply `schema.sql` and the upgrade scripts yourself and set `initialize-schema=validate` (see [Database schema](schema.md)). |
 | 9 | **Saga metrics need an OpenTelemetry metric exporter** in Spring Boot (G-010-05). | Define an `SdkMeterProvider` bean (see [Operations](operations.md#opentelemetry)). |
 | 10 | **A saga step cannot react to another saga's outcome event** (G-011-01): `SagaCompleted`, `SagaFailed` and `SagaCompensated` reach listeners, not sagas. | Listen in the application and publish a domain event, or send a command, that the follow-up saga starts on. |
 | 11 | **A failed outbox command always compensates the whole saga**: no step can take the failure and name a business outcome (G-012-03), and a saga that already ended is not changed: a command that fails after its saga `COMPLETED` (G-012-02), or a compensation's command that fails after the saga `COMPENSATED` (G-012-01), only shows as a set-aside message and the warning `saga.command.failure.ignored`. | Send a command whose failure must stop the saga from a step the saga still waits after (it waits for the command's own reply event). Alert on `saga.command.failure.ignored` and on set-aside messages, and make compensation commands idempotent so redelivering one is safe. |

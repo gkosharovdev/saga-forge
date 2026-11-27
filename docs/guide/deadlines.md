@@ -135,7 +135,9 @@ Source: `saga-forge-transport-inmemory/src/test/java/io/github/gkosharovdev/saga
   Modulith's registry (and logs `saga.transport.modulithInterop.skipped`); an explicit `true` refuses to start.
 - **One clock**: the runtime and the transport read the same `java.time.Clock` (in Spring Boot, a `Clock` bean, or
   the UTC system clock).
-- **Postgres**: an existing database applies `schema-upgrade-017.sql` (see [Operations](operations.md#schema-and-upgrades)).
+- **Postgres**: an existing database needs schema version V3, which `initialize-schema=migrate` applies (see
+  [Database schema](schema.md)); without Flyway, apply `schema-upgrade-017.sql` (see
+  [Operations](operations.md#schema-and-upgrades)).
 
 ## Timing
 

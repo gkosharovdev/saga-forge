@@ -17,6 +17,7 @@ snippet, so you can open it for the imports and the surrounding class.
 | [Vocabularies](vocabularies.md) | drive sagas from a domain marked only with jMolecules, or hand aggregate-held events to sagas |
 | [Testing](testing.md) | test a saga with `SagaFixture`, in memory |
 | [Operations](operations.md) | configure properties, Actuator, OpenTelemetry, schema upgrades |
+| [Database schema](schema.md) | create and upgrade Saga Forge's tables with its versioned migrations, or check a schema you manage |
 | [Limitations](limitations.md) | know what to design around in 0.4.0 |
 
 API reference: the Javadoc of every published module is on

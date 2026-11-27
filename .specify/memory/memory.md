@@ -253,7 +253,8 @@ Entry format: `### <ID>: <title>` with **Description**, **Origin** (file/section
   nor migrates the schema; the host applies it with whatever schema management it already uses. A future schema
   change has no shipped migration path.
 - **Origin**: `specs/003-postgres-saga-persistence/research.md` §7; `saga-forge-storage-postgres/.../package-info.java`.
-- **Status**: open (deferred by design).
+- **Status**: closed by 018 (2026-11-27): versioned Flyway migrations V1 to V5 under Saga Forge's own history table,
+  `PostgresSchemaValidator`, and the starter's `initialize-schema=migrate`/`validate` (`specs/018-versioned-schema-migrations`).
 
 ### G-003-26: `DataSource` and pool wiring belong to the starter
 - **Description**: `PostgresStorageProvider` and `PostgresSagaContextStore` take a caller-supplied `DataSource`
@@ -1159,7 +1160,7 @@ was kept out of the library are in `.specify/memory/roadmap.md`:
 6. 016 marker SPI and jMolecules adapter (G-ADOPT-04) - done 2026-11-27 (`specs/016-marker-spi-jmolecules`)
 7. 017 saga deadlines and scheduled commands (G-ENG-25) - done 2026-11-25; durable backoff (G-005-01, G-005-02)
    left to a later spec
-8. 018 versioned schema migrations (G-003-25)
+8. 018 versioned schema migrations (G-003-25) - done 2026-11-27 (`specs/018-versioned-schema-migrations`)
 9. 019 process metadata (G-ADOPT-05)
 10. 020 Spring context tests without a database (G-009-01; needs a scope decision, Principle IV)
 
@@ -1259,7 +1260,11 @@ Revisit the order with feedback from booking-service before each release.
   automated and the docs set back to 0.3.0 the same day.
   Deployments wait for a manual "Publish" unless the repository variable `CENTRAL_AUTO_PUBLISH` is `true`.
 - **Versioning**: semver; before 1.0 a minor release may break the API, a patch release never does; `internal`
-  packages carry no compatibility promise. Release notes list schema upgrade scripts.
+  packages carry no compatibility promise. Release notes list schema upgrade scripts and new schema versions, and
+  whether a new version keeps the previous release working during a rolling deploy (G-018-04).
+- **Release step (018)**: add the SHA-256 of each newly released `migration/V*.sql` to
+  `saga-forge-storage-postgres/src/test/resources/.../released-migrations.sha256`, so `ReleasedMigrationsTest` freezes it
+  (V5 at the release that ships 018).
 - **Javadoc**: making the release build pass fixed type-level `<h3>` headings (now `<h2>`), `@throws` tags on record
   comments (moved into a sentence about the canonical constructor) and one block-tag-looking continuation line.
 
@@ -1774,3 +1779,57 @@ Gaps found by the first migration attempt. Feature briefs and the verdict on eac
   Large scanned packages pay class loading at startup.
 - **Origin**: 016 T023.
 - **Status**: open (narrow `saga-forge.scan-packages` to the domain).
+
+## Versioned schema migrations (018)
+
+### G-018-01: No Liquibase changesets
+- **Description**: Saga Forge's migrations are Flyway SQL only. A Liquibase changelog would be a second copy of the
+  versions to keep in step. Liquibase users apply `schema.sql` and the upgrade scripts and use `initialize-schema=validate`.
+- **Origin**: `specs/018-versioned-schema-migrations/spec.md` (out of scope), research.md.
+- **Status**: open (on request).
+
+### G-018-02: Detection cannot see data rewrites
+- **Description**: version detection compares the catalog only. V2 renames a status in the data; a database whose check
+  constraint was changed by hand without the data is detected as V2 and skips the rewrite.
+- **Origin**: `specs/018-versioned-schema-migrations/research.md` R6.
+- **Status**: open (affects hand-edited schemas only).
+
+### G-018-03: Snapshots are taken on Postgres 16
+- **Description**: the `schema-levels/V<N>.json` constraint and index definitions come from `pg_get_constraintdef` and
+  `pg_get_indexdef` on `postgres:16-alpine`. Other majors may render a definition differently and report a false
+  difference; `Definitions` normalises only whitespace, `public.` and the index name.
+- **Origin**: `specs/018-versioned-schema-migrations/research.md` R5.
+- **Status**: open: run `SchemaSnapshotTest` and the detection tests on the oldest and newest supported majors.
+
+### G-018-04: Nothing enforces rolling-deploy compatibility of a version
+- **Description**: a rolling deploy runs the previous release against the new version. Nothing checks that a new
+  migration keeps the previous release working; it is a review rule, and release notes say whether it does.
+- **Origin**: `specs/018-versioned-schema-migrations/spec.md` edge cases.
+- **Status**: open.
+
+### G-018-05: MySQL and MongoDB migrations
+- **Description**: only Postgres ships versioned migrations; the other storage modules don't exist yet.
+- **Origin**: `specs/018-versioned-schema-migrations/spec.md` (out of scope).
+- **Status**: open (follows the storage modules).
+
+### G-018-06: Schema status only through the `sagaforge` endpoint
+- **Description**: `SchemaInitializer.status()` is shown by the `sagaforge` Actuator endpoint, which exists only with the
+  in-memory transport; there is no health contributor or metric for the schema.
+- **Origin**: `specs/018-versioned-schema-migrations/research.md`.
+- **Status**: open.
+
+### G-018-07: A baseline row at version 0 beside the application's tables
+- **Description**: Flyway refuses to migrate a non-empty schema without a history table unless `baselineOnMigrate` is on,
+  and a Spring Boot application's schema holds its own tables. Saga Forge's migrator therefore always baselines: at the
+  detected version, or at `0` when none of Saga Forge's tables exist, so `saga_forge_schema_history` starts with a
+  `<< Flyway Baseline >>` row at 0 before V1. In a truly empty schema Flyway writes no baseline row. Found during
+  implementation (T020); the guide's schema page shows it.
+- **Origin**: `specs/018-versioned-schema-migrations/tasks.md` T020; `FlywaySchemaMigrator`.
+- **Status**: accepted.
+
+### G-018-08: Spring Boot's OutputCaptureExtension does not run with the repository's JUnit
+- **Description**: `OutputCaptureExtension` fails with `NoSuchMethodError` on `ExtensionContext.Store.computeIfAbsent`
+  (JUnit version skew with Spring Boot 4.1's test support). `SchemaValidateModeTest` asserts warnings on the status
+  report, whose `describe()` is the logged text, instead of on the log.
+- **Origin**: `specs/018-versioned-schema-migrations/tasks.md` T034.
+- **Status**: open (align the JUnit version with Spring Boot's, then assert on logs where it matters).

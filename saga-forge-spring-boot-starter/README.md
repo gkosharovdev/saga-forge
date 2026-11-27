@@ -57,9 +57,14 @@ Every bean backs off when the application defines one of the same type. Two `Sag
 spring.datasource.url=jdbc:postgresql://localhost:5432/orders
 spring.datasource.username=orders
 spring.datasource.password=orders
-# development only: create Saga Forge's tables in an empty database
-saga-forge.storage.postgres.initialize-schema=always
+# production: apply Saga Forge's versioned migrations with Flyway (or `always` in development)
+saga-forge.storage.postgres.initialize-schema=migrate
 ```
+
+`migrate` needs `org.flywaydb:flyway-core` and `org.flywaydb:flyway-database-postgresql` (versions from Spring Boot).
+Saga Forge applies its migrations after your own Flyway migrations, under its own history table
+`saga_forge_schema_history`, and takes over a database created earlier from `schema.sql` at its version. See the
+guide's [Database schema](../docs/guide/schema.md) page.
 
 Publish the event that starts a saga the usual Spring way, through `ApplicationEventPublisher` (or from a Spring Data
 aggregate's `@DomainEvents`). Inside a `@Transactional` method, the event is stored with your own changes and delivered
@@ -224,8 +229,12 @@ unconsumed message. `CANCELLED` counts deadlines and scheduled commands cancelle
 { "counts": { "CANCELLED": 4, "CONSUMED": 120, "SET_ASIDE": 1, "UNCONSUMED": 3 }, "oldestUnconsumed": "PT2.5S",
   "leadership": { "role": "ACTIVE", "relayId": "7f3c…",
     "leader": { "holderId": "7f3c…", "holderHost": "orders-1", "fencingToken": 12,
-                "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } } }
+                "acquiredAt": "2026-11-26T09:00:00Z", "expiresAt": "2026-11-26T09:12:30Z" } },
+  "schema": { "mode": "migrate", "version": "V5 (saga operations)", "check": "PASSED", "failures": 0, "warnings": 0 } }
 ```
+
+With Postgres storage, `schema` shows the `initialize-schema` mode, the version in Saga Forge's history and the
+startup schema check's result.
 
 The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator,
 `DEGRADED` while no relay has led the message store for longer than one leadership lease, and `UP` otherwise. Its
@@ -312,7 +321,9 @@ instance delivers.
 | `saga-forge.enabled` | `true` | Whether Saga Forge's auto-configuration is active. |
 | `saga-forge.scan-packages` | none | Packages scanned for saga model classes in addition to the application's packages. |
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
-| `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
+| `saga-forge.storage.postgres.initialize-schema` | `never` | `migrate` applies Saga Forge's versioned migrations with Flyway, then checks the schema; `validate` checks it and fails on a missing or different table, column or constraint; `always` creates the tables in an empty database; `never` fails startup if they are missing and logs other differences. |
+| `saga-forge.storage.postgres.migration.history-table` | `saga_forge_schema_history` | Saga Forge's own Flyway history table, apart from the application's. |
+| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version (1 to 5) an existing database without Saga Forge's history is at; replaces detection. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.jmolecules.enabled` | `true` | Whether jMolecules' aggregate, event, command and command handler markers are recognised when `saga-forge-jmolecules` is on the class path. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
@@ -409,9 +420,18 @@ The same works by property: `saga-forge.scan-packages=com.example.billing`.
 
 ```properties
 saga-forge.application-events.mode=none
-saga-forge.storage.postgres.initialize-schema=never
+saga-forge.storage.postgres.initialize-schema=validate
 saga-forge.enabled=false
 ```
+
+## Optional dependencies
+
+The starter declares these as optional; add them to use the feature:
+
+| Dependency | For |
+|---|---|
+| `org.flywaydb:flyway-core`, `org.flywaydb:flyway-database-postgresql` | `saga-forge.storage.postgres.initialize-schema=migrate` |
+| `spring-boot-starter-actuator` | the `sagaforge` and `sagas` endpoints and the health contributor |
 
 ## Gotchas
 
@@ -421,8 +441,11 @@ saga-forge.enabled=false
   failure rolls the unit of work back. Listeners in other modules should use `@ApplicationModuleListener` or
   `@TransactionalEventListener`.
 - **`initialize-schema=always` is for development.** It creates the tables in an empty database and never alters
-  existing ones. In production, apply `saga-forge-storage-postgres`'s `schema.sql` and its `schema-upgrade-NNN.sql`
-  scripts with Flyway or Liquibase.
+  existing ones. In production, use `migrate` (Flyway) or `validate` (Liquibase, DBA-managed DDL). Never copy Saga
+  Forge's migrations into your own migration location: the version numbers would clash with yours.
+- **Spring Boot's Flyway and Saga Forge's are separate.** `spring.flyway.*` doesn't configure Saga Forge's
+  migrations, and `spring.flyway.enabled=false` doesn't stop them. Saga Forge's history starts with a baseline row at
+  version 0 when your own tables are already in the schema.
 - **One runtime per application.**
 - **The `@AggregateIdentifier` type must convert to the repository's id type** through the application's
   `ConversionService`. Startup fails naming both types otherwise.

@@ -131,8 +131,11 @@ Reported by the starter's failure analyzers with a *Description* and an *Action*
 | `The [postgres] storage module is on the class path, but no storage was assembled: it needs a DataSource and a PlatformTransactionManager bean.` | Configure `spring.datasource.*` with `spring-boot-starter-jdbc`. |
 | `Several Saga Forge storage modules are on the class path: ...` | Set `saga-forge.storage.type`, or remove the others. |
 | `saga-forge.storage.type is {x}, but {artifact} is not on the class path ...` | Add the artifact or change the property. |
-| `Saga Forge's tables [...] do not exist in the database.` | Apply `schema.sql` (Flyway/Liquibase), or set `saga-forge.storage.postgres.initialize-schema=always` in development. |
-| `Saga Forge's schema is incomplete: tables [...] are missing while others exist.` | Apply the matching `schema-upgrade-NNN.sql` scripts. |
+| `Saga Forge's tables [...] do not exist in the database.` | Set `saga-forge.storage.postgres.initialize-schema=migrate` (with Flyway), or `always` in development; see [Database schema](schema.md). |
+| `Saga Forge's schema is incomplete: tables [...] are missing while others exist.` | Use `initialize-schema=migrate`, or apply the matching `schema-upgrade-NNN.sql` scripts. |
+| `Saga Forge's schema does not match V<N> (...): N failures, M warnings.` and one line per difference | Apply the missing migrations (`initialize-schema=migrate`) or repair the listed tables, columns and constraints. |
+| `Saga Forge's tables exist but match no released schema version. Closest: V<N> (...).` | Repair the listed differences, or set `saga-forge.storage.postgres.migration.baseline-version` to the version the database is at. |
+| `saga-forge.storage.postgres.initialize-schema=migrate needs Flyway, but [...] is not on the class path.` | Add `org.flywaydb:flyway-core` and `org.flywaydb:flyway-database-postgresql`, or use `initialize-schema=validate`. |
 | `No TransactionBoundary is available.` | Configure a `DataSource` and a `PlatformTransactionManager`. |
 | `No Saga Forge transport was assembled.` | Keep `saga-forge-transport-inmemory` (comes with the starter) with a configured storage module. |
 | `Several SagaRuntime beans are defined: ...` | Keep one runtime per application. |

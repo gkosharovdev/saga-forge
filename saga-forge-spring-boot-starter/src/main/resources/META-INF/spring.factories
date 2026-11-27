@@ -1,4 +1,5 @@
 org.springframework.boot.diagnostics.FailureAnalyzer=\
 io.github.gkosharovdev.sagaforge.spring.diagnostics.DeadlinesRequireOwnLogFailureAnalyzer,\
 io.github.gkosharovdev.sagaforge.spring.diagnostics.SagaForgeConfigurationFailureAnalyzer,\
-io.github.gkosharovdev.sagaforge.spring.diagnostics.SagaRuntimeStartupFailureAnalyzer
+io.github.gkosharovdev.sagaforge.spring.diagnostics.SagaRuntimeStartupFailureAnalyzer,\
+io.github.gkosharovdev.sagaforge.spring.diagnostics.SagaSchemaFailureAnalyzer

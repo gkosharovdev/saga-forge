@@ -46,7 +46,8 @@ class SchemaTest {
                 + "ORDER BY table_name");
     List<Map<String, Object>> index =
         PostgresTestSupport.queryRows(
-            "SELECT indexdef FROM pg_indexes WHERE indexname = ?", "idx_saga_association_lookup");
+            "SELECT indexdef FROM pg_indexes WHERE indexname = ? AND schemaname = current_schema()",
+            "idx_saga_association_lookup");
 
     assertThat(tables)
         .extracting(row -> row.get("table_name"))

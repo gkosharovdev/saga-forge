@@ -160,6 +160,12 @@
             <artifactId>spring-tx</artifactId>
             <version>${spring-framework.version}</version>
         </dependency>
+        <!-- @DependsOnDatabaseInitialization (018): present with spring-boot-jdbc; ignored when absent -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-sql</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -216,6 +222,19 @@
             <version>${project.version}</version>
             <optional>true</optional>
         </dependency>
+        <!-- 018: initialize-schema=migrate applies Saga Forge's migrations with Flyway when the application has it -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>${flyway.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <version>${flyway.version}</version>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-events-core</artifactId>
@@ -224,6 +243,13 @@
         </dependency>
 
         <!-- Test dependencies -->
+        <!-- 018: the application's own Flyway beside Saga Forge's, in the migration tests -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+            <version>${spring-boot.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-sdk-testing</artifactId>

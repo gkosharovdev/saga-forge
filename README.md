@@ -265,6 +265,7 @@ copied from compiling code in this repository. It is also published as a site at
 | [Deadlines](docs/guide/deadlines.md) | saga deadlines, timeout steps and scheduled commands |
 | [Testing](docs/guide/testing.md) | `SagaFixture` given/when/then tests, in memory |
 | [Operations](docs/guide/operations.md) | properties, Actuator, OpenTelemetry spans and metrics, schema upgrades |
+| [Database schema](docs/guide/schema.md) | versioned migrations with Flyway, taking over an existing database, the schema check |
 | [Limitations](docs/guide/limitations.md) | what to design around in 0.4.0 |
 
 API reference: [Javadoc on javadoc.io](https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core). Spring Boot
@@ -336,8 +337,8 @@ In a Spring Boot 4.1 application on Java 21, add the starter and the Postgres st
 ```
 
 Point Spring Boot at your database as usual (`spring.datasource.*`) and create Saga Forge's tables
-(`saga-forge.storage.postgres.initialize-schema=always` in development, `schema.sql` in your migrations in
-production). The starter finds the saga, handler and aggregate classes in your application's packages and starts the
+(`saga-forge.storage.postgres.initialize-schema=always` in development; in production `migrate`, which applies Saga
+Forge's versioned migrations with Flyway under their own history table, or `validate` for a schema you manage). The starter finds the saga, handler and aggregate classes in your application's packages and starts the
 runtime; publish the first event through the `EventPublisher` bean. Continue with
 [Getting started](docs/guide/getting-started.md) (Gradle, schema, the complete example) and
 [Testing](docs/guide/testing.md).
@@ -418,7 +419,8 @@ not published.
 
 **Versions** follow semantic versioning. Before 1.0, a minor release (0.x.0) may break the API and a patch release
 (0.x.y) never does. Classes in packages named `internal` are public only for wiring between modules and carry no
-compatibility promise. Each release's notes list any schema upgrade script (for example `schema-upgrade-010.sql`).
+compatibility promise. Each release's notes list any new schema version and its upgrade script (for example
+`schema-upgrade-010.sql`), and whether it keeps the previous release working during a rolling deploy.
 
 **To release** version X.Y.Z, push a tag from master:
 

@@ -243,6 +243,24 @@
   Guide page `docs/guide/vocabularies.md`.
 - With 016 (vocabularies and harvesting) the whole build, container suites included (`mvn -Pcontainer-tests verify`), passed on
   2026-11-27 (2,233 tests, 0 failures; 6 skipped, as with 015); the release build `-P release` with Javadoc also passes.
+- Implemented and tested, including container suites, added by `specs/018-versioned-schema-migrations` (closes G-003-25):
+  versioned schema migrations. `saga-forge-storage-postgres` ships Flyway SQL migrations `V1__base_schema` (the 0.1.0
+  schema), `V2__saga_outcome_events` (011), `V3__saga_deadlines` (017), `V4__active_standby_relay` (013) and
+  `V5__saga_operations` (015), in the order their changes reached `schema.sql`, at
+  `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration` (not under `db/migration`, which Flyway
+  scans recursively), applied under Saga Forge's own history table `saga_forge_schema_history`. Released versions
+  (V1 to V4; V5 at its release) are frozen by `released-migrations.sha256`. The module has no Flyway dependency:
+  `PostgresSchema` (location, table, `versions()`), `PostgresSchemaValidator` (`validate`, `detectVersion` →
+  `SchemaDetection` `Empty`/`Matched`/`Unmatched`, `appliedVersion`) compares `pg_catalog` with per-version snapshots
+  `schema-levels/V<N>.json` by meaning (failures for tables, columns, keys, foreign keys, checks; indexes only warn;
+  extras ignored) → `SchemaValidationReport`/`SchemaDifference`; `SagaSchemaException`. Starter:
+  `saga-forge.storage.postgres.initialize-schema` gains `validate` and `migrate` (`never` also logs the check),
+  `saga-forge.storage.postgres.migration.history-table`/`baseline-version`; `SchemaInitializer` runs after the
+  application's database initialisers (`@DependsOnDatabaseInitialization`) and drives its own Flyway
+  (`FlywaySchemaMigrator`, Flyway optional; always `baselineOnMigrate`, at the detected version or 0, G-018-07);
+  `SagaSchemaFailureAnalyzer`; the `sagaforge` endpoint's `schema` object. Guide page `docs/guide/schema.md`.
+- With 018 (versioned schema migrations) the whole build, container suites included (`mvn -Pcontainer-tests verify`), passed
+  on 2026-11-27 (2,317 tests, 0 failures; 6 skipped, as with 015); the release build `-P release` with Javadoc also passes.
 - Released to Maven Central (memory.md DEC-REL-01): Apache-2.0, `release` profile in the root POM, `release.yml`
   publishes on a `vX.Y.Z` tag. Published: core, runtime, test, transport-inmemory, storage-postgres, starter (plus the
   test jars of core, runtime and the transport). Keep the release build green: `mvn -P release -Dgpg.skip -DskipTests
@@ -271,11 +289,14 @@
   `SpringTransactionConfiguration`, `PostgresStorageConfiguration` (`SchemaInitializer`), `SpringHostConfiguration`,
   `ApplicationEventsConfiguration`, `SagaForgeActuatorConfiguration`, `SagasEndpointConfiguration` (`SagasEndpoint`, 015), the failure analyzers, `SagaForgeProperties`;
   plus 007's transport wiring (`InMemoryTransportConfiguration`, `TransportLifecycle`, `EventReceiverCustomizer`,
-  `ApplicationEventBridge`, `ModulithInteropConfiguration`/`ModulithMessageStore`). No `SagaRuntimeConfig` for users
+  `ApplicationEventBridge`, `ModulithInteropConfiguration`/`ModulithMessageStore`), and 018's `SchemaInitializer`/
+  `FlywaySchemaMigrator` (Flyway optional) with `SagaSchemaFailureAnalyzer`. No `SagaRuntimeConfig` for users
   to hand-assemble. Spring code stays in this module and `saga-forge-example-spring`.
 - `saga-forge-storage-postgres` — `StorageProvider` + `SagaContextStore` over plain JDBC, with Jackson 3
   (`tools.jackson.core:jackson-databind`) encoding the JSONB columns; also persists lifecycle history
-  (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core.
+  (`saga_lifecycle_history`). Jackson and the driver stay in this module, never in core. Ships the schema as versioned
+  Flyway migrations (`migration/V<N>__*.sql`) plus `schema.sql` and the upgrade scripts, and `PostgresSchemaValidator`
+  (018); Flyway is a test dependency only.
 - `saga-forge-storage-mysql` / `-mongodb` — target: `StorageProvider` + `SagaContextStore` implementations, one
   per backend.
 - `saga-forge-transport-inmemory` — `InMemoryTransport`: `EventDispatcher` and `IN_TRANSACTION` `Outbox` over a
@@ -468,6 +489,12 @@
   identifier type (G-016-06); no Modulith-interop or `@TransactionalEventListener` harvest test (G-016-07); no
   invalid-variant equivalence property (G-016-08); package scanning loads each candidate class (G-016-09).
 
+- Versioned schema migrations (018), see memory.md G-018-01 to G-018-08: Flyway only, no Liquibase (G-018-01);
+  detection cannot see data rewrites (G-018-02); snapshots taken on Postgres 16 (G-018-03); rolling-deploy compatibility
+  of a version is a review rule (G-018-04); no MySQL/MongoDB migrations (G-018-05); the schema status only on the
+  `sagaforge` endpoint (G-018-06); Saga Forge's history starts with a baseline row at 0 beside application tables
+  (G-018-07); Boot's `OutputCaptureExtension` does not run here (G-018-08).
+
 - Observability (010), see memory.md G-010-01 to G-010-06: the Kafka transport must carry the same trace context
   (G-010-01); Spring Modulith listeners' trace continuity is Modulith's (G-010-03); diagnostics carry trace ids as keys,
   not MDC (G-010-04); saga metrics need an OpenTelemetry metric exporter, Spring Boot defines none (G-010-05); no
@@ -476,6 +503,8 @@
 ## Agent Working Rules For This Repo
 - Sources are formatted with google-java-format through Spotless: run `mvn spotless:apply` before committing; `mvn verify` and
   the CI `format` job fail on unformatted code. The code compiles with `maven.compiler.release` 21; CI also tests on JDK 25.
+- A schema change adds `migration/V<N+1>__*.sql`, updates `schema.sql` and an upgrade script, and regenerates
+  `schema-levels/V<N+1>.json` (`SchemaSnapshotTest -Dsaga-forge.write-snapshots=true`); never edit a released version.
 - Prefer edits that preserve the annotation-driven declarative style over imperative orchestration code.
 - Keep compensation logic explicit and mapped to concrete step names via `forStep`.
 - Never show a step returning a command; steps dispatch through `CommandGateway`.
