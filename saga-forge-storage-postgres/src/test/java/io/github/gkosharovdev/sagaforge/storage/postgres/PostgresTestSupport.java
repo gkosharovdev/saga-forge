@@ -77,6 +77,59 @@ final class PostgresTestSupport {
   }
 
   /**
+   * Drops and creates {@code schema} on the shared container (018), so a test gets an empty schema
+   * of its own beside the shared one.
+   *
+   * @param schema a lower-case schema name
+   * @return a {@link DataSource} whose connections have {@code schema} as {@code current_schema()}
+   */
+  static DataSource freshSchema(String schema) {
+    try (Connection connection = newDataSource().getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+      statement.execute("CREATE SCHEMA " + schema);
+    } catch (SQLException e) {
+      throw new IllegalStateException("could not create schema " + schema, e);
+    }
+    return schemaDataSource(schema);
+  }
+
+  /**
+   * @param schema an existing schema
+   * @return a {@link DataSource} whose connections have {@code schema} as {@code current_schema()}
+   */
+  static DataSource schemaDataSource(String schema) {
+    PGSimpleDataSource dataSource = (PGSimpleDataSource) newDataSource();
+    dataSource.setCurrentSchema(schema);
+    return dataSource;
+  }
+
+  /**
+   * Runs every statement of the SQL script {@code resource} (a class path path starting with {@code
+   * /}) on {@code dataSource}.
+   */
+  static void runScript(DataSource dataSource, String resource) {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      for (String sql : statements(resource)) {
+        statement.execute(sql);
+      }
+    } catch (SQLException e) {
+      throw new IllegalStateException("could not run " + resource, e);
+    }
+  }
+
+  /** Runs one SQL statement on {@code dataSource}. */
+  static void execute(DataSource dataSource, String sql) {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute(sql);
+    } catch (SQLException e) {
+      throw new IllegalStateException("could not run " + sql, e);
+    }
+  }
+
+  /**
    * A connection pool on the shared container, as an application would pass one. {@link
    * #newDataSource()} opens a new physical connection on every {@code getConnection()} (TCP
    * connect, authentication, a new server process), which dominates the time of the volume tests;

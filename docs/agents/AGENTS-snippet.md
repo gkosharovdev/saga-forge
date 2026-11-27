@@ -46,5 +46,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - With `saga-forge-jmolecules`, jMolecules markers (`AggregateRoot`, `DomainEvent`, `@Command`, `@CommandHandler`)
   replace the domain annotations; links are `Association`/`@Association`/`Identifier` members, never plain `String`s.
   An aggregate that holds its events gets an `AggregateEventSource` bean that returns and clears them.
+- Saga Forge's tables come from its own versioned migrations: `saga-forge.storage.postgres.initialize-schema=migrate`
+  with `flyway-core` and `flyway-database-postgresql` (own history table `saga_forge_schema_history`), or `validate`
+  for a schema managed elsewhere. Never copy its `schema.sql` or migrations into the application's migrations.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

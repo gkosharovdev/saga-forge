@@ -94,11 +94,19 @@
       "values": [
         {
           "value": "never",
-          "description": "Never create tables; missing tables fail startup. For Flyway or Liquibase users."
+          "description": "Never create tables; missing tables fail startup; differences are logged as warnings. The default."
         },
         {
           "value": "always",
           "description": "Create Saga Forge's tables from schema.sql when none exist; never alters existing tables."
+        },
+        {
+          "value": "validate",
+          "description": "Check every table, column and constraint Saga Forge needs; fail startup listing the differences. Never writes."
+        },
+        {
+          "value": "migrate",
+          "description": "Apply Saga Forge's versioned migrations with Flyway under its own history table, then check."
         }
       ]
     },

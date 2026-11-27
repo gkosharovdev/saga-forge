@@ -18,8 +18,9 @@ import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
  * contracts/actuator.md): message counts per status, capped at 1,000 each, the age of the oldest
  * unconsumed message, and this instance's relay role with the store's leader ({@code
  * specs/013-active-standby-relay} FR-022), the enabled vocabularies of domain markers and the
- * registered aggregate event sources ({@code specs/016-marker-spi-jmolecules} FR-030). No write
- * operation (G-008-02).
+ * registered aggregate event sources ({@code specs/016-marker-spi-jmolecules} FR-030), and, with
+ * Postgres storage, the schema's version and check ({@code specs/018-versioned-schema-migrations}
+ * FR-020). No write operation (G-008-02).
  */
 @Endpoint(id = "sagaforge")
 public class SagaForgeEndpoint {
@@ -28,6 +29,7 @@ public class SagaForgeEndpoint {
   private final Supplier<LeadershipStatus> leadership;
   private final DomainTypes domainTypes;
   private final List<String> eventSources;
+  private final Supplier<Map<String, Object>> schema;
 
   /**
    * An endpoint reporting Saga Forge's annotations as the only vocabulary.
@@ -48,6 +50,22 @@ public class SagaForgeEndpoint {
       Supplier<LeadershipStatus> leadership,
       DomainTypes domainTypes,
       List<? extends AggregateEventSource> eventSources) {
+    this(queries, leadership, domainTypes, eventSources, () -> null);
+  }
+
+  /**
+   * @param leadership this instance's view of the leadership, read on every request
+   * @param domainTypes the vocabularies the runtime recognises, listed by name
+   * @param eventSources the aggregate event sources the runtime asks, in order, listed by class
+   * @param schema the {@code schema} object, or {@code null} when there is no schema initializer
+   */
+  public SagaForgeEndpoint(
+      MessageStoreQueries queries,
+      Supplier<LeadershipStatus> leadership,
+      DomainTypes domainTypes,
+      List<? extends AggregateEventSource> eventSources,
+      Supplier<Map<String, Object>> schema) {
+    this.schema = schema;
     this.queries = queries;
     this.leadership = leadership;
     this.domainTypes = domainTypes;
@@ -65,6 +83,10 @@ public class SagaForgeEndpoint {
     payload.put("leadership", leadership(leadership.get()));
     payload.put("vocabularies", domainTypes.vocabularies());
     payload.put("eventSources", eventSources);
+    Map<String, Object> schemaView = schema.get();
+    if (schemaView != null) {
+      payload.put("schema", schemaView);
+    }
     return payload;
   }
 

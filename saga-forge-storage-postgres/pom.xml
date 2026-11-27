@@ -40,6 +40,19 @@
         </dependency>
 
         <!-- Test dependencies -->
+        <!-- 018: Flyway applies the shipped migrations in tests only; the module never depends on it -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>${flyway.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <version>${flyway.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- 007: the MessageStore contract suite, the transport fixtures and the engine for fault injection -->
         <dependency>
             <groupId>io.github.gkosharovdev</groupId>

@@ -11,7 +11,9 @@ with your own bean.
 | `saga-forge.enabled` | `true` | Whether Saga Forge's auto-configuration is active. |
 | `saga-forge.scan-packages` | none | Packages scanned for saga model classes in addition to the application's packages. |
 | `saga-forge.storage.type` | detected | Which storage module to use when several are on the class path (`postgres`). |
-| `saga-forge.storage.postgres.initialize-schema` | `never` | `always` creates Saga Forge's tables in an empty database; `never` fails startup if they are missing. |
+| `saga-forge.storage.postgres.initialize-schema` | `never` | `migrate` applies Saga Forge's versioned migrations with Flyway; `validate` checks the schema and fails on a difference; `always` creates the tables in an empty database; `never` fails startup if they are missing. See [Database schema](schema.md). |
+| `saga-forge.storage.postgres.migration.history-table` | `saga_forge_schema_history` | Saga Forge's own Flyway history table. |
+| `saga-forge.storage.postgres.migration.baseline-version` | unset | The version an existing database without Saga Forge's history is at; replaces detection. |
 | `saga-forge.runtime.max-total-retry-backoff` | `30s` | Longest total wait a step's `@RetryPolicy` may add up to; a longer policy fails startup. |
 | `saga-forge.outcome-events.enabled` | `true` | Whether a saga that ends records an outcome event (`SagaCompleted`, `SagaFailed` or `SagaCompensated`) with its last unit of work. |
 | `saga-forge.application-events.mode` | `in-transaction` | `in-transaction`: recorded events, and events published through `EventPublisher`, are published as Spring application events inside the transaction. `after-delivery` (deprecated, refused while the inbound route is on): published when the transport delivers them, after the commit. `none`: not published. |
@@ -47,6 +49,9 @@ with your own bean.
 
 ## Schema and upgrades
 
+With Flyway, `initialize-schema=migrate` applies everything below for you, as versioned migrations: see
+[Database schema](schema.md). The scripts stay for hosts that apply the DDL themselves:
+
 - `saga-forge-storage-postgres` ships its DDL as classpath resources under
   `io/github/gkosharovdev/sagaforge/storage/postgres/`: `schema.sql` (the complete current schema) and
   `schema-upgrade-005.sql`, `-006.sql`, `-007.sql`, `-010.sql`, `-011.sql`, `-017.sql`, `-013.sql`, `-015.sql`.
@@ -63,8 +68,8 @@ with your own bean.
   heartbeat table `saga_message_store_consumer`. Stop every instance before applying it.
 - `schema-upgrade-015.sql` (after `-013.sql`) adds an instance's `resolution` and `compensation_round`, the operator
   columns of `saga_lifecycle_history` and the indexes the instance listing and the recovery sweeps use.
-- Saga Forge ships no migration tool and never alters existing tables. With `initialize-schema=never` (the default),
-  startup fails if tables are missing, naming them.
+- Without `migrate`, Saga Forge never alters existing tables. With `initialize-schema=never` (the default), startup
+  fails if tables are missing, naming them; `validate` also fails on a missing or different column or constraint.
 
 ## Actuator
 
@@ -86,6 +91,10 @@ management.endpoints.web.exposure.include=health,sagaforge
 
   `role` is this instance's (`ACTIVE` or `STANDBY`); `leader` is the leadership record as last seen, absent before
   any was seen.
+- **Schema version**: with Postgres storage, the payload also has a `schema` object with the configured mode, the
+  version in Saga Forge's history (with `migrate`) and the startup check's result:
+  `"schema": { "mode": "migrate", "version": "V5 (saga operations)", "check": "PASSED", "failures": 0, "warnings": 0 }`.
+  See [Database schema](schema.md).
 - The `sagaforge` health contributor is `DOWN` with a `setAside` detail while any message waits for an operator (a
   delivery that failed `saga-forge.transport.max-attempts` times), `DEGRADED` while no instance has led the message
   store for longer than one leadership lease, and `UP` otherwise. Its details carry `role`, `fencingToken` and, on a

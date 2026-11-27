@@ -178,7 +178,12 @@ public class OrderProcessingSaga {
   resolved. Don't allow the `sagas` endpoint's write access without Spring Security, and don't turn on
   `saga-forge.operations.expose-context-values` when context values hold personal data.
 - Don't look for `REQUIRES_INTERVENTION`: a failed compensation ends `COMPENSATION_FAILED` (existing Postgres
-  databases apply `schema-upgrade-011.sql`).
+  databases get it from schema version V2, `migrate` applies it).
+- Don't copy Saga Forge's `schema.sql` or its migrations into the application's own Flyway location, and don't set
+  `initialize-schema=always` in production. With Flyway, set `saga-forge.storage.postgres.initialize-schema=migrate`
+  and add `flyway-core` and `flyway-database-postgresql`: Saga Forge applies its versioned migrations under its own
+  history table `saga_forge_schema_history`, after the application's, and takes over a database created from
+  `schema.sql`. With Liquibase or DBA-managed DDL, set `initialize-schema=validate`.
 
 ## When startup fails
 
@@ -199,3 +204,12 @@ https://github.com/gkosharovdev/saga-forge/blob/master/docs/guide/validation-rul
 | `@SagaCompensation on m: forStep 'x' does not reference an existing method` | use the exact step method name |
 | `total retry backoff n ms exceeds the engine maximum` | shorten the `@RetryPolicy` |
 | `Event E has no value for association property 'p'` (at runtime) | the event needs a non-null field named `p` |
+
+Schema failures are reported by Spring Boot's failure analysis, not in that list:
+
+| Description starts with | Fix |
+|---|---|
+| `Saga Forge's tables [...] do not exist in the database.` | `initialize-schema=migrate` (Flyway), or `always` in development |
+| `Saga Forge's schema does not match V<N> (...)`, one line per difference | `initialize-schema=migrate`, or repair the listed tables, columns and constraints |
+| `Saga Forge's tables exist but match no released schema version. Closest: V<N>` | repair the listed differences, or set `saga-forge.storage.postgres.migration.baseline-version` |
+| `...initialize-schema=migrate needs Flyway, but ... is not on the class path.` | add `org.flywaydb:flyway-core` and `org.flywaydb:flyway-database-postgresql` |

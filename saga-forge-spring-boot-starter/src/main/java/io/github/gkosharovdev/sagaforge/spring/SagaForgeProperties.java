@@ -317,9 +317,14 @@ public class SagaForgeProperties {
   public static class Postgres {
 
     /**
-     * Whether the starter creates Saga Forge's tables from schema.sql when they do not exist yet.
+     * How the starter treats Saga Forge's schema at startup: never (check the tables exist), always
+     * (create them in an empty database), validate (check the schema, change nothing) or migrate
+     * (apply Saga Forge's versioned migrations with Flyway, then check).
      */
     private SchemaInitialization initializeSchema = SchemaInitialization.NEVER;
+
+    /** {@code saga-forge.storage.postgres.migration.*}. */
+    private final Migration migration = new Migration();
 
     public SchemaInitialization getInitializeSchema() {
       return initializeSchema;
@@ -327,6 +332,43 @@ public class SagaForgeProperties {
 
     public void setInitializeSchema(SchemaInitialization initializeSchema) {
       this.initializeSchema = initializeSchema;
+    }
+
+    public Migration getMigration() {
+      return migration;
+    }
+  }
+
+  /**
+   * {@code saga-forge.storage.postgres.migration.*}: how {@code initialize-schema=migrate} applies
+   * Saga Forge's migrations ({@code specs/018-versioned-schema-migrations}).
+   */
+  public static class Migration {
+
+    /** Saga Forge's own Flyway history table, kept apart from the application's. */
+    // PostgresSchema.DEFAULT_HISTORY_TABLE, spelled out: the Postgres module is optional here.
+    private String historyTable = "saga_forge_schema_history";
+
+    /**
+     * The Saga Forge schema version an existing database without Saga Forge's history is at.
+     * Replaces detection from the tables' shape; used only while the history table does not exist.
+     */
+    private Integer baselineVersion;
+
+    public String getHistoryTable() {
+      return historyTable;
+    }
+
+    public void setHistoryTable(String historyTable) {
+      this.historyTable = historyTable;
+    }
+
+    public Integer getBaselineVersion() {
+      return baselineVersion;
+    }
+
+    public void setBaselineVersion(Integer baselineVersion) {
+      this.baselineVersion = baselineVersion;
     }
   }
 
@@ -397,14 +439,26 @@ public class SagaForgeProperties {
   /** Schema initialization policies. */
   public enum SchemaInitialization {
     /**
-     * Never create tables; missing tables fail startup. The default, for Flyway or Liquibase users.
+     * Never create tables; missing tables fail startup. The schema is also checked and differences
+     * are logged as warnings, never failing startup. The default.
      */
     NEVER,
     /**
      * Create Saga Forge's tables from schema.sql when they do not exist yet; never alters existing
-     * tables.
+     * tables. For development.
      */
-    ALWAYS
+    ALWAYS,
+    /**
+     * Check that the schema has every table, column and constraint this release needs; fail startup
+     * listing every difference. Never writes. For schemas applied by other means.
+     */
+    VALIDATE,
+    /**
+     * Apply Saga Forge's missing versioned migrations with Flyway, under Saga Forge's own history
+     * table and after the application's own migrations, then check. Needs flyway-core and
+     * flyway-database-postgresql.
+     */
+    MIGRATE
   }
 
   /**

@@ -70,6 +70,8 @@
         <jmolecules-bom.version>2025.0.2</jmolecules-bom.version>
         <!-- The version Spring Boot 4.1.x manages, so applications get one API version (010 research §10) -->
         <opentelemetry.version>1.62.0</opentelemetry.version>
+        <!-- 018: the version Spring Boot 4.1.x manages; optional in the starter, test scope in the Postgres module -->
+        <flyway.version>12.4.0</flyway.version>
         <!-- Release profile: whether a validated deployment is published without a manual step in the portal -->
         <central.autoPublish>false</central.autoPublish>
         <spotless.version>2.46.1</spotless.version>

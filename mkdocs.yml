@@ -39,6 +39,7 @@ nav:
   - Vocabularies: vocabularies.md
   - Testing: testing.md
   - Operations: operations.md
+  - Database schema: schema.md
   - Limitations: limitations.md
   - Javadoc: https://javadoc.io/doc/io.github.gkosharovdev/saga-forge-core
 markdown_extensions:

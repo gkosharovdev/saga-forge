@@ -3,14 +3,17 @@ package io.github.gkosharovdev.sagaforge.spring.actuator;
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.transport.TransportProperties;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.endpoint.condition.ConditionalOnAvailableEndpoint;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -21,6 +24,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.health.autoconfigure.contributor.ConditionalOnEnabledHealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.ClassUtils;
 
 /**
  * The {@code sagaforge} Actuator endpoint and health indicator over the in-memory transport's
@@ -44,18 +48,37 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnBean(InMemoryTransport.class)
 public class SagaForgeActuatorConfiguration {
 
+  private static final String POSTGRES_STORAGE =
+      "io.github.gkosharovdev.sagaforge.storage.postgres.PostgresStorageProvider";
+
   @Bean
   @ConditionalOnMissingBean
   @ConditionalOnAvailableEndpoint(endpoint = SagaForgeEndpoint.class)
   public SagaForgeEndpoint sagaForgeEndpoint(
       InMemoryTransport transport,
       ObjectProvider<DomainTypes> domainTypes,
-      ObjectProvider<AggregateEventSource> eventSources) {
+      ObjectProvider<AggregateEventSource> eventSources,
+      BeanFactory beanFactory) {
     return new SagaForgeEndpoint(
         transport.queries(),
         transport::leadership,
         domainTypes.getIfAvailable(DomainTypes::builtIn),
-        eventSources.orderedStream().toList());
+        eventSources.orderedStream().toList(),
+        () -> schema(beanFactory));
+  }
+
+  /**
+   * The schema initializer's status, when there is one; the Postgres module, which its types come
+   * from, is optional, so they are touched only once it is known to be present.
+   */
+  private static Map<String, Object> schema(BeanFactory beanFactory) {
+    if (!ClassUtils.isPresent(
+        POSTGRES_STORAGE, SagaForgeActuatorConfiguration.class.getClassLoader())) {
+      return null;
+    }
+    SchemaInitializer initializer =
+        beanFactory.getBeanProvider(SchemaInitializer.class).getIfAvailable();
+    return initializer == null ? null : initializer.status().view();
   }
 
   /** The health indicator, when Spring Boot's health module is present. */

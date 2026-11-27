@@ -1,0 +1,6 @@
+# SHA-256 of every released Saga Forge schema version (specs/018 research R4). Released versions are frozen:
+# a schema change adds a new version. Add a version's line when the release that ships it is tagged.
+c90352bc09b2ac112ec1f802861ec9714aa7eb73d58f8ea730e7d7837627775f  V1__base_schema.sql
+aa7771481bc0925f93e2de0b7ac4f9d77dc9b7e47eec0f8ac52b6eae09c6810f  V2__saga_outcome_events.sql
+b1186d94e8372b74efc3bacab1c602967e4c493e169db9995e3997b2d89bd6c2  V3__saga_deadlines.sql
+3a7801bd84c624e3434bea48b55d15506b2522d4242840ab25806d912a7ce988  V4__active_standby_relay.sql

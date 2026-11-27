@@ -65,14 +65,18 @@ Saga Forge's tables (`saga_instance`, `saga_association`, `saga_context`, `saga_
 `saga_message_store`, `saga_message_store_leader`) are defined in the classpath resource
 `io/github/gkosharovdev/sagaforge/storage/postgres/schema.sql` inside `saga-forge-storage-postgres`.
 
-- **Development**: let the starter create them in an empty database:
-  `saga-forge.storage.postgres.initialize-schema=always`. It never alters existing tables.
-- **Production**: copy `schema.sql` into your Flyway or Liquibase migrations and keep
-  `initialize-schema=never` (the default). With `never`, startup fails if the tables are missing:
-  `Saga Forge's tables [...] do not exist in the database.`
+- **Production**: let the starter apply Saga Forge's versioned migrations with Flyway, under its own history table
+  `saga_forge_schema_history`, beside your own migrations. Add `org.flywaydb:flyway-core` and
+  `org.flywaydb:flyway-database-postgresql` (versions from Spring Boot) and set
+  `saga-forge.storage.postgres.initialize-schema=migrate`. A database created earlier from `schema.sql` is taken over
+  at its version.
+- **Schema managed elsewhere** (Liquibase, a DBA): set `initialize-schema=validate`; startup fails on any missing or
+  different table, column or constraint and names it.
+- **Development**: `initialize-schema=always` creates the tables from `schema.sql` in an empty database. It never
+  alters existing tables.
 
-A database created from the current `schema.sql` needs none of the `schema-upgrade-NNN.sql` scripts; see
-[Operations](operations.md#schema-and-upgrades) for when they apply.
+With `never` (the default), startup fails if the tables are missing: `Saga Forge's tables [...] do not exist in the
+database.` [Database schema](schema.md) explains each mode, the takeover of an existing database and plain Java.
 
 ## 3. A saga
 

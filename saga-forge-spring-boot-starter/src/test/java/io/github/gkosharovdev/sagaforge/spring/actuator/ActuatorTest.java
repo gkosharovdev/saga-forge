@@ -9,6 +9,13 @@ import io.github.gkosharovdev.sagaforge.core.spi.store.LeaderLease;
 import io.github.gkosharovdev.sagaforge.core.spi.store.MessageStatus;
 import io.github.gkosharovdev.sagaforge.jmolecules.JMoleculesDomainTypeResolver;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
+import io.github.gkosharovdev.sagaforge.spring.SagaForgeProperties.SchemaInitialization;
+import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
+import io.github.gkosharovdev.sagaforge.spring.storage.SchemaStatus;
+import io.github.gkosharovdev.sagaforge.storage.postgres.PostgresSchema;
+import io.github.gkosharovdev.sagaforge.storage.postgres.SchemaDifference;
+import io.github.gkosharovdev.sagaforge.storage.postgres.SchemaDifference.ObjectKind;
+import io.github.gkosharovdev.sagaforge.storage.postgres.SchemaValidationReport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.InMemoryTransport;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipSettings;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.LeadershipStatus;
@@ -228,5 +235,45 @@ class ActuatorTest {
         .withConfiguration(AutoConfigurations.of(SagaForgeActuatorConfiguration.class))
         .run(
             context -> assertThat(context).hasNotFailed().doesNotHaveBean(SagaForgeEndpoint.class));
+  }
+
+  @Test
+  @DisplayName("the schema object: present with a schema initializer, absent without (018 FR-020)")
+  void schema() {
+    runner.run(
+        context ->
+            assertThat(context.getBean(SagaForgeEndpoint.class).status())
+                .doesNotContainKey("schema"));
+    runner
+        .withBean(
+            SchemaInitializer.class,
+            () ->
+                new SchemaInitializer(
+                    new org.postgresql.ds.PGSimpleDataSource(), SchemaInitialization.NEVER))
+        .run(
+            context ->
+                assertThat(context.getBean(SagaForgeEndpoint.class).status())
+                    .containsEntry("schema", Map.of("mode", "never")));
+  }
+
+  @Test
+  @DisplayName("the schema object carries the version and the check's counts")
+  void schemaView() {
+    SchemaValidationReport report =
+        new SchemaValidationReport(
+            PostgresSchema.currentVersion(),
+            List.of(
+                SchemaDifference.missing(
+                    "saga_message_store", ObjectKind.INDEX, "saga_message_store_due", "x")));
+
+    assertThat(
+            new SchemaStatus(SchemaInitialization.MIGRATE, PostgresSchema.currentVersion(), report)
+                .view())
+        .containsExactly(
+            Map.entry("mode", "migrate"),
+            Map.entry("version", "V5 (saga operations)"),
+            Map.entry("check", "PASSED"),
+            Map.entry("failures", 0),
+            Map.entry("warnings", 1));
   }
 }

@@ -72,7 +72,7 @@ building on unfinished work.
 | 015b | Retry a failed saga from its failed step (split from 015; after 014 and 016) | SF-5 | new G-015-01 | W10 (rest) | P1 |
 | 016 | Marker SPI and jMolecules adapter (done 2026-11-27) | SF-3 | new G-ADOPT-04, G-002-04 | W5, W6 | P2 |
 | 017 | Durable scheduling: deadlines and scheduled commands (**done**, `specs/017-saga-deadlines`, taken ahead of 013); durable backoff left to a later spec | SF-11 | G-ENG-25 (G-005-01, G-005-02 still open) | W16 | P2 |
-| 018 | Versioned schema migrations | SF-7 | G-003-25 | W11 | P2 |
+| 018 | Versioned schema migrations (**done** 2026-11-27, `specs/018-versioned-schema-migrations`) | SF-7 | G-003-25 | — (W11 was attributed to booking-service in error: it never adopted Saga Forge) | P2 |
 | 019 | Process metadata propagation | SF-10 | new G-ADOPT-05, G-010-04 (partly) | W15 | P2 |
 | 020 | Spring context tests without a database | SF-12 | G-009-01 | W12 | P2 |
 | later | Derived command ids; extra associations | SF-9, SF-13 | new G-ADOPT-06, G-ADOPT-07 | W14 | P3 |

@@ -1,0 +1,342 @@
+{
+  "tables" : [ {
+    "name" : "saga_association",
+    "columns" : [ {
+      "name" : "saga_id",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "association_property",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "association_value",
+      "type" : "text",
+      "notNull" : true
+    } ],
+    "constraints" : [ {
+      "kind" : "FOREIGN_KEY",
+      "columns" : [ "saga_id" ],
+      "references" : "saga_instance",
+      "referencedColumns" : [ "saga_id" ],
+      "onDelete" : "CASCADE"
+    }, {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "saga_id", "association_property" ]
+    } ],
+    "indexes" : [ "USING btree (association_property, association_value)" ]
+  }, {
+    "name" : "saga_context",
+    "columns" : [ {
+      "name" : "saga_id",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "values",
+      "type" : "jsonb",
+      "notNull" : true
+    }, {
+      "name" : "last_modified_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    } ],
+    "constraints" : [ {
+      "kind" : "FOREIGN_KEY",
+      "columns" : [ "saga_id" ],
+      "references" : "saga_instance",
+      "referencedColumns" : [ "saga_id" ],
+      "onDelete" : "CASCADE"
+    }, {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "saga_id" ]
+    } ],
+    "indexes" : [ ]
+  }, {
+    "name" : "saga_instance",
+    "columns" : [ {
+      "name" : "saga_id",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "saga_type",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "state",
+      "type" : "jsonb",
+      "notNull" : true
+    }, {
+      "name" : "status",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "created_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "last_modified_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "steps",
+      "type" : "jsonb",
+      "notNull" : true
+    }, {
+      "name" : "outcome",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_step_name",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_cause_type",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_message",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_failed_at",
+      "type" : "timestamp with time zone",
+      "notNull" : false
+    }, {
+      "name" : "failure_classification",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_attempts",
+      "type" : "integer",
+      "notNull" : false
+    }, {
+      "name" : "pending_retry",
+      "type" : "jsonb",
+      "notNull" : false
+    }, {
+      "name" : "compensation_trigger",
+      "type" : "jsonb",
+      "notNull" : false
+    } ],
+    "constraints" : [ {
+      "kind" : "CHECK",
+      "definition" : "CHECK ((((status = 'FAILED'::text) = (failure_step_name IS NOT NULL)) AND ((status = 'FAILED'::text) = (failure_classification IS NOT NULL)) AND ((status = 'FAILED'::text) = (failure_attempts IS NOT NULL))))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((pending_retry IS NULL) OR (status = ANY (ARRAY['CREATED'::text, 'RUNNING'::text]))))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((status = 'COMPLETED'::text) = (outcome IS NOT NULL)))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((status = ANY (ARRAY['COMPENSATING'::text, 'COMPENSATED'::text, 'COMPENSATION_FAILED'::text])) = (compensation_trigger IS NOT NULL)))"
+    }, {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "saga_id" ]
+    } ],
+    "indexes" : [ ]
+  }, {
+    "name" : "saga_lifecycle_history",
+    "columns" : [ {
+      "name" : "saga_id",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "sequence_number",
+      "type" : "bigint",
+      "notNull" : true
+    }, {
+      "name" : "kind",
+      "type" : "text",
+      "notNull" : true
+    }, {
+      "name" : "step_name",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "touched_aggregates",
+      "type" : "jsonb",
+      "notNull" : true
+    }, {
+      "name" : "outcome_step",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_step_name",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_cause_type",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_message",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_failed_at",
+      "type" : "timestamp with time zone",
+      "notNull" : false
+    }, {
+      "name" : "failure_classification",
+      "type" : "text",
+      "notNull" : false
+    }, {
+      "name" : "failure_attempts",
+      "type" : "integer",
+      "notNull" : false
+    }, {
+      "name" : "occurred_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "compensation_trigger",
+      "type" : "jsonb",
+      "notNull" : false
+    } ],
+    "constraints" : [ {
+      "kind" : "FOREIGN_KEY",
+      "columns" : [ "saga_id" ],
+      "references" : "saga_instance",
+      "referencedColumns" : [ "saga_id" ],
+      "onDelete" : "CASCADE"
+    }, {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "saga_id", "sequence_number" ]
+    } ],
+    "indexes" : [ ]
+  }, {
+    "name" : "saga_message_store",
+    "columns" : [ {
+      "name" : "position",
+      "type" : "bigint",
+      "notNull" : true
+    }, {
+      "name" : "message_id",
+      "type" : "character varying(255)",
+      "notNull" : true
+    }, {
+      "name" : "kind",
+      "type" : "character varying(16)",
+      "notNull" : true
+    }, {
+      "name" : "payload_type",
+      "type" : "character varying(512)",
+      "notNull" : true
+    }, {
+      "name" : "payload",
+      "type" : "jsonb",
+      "notNull" : false
+    }, {
+      "name" : "command_id",
+      "type" : "jsonb",
+      "notNull" : false
+    }, {
+      "name" : "ordering_key",
+      "type" : "character varying(1024)",
+      "notNull" : false
+    }, {
+      "name" : "source_saga_type",
+      "type" : "character varying(512)",
+      "notNull" : false
+    }, {
+      "name" : "source_saga_id",
+      "type" : "character varying(255)",
+      "notNull" : false
+    }, {
+      "name" : "recorded_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "status",
+      "type" : "character varying(16)",
+      "notNull" : true
+    }, {
+      "name" : "attempts",
+      "type" : "integer",
+      "notNull" : true
+    }, {
+      "name" : "next_attempt_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "last_failure",
+      "type" : "jsonb",
+      "notNull" : false
+    }, {
+      "name" : "leased_by",
+      "type" : "character varying(64)",
+      "notNull" : false
+    }, {
+      "name" : "leased_until",
+      "type" : "timestamp with time zone",
+      "notNull" : false
+    }, {
+      "name" : "consumed_at",
+      "type" : "timestamp with time zone",
+      "notNull" : false
+    }, {
+      "name" : "set_aside_reason",
+      "type" : "character varying(4096)",
+      "notNull" : false
+    }, {
+      "name" : "external_ref",
+      "type" : "character varying(255)",
+      "notNull" : false
+    }, {
+      "name" : "trace_context",
+      "type" : "jsonb",
+      "notNull" : false
+    } ],
+    "constraints" : [ {
+      "kind" : "CHECK",
+      "definition" : "CHECK ((((kind)::text = 'COMMAND'::text) = (command_id IS NOT NULL)))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK ((((status)::text = 'CONSUMED'::text) = (consumed_at IS NOT NULL)))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK ((((status)::text = 'SET_ASIDE'::text) = (set_aside_reason IS NOT NULL)))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((kind)::text = ANY ((ARRAY['EVENT'::character varying, 'COMMAND'::character varying])::text[])))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((leased_by IS NULL) = (leased_until IS NULL)))"
+    }, {
+      "kind" : "CHECK",
+      "definition" : "CHECK (((status)::text = ANY ((ARRAY['UNCONSUMED'::character varying, 'CONSUMED'::character varying, 'SET_ASIDE'::character varying])::text[])))"
+    }, {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "position" ]
+    }, {
+      "kind" : "UNIQUE",
+      "columns" : [ "message_id" ]
+    } ],
+    "indexes" : [ "USING btree (consumed_at) WHERE ((status)::text = 'CONSUMED'::text)", "USING btree (next_attempt_at, \"position\") WHERE ((status)::text = 'UNCONSUMED'::text)", "USING btree (ordering_key, \"position\") WHERE ((status)::text = 'UNCONSUMED'::text)", "USING btree (source_saga_type, source_saga_id)" ]
+  }, {
+    "name" : "saga_message_store_consumer",
+    "columns" : [ {
+      "name" : "consumer_id",
+      "type" : "character varying(64)",
+      "notNull" : true
+    }, {
+      "name" : "host",
+      "type" : "character varying(255)",
+      "notNull" : true
+    }, {
+      "name" : "started_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    }, {
+      "name" : "last_seen_at",
+      "type" : "timestamp with time zone",
+      "notNull" : true
+    } ],
+    "constraints" : [ {
+      "kind" : "PRIMARY_KEY",
+      "columns" : [ "consumer_id" ]
+    } ],
+    "indexes" : [ ]
+  } ]
+}
