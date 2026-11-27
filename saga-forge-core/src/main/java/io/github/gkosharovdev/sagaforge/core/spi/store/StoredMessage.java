@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi.store;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import java.time.Instant;
 import java.util.Map;
 
@@ -32,6 +33,9 @@ import java.util.Map;
  * @param setAsideReason non-null if and only if {@code status} is {@link MessageStatus#SET_ASIDE}
  * @param externalRef in Spring Modulith interop mode the registry's publication identity; otherwise
  *     {@code null}
+ * @param traceContext the producing unit of work's trace context; {@code null} becomes empty (010)
+ * @param metadata the process metadata the message carries ({@code specs/019-process-metadata});
+ *     {@code null} becomes empty
  */
 public record StoredMessage(
     long position,
@@ -53,9 +57,13 @@ public record StoredMessage(
     Instant consumedAt,
     String setAsideReason,
     String externalRef,
-    Map<String, String> traceContext) {
+    Map<String, String> traceContext,
+    SagaMetadata metadata) {
 
-  /** Validates the components; a {@code null} {@code traceContext} becomes empty (010). */
+  /**
+   * Validates the components; a {@code null} {@code traceContext} becomes empty (010), a {@code
+   * null} {@code metadata} too (019).
+   */
   public StoredMessage {
     Checks.nonBlank(messageId, "messageId");
     Checks.nonNull(kind, "kind");
@@ -77,6 +85,53 @@ public record StoredMessage(
       throw new IllegalArgumentException("attempts must not be negative, but is " + attempts);
     }
     traceContext = traceContext == null ? Map.of() : Map.copyOf(traceContext);
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
+  }
+
+  /** A message without metadata (the 010 shape). */
+  public StoredMessage(
+      long position,
+      String messageId,
+      MessageKind kind,
+      String payloadType,
+      Object payload,
+      CommandId commandId,
+      String orderingKey,
+      String sourceSagaType,
+      String sourceSagaId,
+      Instant recordedAt,
+      MessageStatus status,
+      int attempts,
+      Instant nextAttemptAt,
+      DeliveryFailure lastFailure,
+      String leasedBy,
+      Instant leasedUntil,
+      Instant consumedAt,
+      String setAsideReason,
+      String externalRef,
+      Map<String, String> traceContext) {
+    this(
+        position,
+        messageId,
+        kind,
+        payloadType,
+        payload,
+        commandId,
+        orderingKey,
+        sourceSagaType,
+        sourceSagaId,
+        recordedAt,
+        status,
+        attempts,
+        nextAttemptAt,
+        lastFailure,
+        leasedBy,
+        leasedUntil,
+        consumedAt,
+        setAsideReason,
+        externalRef,
+        traceContext,
+        SagaMetadata.empty());
   }
 
   /** A message without trace context (the 007 shape). */
@@ -120,7 +175,8 @@ public record StoredMessage(
         consumedAt,
         setAsideReason,
         externalRef,
-        Map.of());
+        Map.of(),
+        SagaMetadata.empty());
   }
 
   /**
@@ -152,7 +208,8 @@ public record StoredMessage(
         null,
         null,
         null,
-        entry.traceContext());
+        entry.traceContext(),
+        entry.metadata());
   }
 
   /**
@@ -180,7 +237,8 @@ public record StoredMessage(
         at,
         null,
         externalRef,
-        traceContext);
+        traceContext,
+        metadata);
   }
 
   /**
@@ -222,6 +280,7 @@ public record StoredMessage(
         consumedAt,
         setAsideReason,
         externalRef,
-        traceContext);
+        traceContext,
+        metadata);
   }
 }

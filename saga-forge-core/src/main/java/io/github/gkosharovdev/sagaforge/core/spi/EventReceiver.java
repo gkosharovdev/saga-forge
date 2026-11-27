@@ -115,4 +115,30 @@ public interface EventReceiver {
     }
     return receive(domainEvent);
   }
+
+  /**
+   * Routes the delivered event like {@link #receive(Object, String)} when the delivery names a
+   * source instance, else like {@link #receive(Object)}, with the metadata of the message that
+   * carried it ({@code specs/019-process-metadata} contracts/propagation.md). A transport that
+   * delivers stored messages calls this; the engine starts a new instance with the delivery's
+   * metadata and records it on the history entry of the step the event triggers.
+   *
+   * <p>This default ignores the metadata. A decorator of this interface must forward this method,
+   * or the engine falls back to capturing metadata from the calling thread.
+   *
+   * @param delivery the event, its source instance and its metadata; must not be {@code null}
+   * @return the report of what happened; never {@code null}
+   * @throws IllegalArgumentException if {@code delivery} is {@code null}, or for any reason {@link
+   *     #receive(Object)} gives
+   * @throws IllegalStateException for any reason {@link #receive(Object)} gives
+   * @throws EventHandlingException for any reason {@link #receive(Object)} gives
+   */
+  default HandlingReport receive(EventDelivery delivery) {
+    if (delivery == null) {
+      throw new IllegalArgumentException("delivery must not be null");
+    }
+    return delivery.sourceSagaId() == null
+        ? receive(delivery.event())
+        : receive(delivery.event(), delivery.sourceSagaId());
+  }
 }

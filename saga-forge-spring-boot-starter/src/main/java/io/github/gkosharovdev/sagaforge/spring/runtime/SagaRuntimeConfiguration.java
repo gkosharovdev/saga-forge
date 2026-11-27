@@ -7,6 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaObjectProvider;
@@ -93,6 +94,7 @@ public class SagaRuntimeConfiguration {
       ObjectProvider<Clock> clock,
       ObjectProvider<DomainTypes> domainTypes,
       ObjectProvider<AggregateEventSource> eventSources,
+      ObjectProvider<MetadataAccessor> metadataAccessor,
       Environment environment) {
     properties.validate();
     StorageDetection detection = new StorageDetection(beanFactory.getBeanClassLoader());
@@ -145,6 +147,7 @@ public class SagaRuntimeConfiguration {
     parameterResolvers.orderedStream().forEach(builder::parameterResolver);
     aggregateResolvers.orderedStream().forEach(builder::aggregateResolver);
     eventSources.orderedStream().forEach(builder::aggregateEventSource);
+    metadataAccessor.ifAvailable(builder::metadataAccessor);
     SagaForgeTelemetry resolved = telemetry.getIfAvailable(SagaForgeTelemetry::none);
     builder.openTelemetry(resolved.openTelemetry()).telemetry(resolved.settings());
     return builder.build();

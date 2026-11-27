@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingMessages;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
@@ -76,7 +77,8 @@ public final class InMemoryTransport {
             builder.executor,
             instrumentation,
             LeaderElector.backgroundScheduling(),
-            builder.domainTypes);
+            builder.domainTypes,
+            builder.metadataAccessor);
     this.dispatcher = new TransportDispatcher(relay);
     this.outbox = new TransportOutbox(relay);
     this.queries = new MessageStoreQueries(builder.messageStore, relay, builder.clock);
@@ -263,6 +265,7 @@ public final class InMemoryTransport {
     private OpenTelemetry openTelemetry = OpenTelemetry.noop();
     private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
     private DomainTypes domainTypes = DomainTypes.builtIn();
+    private MetadataAccessor metadataAccessor = MetadataAccessor.NONE;
 
     private Builder() {}
 
@@ -336,6 +339,18 @@ public final class InMemoryTransport {
      */
     public Builder domainTypes(DomainTypes value) {
       this.domainTypes = requireNonNull(value, "domainTypes");
+      return this;
+    }
+
+    /**
+     * Optional: the process metadata accessor ({@code specs/019-process-metadata}); pass the
+     * runtime's instance. The transport captures metadata for events published outside a unit of
+     * work, stores each message's metadata and restores it around the message's delivery. Default
+     * {@link MetadataAccessor#NONE}: messages still carry the metadata of the unit of work that
+     * produced them.
+     */
+    public Builder metadataAccessor(MetadataAccessor value) {
+      this.metadataAccessor = requireNonNull(value, "metadataAccessor");
       return this;
     }
 

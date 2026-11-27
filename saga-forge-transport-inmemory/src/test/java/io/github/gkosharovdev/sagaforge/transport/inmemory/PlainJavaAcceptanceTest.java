@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.transport.inmemory;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
+import io.github.gkosharovdev.sagaforge.core.spi.ThreadLocalMetadataAccessor;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
 import io.github.gkosharovdev.sagaforge.runtime.support.InMemoryTransactionBoundary;
 import io.github.gkosharovdev.sagaforge.runtime.support.TransactionalInMemoryStorageProvider;
@@ -14,6 +15,7 @@ import io.github.gkosharovdev.sagaforge.transport.inmemory.support.InMemoryMessa
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportAcceptanceSuite;
 import io.github.gkosharovdev.sagaforge.transport.inmemory.support.TransportHarness;
 import java.time.Duration;
+import java.util.Map;
 
 /**
  * SC-008, setup 1 (tasks.md T072): plain Java, Saga Forge's own log (the in-memory double here).
@@ -35,6 +37,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
     private final PaymentService payments = new PaymentService();
     private final ShippingService shipping = new ShippingService();
     private final CardService cards = new CardService();
+    private final ThreadLocalMetadataAccessor metadata = new ThreadLocalMetadataAccessor();
     private InMemoryTransport transport;
     private SagaRuntime engine;
     private FlakyReceiver receiver;
@@ -49,6 +52,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
               .messageStore(log)
               .transactions(boundary)
               .settings(TransportHarness.FAST.withMaxAttempts(3))
+              .metadataAccessor(metadata)
               .build();
       engine =
           SagaRuntime.builder()
@@ -58,6 +62,7 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
               .transactions(boundary)
               .dispatcher(transport.dispatcher())
               .outbox(transport.outbox())
+              .metadataAccessor(metadata)
               .handlerInstances(
                   new MapHandlerInstanceProvider()
                       .register(payments)
@@ -72,6 +77,31 @@ class PlainJavaAcceptanceTest extends TransportAcceptanceSuite {
     @Override
     public void publish(Object event) {
       engine.eventPublisher().publish(event);
+    }
+
+    @Override
+    public boolean propagatesMetadata() {
+      return true;
+    }
+
+    @Override
+    public void publish(Object event, Map<String, String> entries) {
+      metadata.set(entries);
+      try {
+        engine.eventPublisher().publish(event);
+      } finally {
+        metadata.clear();
+      }
+    }
+
+    @Override
+    public Map<String, String> instanceMetadata(Class<?> sagaType) {
+      return storage.committed().all().stream()
+          .filter(i -> i.sagaType().equals(sagaType.getName()))
+          .findFirst()
+          .orElseThrow()
+          .metadata()
+          .asMap();
     }
 
     @Override

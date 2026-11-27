@@ -41,7 +41,7 @@ class SagaSchemaFailureAnalyzerTest {
             new BeanCreationException("schema", SagaSchemaException.failedCheck(MISSING_COLUMN)));
 
     assertThat(analysis.getDescription())
-        .contains("does not match V5 (saga operations)")
+        .contains("does not match V6 (process metadata)")
         .contains("saga_context: column last_modified_at is missing");
     assertThat(analysis.getAction()).isEqualTo(SagaSchemaFailureAnalyzer.CHECK_FAILED_ACTION);
   }

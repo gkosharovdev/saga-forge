@@ -1,10 +1,13 @@
 package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.OutgoingCommand;
@@ -50,15 +53,20 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
   private final List<OutgoingMessages> staged = new ArrayList<>();
   private final List<SagaOutcome> outcomes = new ArrayList<>();
   private final ScheduledMessages scheduled;
+  private final MetadataAccessor metadataAccessor;
 
   /**
    * @param outboxCommandAttempts attempts of a failing outbox command before it is reported; at
    *     least 1
    * @param scheduled where deadlines and scheduled commands wait until due (017)
+   * @param metadataAccessor captures the metadata of an event published outside any unit of work
+   *     (019)
    */
-  LoopBackTransport(int outboxCommandAttempts, ScheduledMessages scheduled) {
+  LoopBackTransport(
+      int outboxCommandAttempts, ScheduledMessages scheduled, MetadataAccessor metadataAccessor) {
     this.outboxCommandAttempts = outboxCommandAttempts;
     this.scheduled = scheduled;
+    this.metadataAccessor = metadataAccessor;
   }
 
   @Override
@@ -66,7 +74,16 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     if (domainEvent == null) {
       throw new IllegalArgumentException("domainEvent must not be null");
     }
-    queue.add(domainEvent);
+    queue.add(new EventDelivery(domainEvent, null, captured()));
+  }
+
+  /** What the accessor holds on this thread; a failing accessor gives empty metadata. */
+  private SagaMetadata captured() {
+    try {
+      return SagaMetadata.sanitized(metadataAccessor.capture(), key -> {});
+    } catch (RuntimeException failure) {
+      return SagaMetadata.empty();
+    }
   }
 
   @Override
@@ -94,7 +111,7 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
   @Override
   public synchronized void store(OutgoingMessages batch) {
     staged.add(batch);
-    scheduled.add(batch.scheduled());
+    scheduled.add(batch.scheduled(), batch.metadata());
   }
 
   @Override
@@ -108,13 +125,12 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       for (Object event : batch.events()) {
         if (event instanceof SagaOutcome outcome) {
           outcomes.add(outcome);
-        } else if (batch.sagaId() != null) {
-          queue.add(new SourcedEvent(event, batch.sagaId()));
         } else {
-          queue.add(event);
+          // 014: delivered with the instance that recorded it, as the in-memory transport does.
+          queue.add(new EventDelivery(event, batch.sagaId(), batch.metadata()));
         }
       }
-      queue.addAll(batch.commands());
+      batch.commands().forEach(command -> queue.add(new QueuedCommand(command, batch.metadata())));
     }
   }
 
@@ -148,13 +164,10 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
                 + " messages were delivered for one"
                 + " event; do two sagas keep triggering each other?");
       }
-      if (next instanceof OutgoingCommand command) {
-        deliverCommand(runtime, interceptor, command, commandFailures);
-      } else if (next instanceof SourcedEvent sourced) {
-        // 014: delivered with the instance that recorded it, as the in-memory transport does.
-        reports.accept(runtime.receive(sourced.event(), sourced.sourceSagaId()));
+      if (next instanceof QueuedCommand queued) {
+        deliverCommand(runtime, interceptor, queued.command(), queued.metadata(), commandFailures);
       } else {
-        reports.accept(runtime.receive(next));
+        reports.accept(runtime.receive((EventDelivery) next));
       }
     }
     synchronized (this) {
@@ -175,7 +188,7 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       Consumer<RuntimeException> commandFailures) {
     drain(runtime, interceptor, reports, commandFailures);
     int deliveries = 0;
-    Optional<ScheduledMessage> due;
+    Optional<ScheduledMessages.Due> due;
     while ((due = scheduled.takeDue(now.get())).isPresent()) {
       if (++deliveries > MAX_DELIVERIES) {
         throw new IllegalStateException(
@@ -185,15 +198,17 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
                 + now.get()
                 + "; does a timeout step keep re-arming its deadline with no duration?");
       }
-      ScheduledMessage message = due.get();
+      ScheduledMessage message = due.get().message();
+      SagaMetadata metadata = due.get().metadata();
       if (message.kind() == MessageKind.COMMAND) {
         deliverCommand(
             runtime,
             interceptor,
             new OutgoingCommand(message.commandId(), message.payload()),
+            metadata,
             commandFailures);
       } else {
-        reports.accept(runtime.receive(message.payload()));
+        reports.accept(runtime.receive(new EventDelivery(message.payload(), null, metadata)));
       }
       drain(runtime, interceptor, reports, commandFailures);
     }
@@ -207,9 +222,10 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
       SagaRuntime runtime,
       FixtureCommandInterceptor interceptor,
       OutgoingCommand command,
+      SagaMetadata metadata,
       Consumer<RuntimeException> commandFailures) {
     for (int attempt = 1; ; attempt++) {
-      RuntimeException failure = attempt(runtime, interceptor, command);
+      RuntimeException failure = attempt(runtime, interceptor, command, metadata);
       if (failure == null) {
         return;
       }
@@ -236,12 +252,17 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
    * @return the failure of one delivery of {@code command}, or {@code null} if it was handled
    */
   private static RuntimeException attempt(
-      SagaRuntime runtime, FixtureCommandInterceptor interceptor, OutgoingCommand command) {
+      SagaRuntime runtime,
+      FixtureCommandInterceptor interceptor,
+      OutgoingCommand command,
+      SagaMetadata metadata) {
     interceptor.deliveringOutbox(true);
     try {
       runtime
           .commandReceiver()
-          .receive(new OutboxCommand(command.commandId(), command.command(), transaction -> {}));
+          .receive(
+              new OutboxCommand(
+                  command.commandId(), command.command(), transaction -> {}, metadata));
       return null;
     } catch (RuntimeException failure) {
       return failure;
@@ -250,8 +271,8 @@ final class LoopBackTransport implements EventDispatcher, Outbox {
     }
   }
 
-  /** An event recorded in a unit of work, queued with the instance that recorded it (014). */
-  private record SourcedEvent(Object event, String sourceSagaId) {}
+  /** An outbox command, queued with the metadata of the unit of work that sent it (019). */
+  private record QueuedCommand(OutgoingCommand command, SagaMetadata metadata) {}
 
   private synchronized Object poll() {
     return queue.poll();

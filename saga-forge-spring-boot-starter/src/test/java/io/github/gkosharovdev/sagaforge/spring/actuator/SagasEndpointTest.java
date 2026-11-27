@@ -88,8 +88,16 @@ class SagasEndpointTest {
     assertThat(view.get("instance"))
         .asInstanceOf(InstanceOfAssertFactories.MAP)
         .containsEntry("status", "COMPENSATION_FAILED")
+        .containsEntry("metadata", Map.of())
         .doesNotContainKey("state");
-    assertThat(view.get("history")).asInstanceOf(InstanceOfAssertFactories.LIST).isNotEmpty();
+    assertThat(view.get("history"))
+        .asInstanceOf(InstanceOfAssertFactories.LIST)
+        .isNotEmpty()
+        .allSatisfy(
+            entry ->
+                assertThat(entry)
+                    .asInstanceOf(InstanceOfAssertFactories.MAP)
+                    .containsEntry("metadata", Map.of()));
     assertThat(endpoint.view("nope").getStatus()).isEqualTo(WebEndpointResponse.STATUS_NOT_FOUND);
   }
 

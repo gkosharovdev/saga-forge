@@ -235,6 +235,8 @@ final class StartupChecks {
       boolean supported =
           position == commandPosition
               || commandId
+              || (position != commandPosition
+                  && EngineCommandGateway.isEngineSuppliedParameter(handler, parameter))
               || settings.parameterResolvers().stream()
                   .anyMatch(resolver -> resolver.supports(handler, parameter));
       if (!supported) {

@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.InMemorySagaContextStore;
 import io.github.gkosharovdev.sagaforge.core.execution.harness.MapHandlerInstanceProvider;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaHandlingResult;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
@@ -28,6 +30,7 @@ import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.StockReserved;
 import io.github.gkosharovdev.sagaforge.test.fixtures.Shop.TakePayment;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -68,7 +71,16 @@ class FixtureParityTest {
     }
   }
 
-  private record Sent(Object command, CommandId commandId) {}
+  private record Sent(Object command, CommandId commandId, SagaMetadata metadata) {}
+
+  /**
+   * The metadata the {@code index}-th event is delivered with in both runs ({@code
+   * specs/019-process-metadata}): each delivery carries its own, so a mismatch in what instances
+   * keep or commands see shows.
+   */
+  private static SagaMetadata metadataOf(int index) {
+    return SagaMetadata.of(Map.of("correlationId", "c-" + index));
+  }
 
   /** What one run observed. */
   private record Observed(
@@ -143,8 +155,8 @@ class FixtureParityTest {
     SagaFixture fixture = builder.build();
     List<List<Handled>> outcomes = new ArrayList<>();
     List<SagaOutcome> outcomeEvents = new ArrayList<>();
-    for (Object event : events) {
-      EventResult result = fixture.when(event).result();
+    for (int index = 0; index < events.size(); index++) {
+      EventResult result = fixture.when(events.get(index), metadataOf(index)).result();
       outcomes.add(result.results().stream().map(Handled::of).toList());
       outcomeEvents.addAll(result.outcomeEvents());
     }
@@ -154,7 +166,7 @@ class FixtureParityTest {
             .toList();
     List<Sent> commands =
         fixture.commands().stream()
-            .map(command -> new Sent(command.command(), command.commandId()))
+            .map(command -> new Sent(command.command(), command.commandId(), command.metadata()))
             .toList();
     return new Observed(outcomes, instances, commands, outcomeEvents);
   }
@@ -175,7 +187,7 @@ class FixtureParityTest {
               throw failures.get(i).exception().get();
             }
           }
-          Sent sent = new Sent(invocation.command(), invocation.commandId());
+          Sent sent = new Sent(invocation.command(), invocation.commandId(), invocation.metadata());
           boundary
               .current()
               .flatMap(tx -> tx.resource(InMemoryTransactionBoundary.Scope.class))
@@ -201,8 +213,14 @@ class FixtureParityTest {
     transport.connect(runtime).loopBack();
     runtime.start();
     List<List<Handled>> outcomes = new ArrayList<>();
-    for (Object event : events) {
-      outcomes.add(runtime.receive(event).results().stream().map(Handled::of).toList());
+    for (int index = 0; index < events.size(); index++) {
+      outcomes.add(
+          runtime
+              .receive(new EventDelivery(events.get(index), null, metadataOf(index)))
+              .results()
+              .stream()
+              .map(Handled::of)
+              .toList());
     }
     List<Optional<SagaInstance>> instances =
         sagaIds(outcomes).stream().map(id -> storage.committed().findById(id)).toList();

@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +43,9 @@ import java.util.List;
  * @param operator who asked for the transition and why ({@code specs/015-saga-operations});
  *     non-null for {@code COMPENSATION_RESUMED} and {@code RESOLVED}, otherwise set when an
  *     operator's or the recovery's action caused the transition and {@code null} when an event did
+ * @param metadata the process metadata of the message that triggered the transition, or the
+ *     instance's for a transition no delivery triggered ({@code specs/019-process-metadata} D3);
+ *     {@code null} becomes empty
  */
 public record SagaLifecycleEntry(
     String sagaId,
@@ -52,8 +56,10 @@ public record SagaLifecycleEntry(
     SagaFailure failure,
     Instant occurredAt,
     CompensationTrigger trigger,
-    OperatorRequest operator) {
+    OperatorRequest operator,
+    SagaMetadata metadata) {
   public SagaLifecycleEntry {
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
     if (sagaId == null) {
       throw new IllegalArgumentException("sagaId must not be null");
     }
@@ -106,6 +112,52 @@ public record SagaLifecycleEntry(
           "touchedAggregates must be empty unless kind is STEP_COMPLETED, but kind is " + kind);
     }
     touchedAggregates = List.copyOf(touchedAggregates);
+  }
+
+  /**
+   * An entry without metadata, as before {@code specs/019-process-metadata}.
+   *
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaLifecycleEntry(
+      String sagaId,
+      SagaLifecycleEventKind kind,
+      String stepName,
+      List<AggregateReference> touchedAggregates,
+      String outcomeStep,
+      SagaFailure failure,
+      Instant occurredAt,
+      CompensationTrigger trigger,
+      OperatorRequest operator) {
+    this(
+        sagaId,
+        kind,
+        stepName,
+        touchedAggregates,
+        outcomeStep,
+        failure,
+        occurredAt,
+        trigger,
+        operator,
+        SagaMetadata.empty());
+  }
+
+  /**
+   * @param newMetadata the metadata to record; {@code null} becomes empty
+   * @return this entry with {@code metadata} replaced
+   */
+  public SagaLifecycleEntry withMetadata(SagaMetadata newMetadata) {
+    return new SagaLifecycleEntry(
+        sagaId,
+        kind,
+        stepName,
+        touchedAggregates,
+        outcomeStep,
+        failure,
+        occurredAt,
+        trigger,
+        operator,
+        newMetadata);
   }
 
   /**

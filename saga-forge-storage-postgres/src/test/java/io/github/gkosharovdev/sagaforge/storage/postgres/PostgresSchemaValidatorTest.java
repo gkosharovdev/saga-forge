@@ -42,7 +42,10 @@ class PostgresSchemaValidatorTest {
     "saga_context, last_modified_at",
     "saga_lifecycle_history, operator_reason",
     "saga_message_store, not_before",
-    "saga_message_store_leader, holder_host"
+    "saga_message_store_leader, holder_host",
+    "saga_instance, metadata",
+    "saga_lifecycle_history, metadata",
+    "saga_message_store, metadata"
   })
   @DisplayName("a dropped column is one failure naming its table and column")
   void droppedColumnFails(String table, String column) {
@@ -96,7 +99,7 @@ class PostgresSchemaValidatorTest {
             });
     assertThat(report.describe())
         .startsWith(
-            "Saga Forge's schema does not match V5 (saga operations): 2 failures, 1 warning.")
+            "Saga Forge's schema does not match V6 (process metadata): 2 failures, 1 warning.")
         .contains(
             "FAILURE saga_instance: column compensation_round is different (expected integer"
                 + " NOT NULL, found bigint NOT NULL)")

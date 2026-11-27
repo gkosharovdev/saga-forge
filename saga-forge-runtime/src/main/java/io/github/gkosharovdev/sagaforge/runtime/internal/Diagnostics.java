@@ -3,6 +3,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CompensationStatus;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
@@ -38,22 +39,43 @@ public final class Diagnostics {
    * What a message is about: the domain event, saga type, instance and unit of work, as far as
    * known.
    */
-  record Correlation(String eventType, String sagaType, String sagaId, String unitOfWorkId) {
+  record Correlation(
+      String eventType,
+      String sagaType,
+      String sagaId,
+      String unitOfWorkId,
+      SagaMetadata delivery) {
+
+    /**
+     * Without delivery metadata: the unit of work's entries take the instance's metadata (019
+     * contracts/propagation.md "History entry").
+     */
+    Correlation(String eventType, String sagaType, String sagaId, String unitOfWorkId) {
+      this(eventType, sagaType, sagaId, unitOfWorkId, null);
+    }
 
     static Correlation of(Object event) {
       return new Correlation(event.getClass().getName(), null, null, null);
     }
 
     Correlation forSaga(String type) {
-      return new Correlation(eventType, type, sagaId, unitOfWorkId);
+      return new Correlation(eventType, type, sagaId, unitOfWorkId, delivery);
     }
 
     Correlation instance(String id) {
-      return new Correlation(eventType, sagaType, id, unitOfWorkId);
+      return new Correlation(eventType, sagaType, id, unitOfWorkId, delivery);
     }
 
     Correlation inUnitOfWork(String id) {
-      return new Correlation(eventType, sagaType, sagaId, id);
+      return new Correlation(eventType, sagaType, sagaId, id, delivery);
+    }
+
+    /**
+     * The metadata of the delivery that caused the call (019); never logged. {@code null} for a
+     * call no delivery caused.
+     */
+    Correlation delivered(SagaMetadata metadata) {
+      return new Correlation(eventType, sagaType, sagaId, unitOfWorkId, metadata);
     }
   }
 
@@ -488,6 +510,30 @@ public final class Diagnostics {
             .instance(about)
             .toString(),
         cause);
+  }
+
+  /**
+   * {@code saga.metadata.capture.failed}: the metadata accessor's capture threw; the call goes on
+   * with empty metadata (019 FR-019). Names no value.
+   */
+  void metadataCaptureFailed(Throwable cause) {
+    logger.log(Level.WARNING, Line.of("saga.metadata.capture.failed").toString(), cause);
+  }
+
+  /**
+   * {@code saga.metadata.restore.failed}: the metadata accessor's restore or the close of its scope
+   * threw; the work runs, or ended, as usual (019 FR-019). Names no value.
+   */
+  void metadataRestoreFailed(Throwable cause) {
+    logger.log(Level.WARNING, Line.of("saga.metadata.restore.failed").toString(), cause);
+  }
+
+  /**
+   * {@code saga.metadata.entry.dropped}: a captured entry broke a metadata rule and was dropped;
+   * names its key, never its value (019 FR-004, FR-024).
+   */
+  void metadataEntryDropped(String key) {
+    logger.log(Level.WARNING, Line.of("saga.metadata.entry.dropped").with("key", key).toString());
   }
 
   /**

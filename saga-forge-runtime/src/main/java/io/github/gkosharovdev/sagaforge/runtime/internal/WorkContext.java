@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.DomainEventScope;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.runtime.internal.Diagnostics.Correlation;
@@ -65,6 +66,11 @@ final class WorkContext {
     return unitOfWorkId;
   }
 
+  /** This unit of work's metadata (019). */
+  SagaMetadata metadata() {
+    return unitOfWork.metadata();
+  }
+
   /** This unit of work's correlation. */
   Correlation correlation() {
     return correlation;
@@ -111,7 +117,7 @@ final class WorkContext {
     }
     EngineSagaContext context =
         new EngineSagaContext(sagaId, settings.contextStore(), settings.sources().clock());
-    saga.inject(sagaObject, new Injection(sagaId, context, gateway));
+    saga.inject(sagaObject, new Injection(sagaId, context, gateway, unitOfWork.metadata()));
     return sagaObject;
   }
 

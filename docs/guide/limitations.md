@@ -20,6 +20,13 @@ status in later releases.
 
 Further constraints of the model:
 
+- **Process metadata** (see [Process metadata](metadata.md)): an instance's metadata is fixed when it starts, and a
+  step cannot add or change entries (G-019-01); operators can read an instance's metadata but cannot list instances by
+  a metadata value (G-019-02); under Spring Modulith interop, listeners that Modulith republishes to run without it
+  (G-019-03); an `EventReceiver` decorator must forward `receive(EventDelivery)`, or delivered metadata is lost and the
+  thread's is captured instead (G-019-04); metadata is stored and shown in the `sagas` endpoint unredacted, so keep
+  secrets and personal data out of it (G-019-06).
+
 - **jMolecules domains** (see [Vocabularies](vocabularies.md)): an outbox command still needs Saga Forge's
   `@Command(delivery = OUTBOX)` beside jMolecules' `@Command` (G-016-01); a fixture test sees no Spring-published
   events, so a Spring Data aggregate's `@DomainEvents` need an event source registered in the test (G-016-02); a

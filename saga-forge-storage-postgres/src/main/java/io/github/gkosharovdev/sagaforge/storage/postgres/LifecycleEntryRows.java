@@ -17,19 +17,19 @@ import java.util.List;
  */
 final class LifecycleEntryRows {
 
-  /** The fourteen history columns, in bind order. */
+  /** The seventeen history columns, in bind order. */
   static final String INSERT_HISTORY =
       "INSERT INTO saga_lifecycle_history (saga_id, sequence_number, "
           + "kind, step_name, touched_aggregates, outcome_step, failure_step_name, failure_cause_type, "
           + "failure_message, failure_failed_at, failure_classification, failure_attempts, occurred_at, "
-          + "compensation_trigger, operator, operator_reason) "
-          + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)";
+          + "compensation_trigger, operator, operator_reason, metadata) "
+          + "VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb)";
 
   /** An instance's history in stored order ({@code specs/015-saga-operations}). */
   static final String SELECT_HISTORY =
       "SELECT kind, step_name, touched_aggregates, outcome_step, failure_step_name, "
           + "failure_cause_type, failure_message, failure_failed_at, failure_classification, "
-          + "failure_attempts, occurred_at, compensation_trigger, operator, operator_reason "
+          + "failure_attempts, occurred_at, compensation_trigger, operator, operator_reason, metadata "
           + "FROM saga_lifecycle_history WHERE saga_id = ? ORDER BY sequence_number";
 
   private static final String TRIGGER_FIELD = "saga_lifecycle_history.compensation_trigger";
@@ -105,6 +105,7 @@ final class LifecycleEntryRows {
     OperatorRequest operator = entry.operator();
     insert.setString(15, operator == null ? null : operator.operator());
     insert.setString(16, operator == null ? null : operator.reason());
+    insert.setString(17, JsonCodec.encodeMetadata(entry.metadata()));
   }
 
   /**
@@ -134,16 +135,19 @@ final class LifecycleEntryRows {
     String operator = row.getString("operator");
     String touched = row.getString("touched_aggregates");
     return new SagaLifecycleEntry(
-        sagaId,
-        SagaLifecycleEventKind.valueOf(row.getString("kind")),
-        row.getString("step_name"),
-        touched == null
-            ? List.of()
-            : SagaInstanceRows.decodeTouchedAggregates(TOUCHED_AGGREGATES_FIELD, touched),
-        row.getString("outcome_step"),
-        SagaInstanceRows.failureFromRow(row),
-        SagaInstanceRows.getInstant(row, "occurred_at"),
-        SagaInstanceRows.decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
-        operator == null ? null : new OperatorRequest(operator, row.getString("operator_reason")));
+            sagaId,
+            SagaLifecycleEventKind.valueOf(row.getString("kind")),
+            row.getString("step_name"),
+            touched == null
+                ? List.of()
+                : SagaInstanceRows.decodeTouchedAggregates(TOUCHED_AGGREGATES_FIELD, touched),
+            row.getString("outcome_step"),
+            SagaInstanceRows.failureFromRow(row),
+            SagaInstanceRows.getInstant(row, "occurred_at"),
+            SagaInstanceRows.decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
+            operator == null
+                ? null
+                : new OperatorRequest(operator, row.getString("operator_reason")))
+        .withMetadata(JsonCodec.decodeMetadata(row.getString("metadata")));
   }
 }

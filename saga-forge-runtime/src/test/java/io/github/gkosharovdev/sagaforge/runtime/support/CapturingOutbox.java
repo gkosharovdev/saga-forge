@@ -90,6 +90,25 @@ public final class CapturingOutbox implements Outbox {
     return new CapturingOutbox(Timing.IN_TRANSACTION, boundary, NO_DELEGATE);
   }
 
+  /**
+   * @param boundary the boundary whose active transaction receives the batches; must not be {@code
+   *     null}
+   * @param delegate receives each batch inside the transaction, after it is recorded; must not be
+   *     {@code null}
+   * @return an {@link Timing#IN_TRANSACTION} outbox that passes batches on to {@code delegate}
+   * @throws IllegalArgumentException if {@code boundary} or {@code delegate} is {@code null}
+   */
+  public static CapturingOutbox inTransaction(
+      InMemoryTransactionBoundary boundary, Outbox delegate) {
+    if (boundary == null) {
+      throw new IllegalArgumentException("boundary must not be null");
+    }
+    if (delegate == null) {
+      throw new IllegalArgumentException("delegate must not be null");
+    }
+    return new CapturingOutbox(Timing.IN_TRANSACTION, boundary, delegate);
+  }
+
   @Override
   public Timing timing() {
     return timing;

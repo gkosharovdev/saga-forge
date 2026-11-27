@@ -42,7 +42,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 @Tag("container")
 class FlywaySchemaMigrationIntegrationTest {
 
-  private static final List<String> SAGA_FORGE_VERSIONS = List.of("1", "2", "3", "4", "5");
+  private static final List<String> SAGA_FORGE_VERSIONS = List.of("1", "2", "3", "4", "5", "6");
 
   @TempDir Path appMigrations;
 
@@ -123,7 +123,7 @@ class FlywaySchemaMigrationIntegrationTest {
       // The application's tables make the schema non-empty: Saga Forge's history starts with a
       // baseline at 0, then applies every version.
       assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-          .containsExactly("0", "1", "2", "3", "4", "5");
+          .containsExactly("0", "1", "2", "3", "4", "5", "6");
       assertThat(
               MigrationSchemas.jdbc(schema)
                   .queryForObject("SELECT saga_forge_first FROM app_t1", Boolean.class))
@@ -139,7 +139,7 @@ class FlywaySchemaMigrationIntegrationTest {
     try (ConfigurableApplicationContext restarted =
         start(schema, "spring.flyway.enabled=true", "spring.flyway.locations=" + location)) {
       assertThat(MigrationSchemas.count(schema, APP_HISTORY)).isEqualTo(62);
-      assertThat(MigrationSchemas.count(schema, SAGA_FORGE_HISTORY)).isEqualTo(6);
+      assertThat(MigrationSchemas.count(schema, SAGA_FORGE_HISTORY)).isEqualTo(7);
     }
   }
 
@@ -169,7 +169,7 @@ class FlywaySchemaMigrationIntegrationTest {
 
     try (ConfigurableApplicationContext context =
         start(schema, "saga-forge.recovery.enabled=false")) {
-      List<String> expected = numbers(baseline, 5);
+      List<String> expected = numbers(baseline, 6);
       assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).isEqualTo(expected);
       assertThat(MigrationSchemas.types(schema, SAGA_FORGE_HISTORY).getFirst())
           .isEqualTo("BASELINE");
@@ -204,7 +204,7 @@ class FlywaySchemaMigrationIntegrationTest {
     assertThat(MigrationSchemas.exists(schema, SAGA_FORGE_HISTORY)).isFalse();
 
     try (ConfigurableApplicationContext after = start(schema)) {
-      assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).containsExactly("5");
+      assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).containsExactly("6");
       after.getBean(EventPublisher.class).publish(new StockUnavailableEvent("o-9"));
       awaitStatus(schema, FulfilmentSaga.class, "COMPLETED");
     }

@@ -9,7 +9,7 @@ out="$root/llms-full.txt"
     echo
     echo "Generated from docs/guide/*.md by docs/guide/build-llms-full.sh; do not edit by hand."
     echo "Source: https://github.com/gkosharovdev/saga-forge/tree/master/docs/guide"
-    for page in README getting-started model-reference validation-rules recipes deadlines vocabularies testing operations schema limitations; do
+    for page in README getting-started model-reference validation-rules recipes deadlines vocabularies metadata testing operations schema limitations; do
         echo
         echo "<!-- docs/guide/$page.md -->"
         echo

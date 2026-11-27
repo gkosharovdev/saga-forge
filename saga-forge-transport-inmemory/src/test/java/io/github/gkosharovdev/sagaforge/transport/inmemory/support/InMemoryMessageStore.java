@@ -555,6 +555,7 @@ public final class InMemoryMessageStore implements MessageStore {
         consumedAt,
         reason,
         m.externalRef(),
-        m.traceContext());
+        m.traceContext(),
+        m.metadata());
   }
 }

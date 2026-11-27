@@ -8,6 +8,7 @@ import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.InvalidSagaTransitionException;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.SagaLifecycle;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.operations.OperatorRequest;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import io.github.gkosharovdev.sagaforge.core.outcome.OutcomeTrigger;
@@ -159,6 +160,11 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     workingCopy = instance;
   }
 
+  /** The working copy's metadata; empty before an instance is started or loaded (019). */
+  SagaMetadata metadata() {
+    return workingCopy == null ? SagaMetadata.empty() : workingCopy.metadata();
+  }
+
   /**
    * The working copy: the instance as loaded or started, with this lifecycle's transitions applied
    * so far.
@@ -175,6 +181,18 @@ final class EngineSagaLifecycle implements SagaLifecycle {
   @Override
   public SagaInstance start(
       Class<?> sagaType, String associationProperty, String associationValue) {
+    return start(sagaType, associationProperty, associationValue, SagaMetadata.empty());
+  }
+
+  /**
+   * {@link #start(Class, String, String)} with the start delivery's metadata, fixed on the instance
+   * for its life ({@code specs/019-process-metadata} FR-007).
+   */
+  SagaInstance start(
+      Class<?> sagaType,
+      String associationProperty,
+      String associationValue,
+      SagaMetadata metadata) {
     requireNonNull(sagaType, "sagaType");
     requireNonNull(associationProperty, "associationProperty");
     requireNonNull(associationValue, "associationValue");
@@ -187,16 +205,17 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     Instant now = sources.now();
     workingCopy =
         new SagaInstance(
-            sources.newSagaId(),
-            saga.typeName(),
-            Map.of(),
-            Map.of(associationProperty, associationValue),
-            SagaStatus.CREATED,
-            now,
-            now,
-            notRunSteps(),
-            null,
-            null);
+                sources.newSagaId(),
+                saga.typeName(),
+                Map.of(),
+                Map.of(associationProperty, associationValue),
+                SagaStatus.CREATED,
+                now,
+                now,
+                notRunSteps(),
+                null,
+                null)
+            .withMetadata(metadata);
     pending.add(entry(SagaLifecycleEventKind.CREATED, now).build());
     return workingCopy;
   }
@@ -412,21 +431,22 @@ final class EngineSagaLifecycle implements SagaLifecycle {
       SagaInstance failed = workingCopy;
       workingCopy =
           new SagaInstance(
-              failed.sagaId(),
-              failed.sagaType(),
-              Map.of(),
-              failed.associations(),
-              SagaStatus.COMPENSATING,
-              failed.createdAt(),
-              now,
-              steps,
-              null,
-              null,
-              null,
-              failed.compensationTrigger(),
-              Map.of(),
-              null,
-              failed.compensationRound() + 1);
+                  failed.sagaId(),
+                  failed.sagaType(),
+                  Map.of(),
+                  failed.associations(),
+                  SagaStatus.COMPENSATING,
+                  failed.createdAt(),
+                  now,
+                  steps,
+                  null,
+                  null,
+                  null,
+                  failed.compensationTrigger(),
+                  Map.of(),
+                  null,
+                  failed.compensationRound() + 1)
+              .withMetadata(failed.metadata());
     } else if (status == SagaStatus.COMPENSATING) {
       replace(status, steps, Ending.NONE, workingCopy.compensationTrigger(), now);
     } else {
@@ -813,21 +833,22 @@ final class EngineSagaLifecycle implements SagaLifecycle {
     }
     workingCopy =
         new SagaInstance(
-            workingCopy.sagaId(),
-            workingCopy.sagaType(),
-            Map.of(),
-            workingCopy.associations(),
-            status,
-            workingCopy.createdAt(),
-            now,
-            steps,
-            ending.outcomeStep(),
-            ending.failure(),
-            retry,
-            trigger,
-            workingCopy.openDeadlines(),
-            resolution,
-            workingCopy.compensationRound());
+                workingCopy.sagaId(),
+                workingCopy.sagaType(),
+                Map.of(),
+                workingCopy.associations(),
+                status,
+                workingCopy.createdAt(),
+                now,
+                steps,
+                ending.outcomeStep(),
+                ending.failure(),
+                retry,
+                trigger,
+                workingCopy.openDeadlines(),
+                resolution,
+                workingCopy.compensationRound())
+            .withMetadata(workingCopy.metadata());
   }
 
   private Map<String, StepRecord> notRunSteps() {

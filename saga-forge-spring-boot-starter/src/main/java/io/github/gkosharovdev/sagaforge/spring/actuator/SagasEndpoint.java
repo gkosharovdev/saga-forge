@@ -216,6 +216,7 @@ public class SagasEndpoint {
     view.put("lastModifiedAt", instance.lastModifiedAt().toString());
     view.put("outcome", instance.outcome());
     view.put("compensationRound", instance.compensationRound());
+    view.put("metadata", new TreeMap<>(instance.metadata().asMap()));
     Map<String, Object> steps = new TreeMap<>();
     instance
         .steps()
@@ -266,6 +267,7 @@ public class SagasEndpoint {
     view.put("kind", entry.kind().name());
     view.put("at", entry.occurredAt().toString());
     view.put("step", entry.stepName());
+    view.put("metadata", new TreeMap<>(entry.metadata().asMap()));
     if (entry.operator() != null) {
       view.put("operator", entry.operator().operator());
       view.put("reason", entry.operator().reason());

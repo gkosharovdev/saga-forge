@@ -188,6 +188,7 @@ final class JdbcFake {
     row.put("open_deadlines", SagaInstanceRows.encodeOpenDeadlines(instance.openDeadlines()));
     row.put("resolution", SagaInstanceRows.encodeResolution(instance.resolution()));
     row.put("compensation_round", instance.compensationRound());
+    row.put("metadata", JsonCodec.encodeMetadata(instance.metadata()));
     row.put(
         "associations",
         JsonCodec.encodeObject(

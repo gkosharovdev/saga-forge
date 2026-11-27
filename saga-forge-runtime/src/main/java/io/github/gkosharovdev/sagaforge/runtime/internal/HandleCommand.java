@@ -1,5 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
+
 /**
  * Handles one command outside any engine unit of work, in a standalone {@link UnitOfWork} (004
  * FR-016, 002 contracts/command-gateway.md "Outside a unit of work", 007 research §3 for outbox
@@ -25,13 +27,18 @@ final class HandleCommand implements UnitOfWork.Work<Void, Void> {
   }
 
   /**
-   * Runs {@code handlerCall} in a new standalone unit of work, then commits and hands the recorded
-   * events on.
+   * Runs {@code handlerCall} in a new standalone unit of work with {@code metadata} (019), then
+   * commits and hands the recorded events on.
    *
    * @throws RuntimeException the handler's failure, after rolling back
    */
-  static void run(EngineSettings settings, Diagnostics diagnostics, Runnable handlerCall) {
-    switch (UnitOfWork.standalone(settings, diagnostics).run(new HandleCommand(handlerCall))) {
+  static void run(
+      EngineSettings settings,
+      Diagnostics diagnostics,
+      SagaMetadata metadata,
+      Runnable handlerCall) {
+    switch (UnitOfWork.standalone(settings, diagnostics, metadata)
+        .run(new HandleCommand(handlerCall))) {
       case UnitOfWork.Committed<Void, Void> committed -> committed.release();
       case UnitOfWork.Failed<Void, Void> failed -> throw UnitOfWork.propagate(failed.cause());
       case UnitOfWork.Conflicted<Void, Void> conflicted -> throw conflicted.conflict();

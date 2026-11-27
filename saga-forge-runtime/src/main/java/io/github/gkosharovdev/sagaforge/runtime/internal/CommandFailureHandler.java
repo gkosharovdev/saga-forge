@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
@@ -232,6 +233,7 @@ final class CommandFailureHandler {
     HandleCommand.run(
         settings,
         with.diagnostics(),
+        SagaMetadata.empty(),
         () ->
             setAside.accept(
                 settings

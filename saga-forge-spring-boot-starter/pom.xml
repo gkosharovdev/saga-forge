@@ -24,6 +24,8 @@
         <spring-modulith.version>2.1.1</spring-modulith.version>
         <spring-data.version>2026.0.2</spring-data.version>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <!-- The SLF4J version of the Spring Boot 4.1 line -->
+        <slf4j.version>2.0.20</slf4j.version>
         <saga.excludedTestGroups>container</saga.excludedTestGroups>
     </properties>
 
@@ -194,6 +196,13 @@
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-commons</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- 019: saga-forge.metadata.mdc-keys captures from and restores to SLF4J's MDC -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
             <optional>true</optional>
         </dependency>
         <dependency>

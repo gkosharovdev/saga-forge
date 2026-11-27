@@ -31,6 +31,7 @@ reasoning behind the boundaries between modules. See the root [README.md](../REA
 | Publish once ([014](../specs/014-publish-once/spec.md)): events published through Spring's `ApplicationEventPublisher` (also Spring Data `@DomainEvents`) reach sagas, `EventPublisher` publishes to Spring, a recorded event its own instance ran in process also reaches other saga types (Property 47, `EventReceiver.receive(event, sourceSagaId)`) | Implemented in core, the runtime, the in-memory transport, the starter and the fixture, tested without containers; the starter's `PublishOnceContainerTest` is written and compiles, not yet run against Postgres |
 | Vocabularies of domain markers and harvested events ([016](../specs/016-marker-spi-jmolecules/spec.md)): `core.spi.model` (`DomainTypes`, `DomainTypeResolver`, `DomainRole`, `Marker`, `IdentifierMember`), rules R30 and R31, Properties 48 and 49; `saga-forge-jmolecules` (`JMoleculesDomainTypeResolver`); `core.spi.AggregateEventSource` | Implemented in core, the runtime, the in-memory transport, the starter (`saga-forge.jmolecules.enabled`, event source beans) and the fixture, tested, including the jMolecules example's container test; no Modulith-interop harvest test (G-016-07) |
 | Saga operations (`SagaRuntime.operations()`: instance queries, `resumeCompensation`/`compensate`/`markResolved` with `OperatorRequest`, `recover()`; recovery sweeps with `RecoverySettings`/`AbandonedStartPolicy`; stranded-start adoption; `SagaResolution`, `compensationRound`; the starter's `sagas` Actuator endpoint) | Implemented in core, the runtime, Postgres, the starter and the fixture, tested, including container suites ([015](../specs/015-saga-operations/spec.md)); no retry of a failed step (G-015-01) |
+| Process metadata ([019](../specs/019-process-metadata/spec.md)): `core.metadata.SagaMetadata` (bounded string map), SPI `MetadataAccessor` (`capture`/`restore` with a `Scope`), `EventDelivery` and `EventReceiver.receive(EventDelivery)`, `CommandInvocation.metadata()`; metadata on `SagaInstance`, `SagaLifecycleEntry`, `OutgoingMessages`, `OutboxCommand` and stored messages; a `SagaMetadata` saga field and handler parameter (rules R32, R33, Property 50); Postgres V6; starter `saga-forge.metadata.mdc-keys` (SLF4J MDC); fixture `when(event, metadata)`/`expectMetadata` | Implemented in core, the runtime, the in-memory transport, Postgres, the starter and the fixture, tested, including container suites; not on outcome events (by decision); no query by a metadata value (G-019-02) |
 | Versioned schema migrations ([018](../specs/018-versioned-schema-migrations/spec.md)): Flyway migrations V1 to V5 at `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration` under their own history table `saga_forge_schema_history`; `PostgresSchemaValidator` (check by meaning against per-version catalog snapshots, version detection for a database without history); starter `initialize-schema=migrate`/`validate` | Implemented in the Postgres module (no Flyway dependency) and the starter (Flyway optional), tested, including container suites; Flyway only, no Liquibase (G-018-01) |
 
 ## Module responsibilities
@@ -389,6 +390,22 @@ Metrics carry only attributes bounded by the model (saga type, step, command typ
 histograms per span, counters for starts, outcomes, handling outcomes and retries, and message-store gauges read from
 the same queries as the starter's Actuator endpoint. Spans carry generated ids; association values, contents and
 failure messages are recorded only when switched on (`SagaTelemetrySettings`). The full reference is in the README.
+
+### Process metadata beside the trace context
+
+Process metadata ([019](../specs/019-process-metadata/spec.md)) travels the same way as trace context, but is the
+application's data rather than OpenTelemetry's: a `MetadataAccessor` (the starter's reads SLF4J's MDC for configured
+keys) captures a string map from the thread that starts a saga or publishes an event outside one. The instance keeps
+the start delivery's metadata for its life (`saga_instance.metadata`); every batch a unit of work stores carries it
+(`OutgoingMessages.metadata`, `saga_message_store.metadata`), and each history entry records the metadata of the
+delivery that caused it (`saga_lifecycle_history.metadata`). A transport hands it back with the event as an
+`EventDelivery`, or with an outbox command as `OutboxCommand.metadata`.
+
+Restoration is scoped: the runtime opens `MetadataAccessor.restore(instance metadata)` around each unit of work,
+including the outbox handoff after its commit, and the relay around each delivery, closing the scope in a `finally`.
+Saga code reads the metadata through a `SagaMetadata` field or handler parameter, or from the thread (the MDC). A
+failing accessor is reported and never fails a unit of work; entries over the bounds (32 entries, 128-character keys,
+1,024-character values) are dropped and logged by key. Outcome events carry no metadata.
 
 ## Truthful state and transaction boundaries
 

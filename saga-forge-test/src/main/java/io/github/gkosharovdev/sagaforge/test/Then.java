@@ -4,6 +4,7 @@ import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 
 /**
@@ -415,6 +417,27 @@ public final class Then {
   public Then expectResolved() {
     if (subject().resolution().isEmpty()) {
       throw fail(Messages.expectedActual("expected", "resolved", "actual", "not resolved"));
+    }
+    return this;
+  }
+
+  /**
+   * The subject keeps exactly {@code metadata} ({@code specs/019-process-metadata}).
+   *
+   * @throws IllegalArgumentException if {@code metadata} is {@code null}
+   */
+  public Then expectMetadata(SagaMetadata metadata) {
+    if (metadata == null) {
+      throw new IllegalArgumentException("metadata must not be null");
+    }
+    SagaMetadata actual = subject().metadata();
+    if (!actual.equals(metadata)) {
+      throw fail(
+          Messages.expectedActual(
+              "expected",
+              new TreeMap<>(metadata.asMap()),
+              "actual",
+              new TreeMap<>(actual.asMap())));
     }
     return this;
   }

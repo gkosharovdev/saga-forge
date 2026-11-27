@@ -55,14 +55,14 @@ class SchemaInitializerTest {
   }
 
   @Test
-  @DisplayName("migrate, on an empty schema: applies V1 to V5 with no baseline and passes")
+  @DisplayName("migrate, on an empty schema: applies V1 to V6 with no baseline and passes")
   void migrateEmpty() {
     SchemaInitializer initializer = migrating();
     initializer.initialize();
 
     assertThat(migrator.baselines).containsExactly((SchemaVersion) null);
     assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-        .containsExactly("1", "2", "3", "4", "5");
+        .containsExactly("1", "2", "3", "4", "5", "6");
     assertThat(initializer.status().version()).isEqualTo(PostgresSchema.currentVersion());
     assertThat(initializer.status().report().passed()).isTrue();
   }
@@ -75,7 +75,7 @@ class SchemaInitializerTest {
 
     assertThat(migrator.baselines).containsExactly(null, null);
     assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-        .containsExactly("1", "2", "3", "4", "5");
+        .containsExactly("1", "2", "3", "4", "5", "6");
   }
 
   @Test
@@ -86,24 +86,24 @@ class SchemaInitializerTest {
     migrating().initialize();
 
     assertThat(MigrationSchemas.types(schema, SAGA_FORGE_HISTORY))
-        .containsExactly("BASELINE", "SQL", "SQL", "SQL", "SQL", "SQL");
+        .containsExactly("BASELINE", "SQL", "SQL", "SQL", "SQL", "SQL", "SQL");
     assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-        .containsExactly("0", "1", "2", "3", "4", "5");
+        .containsExactly("0", "1", "2", "3", "4", "5", "6");
   }
 
   @Test
-  @DisplayName("migrate, on a schema.sql database: detects V5 and takes it as the baseline")
+  @DisplayName("migrate, on a schema.sql database: detects V6 and takes it as the baseline")
   void migrateDetectsCurrentSchema() {
     MigrationSchemas.run(schema, "/" + PostgresSchema.SCHEMA_SCRIPT);
 
     migrating().initialize();
 
     assertThat(migrator.baselines).containsExactly(PostgresSchema.currentVersion());
-    assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).containsExactly("5");
+    assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).containsExactly("6");
   }
 
   @Test
-  @DisplayName("migrate, on a released 0.1.0 database: baselines at V1 and applies V2 to V5")
+  @DisplayName("migrate, on a released 0.1.0 database: baselines at V1 and applies V2 to V6")
   void migrateDetectsReleasedLevel() {
     MigrationSchemas.run(schema, "/takeover/schema-0.1.0.sql");
 
@@ -111,7 +111,7 @@ class SchemaInitializerTest {
 
     assertThat(migrator.baselines).containsExactly(SchemaVersion.of(1));
     assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
-        .containsExactly("1", "2", "3", "4", "5");
+        .containsExactly("1", "2", "3", "4", "5", "6");
   }
 
   @Test
@@ -127,9 +127,10 @@ class SchemaInitializerTest {
     assertThatThrownBy(() -> initializer(SchemaInitialization.MIGRATE, migration).initialize())
         .isInstanceOf(SagaSchemaException.class)
         .hasMessageContaining("holder_host");
-    // The baseline came from the property: V5 was applied over it, then the check failed.
+    // The baseline came from the property: V5 and V6 were applied over it, then the check failed.
     assertThat(migrator.baselines).containsExactly(SchemaVersion.of(4));
-    assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY)).containsExactly("4", "5");
+    assertThat(MigrationSchemas.versions(schema, SAGA_FORGE_HISTORY))
+        .containsExactly("4", "5", "6");
   }
 
   @Test
@@ -141,7 +142,7 @@ class SchemaInitializerTest {
     assertThatThrownBy(() -> initializer(SchemaInitialization.MIGRATE, migration).initialize())
         .isInstanceOf(SagaForgeConfigurationException.class)
         .hasMessageContaining("baseline-version=9")
-        .hasMessageContaining("1 to 5");
+        .hasMessageContaining("1 to 6");
     assertThat(migrator.baselines).isEmpty();
   }
 

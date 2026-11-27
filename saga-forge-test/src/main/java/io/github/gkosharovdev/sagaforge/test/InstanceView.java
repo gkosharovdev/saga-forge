@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.test;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaInstance;
@@ -93,6 +94,14 @@ public record InstanceView(
   /** Deadline name → the deadline still open: started, neither expired nor cancelled (017). */
   public Map<String, OpenDeadline> openDeadlines() {
     return stored.openDeadlines();
+  }
+
+  /**
+   * The process metadata the instance keeps, fixed when it started ({@code
+   * specs/019-process-metadata}); empty when none was captured.
+   */
+  public SagaMetadata metadata() {
+    return stored.metadata();
   }
 
   /** Step name → record. */

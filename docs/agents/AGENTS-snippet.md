@@ -49,5 +49,8 @@ startup error → fix: https://github.com/gkosharovdev/saga-forge/blob/master/do
 - Saga Forge's tables come from its own versioned migrations: `saga-forge.storage.postgres.initialize-schema=migrate`
   with `flyway-core` and `flyway-database-postgresql` (own history table `saga_forge_schema_history`), or `validate`
   for a schema managed elsewhere. Never copy its `schema.sql` or migrations into the application's migrations.
+- Correlation ids travel as process metadata: `saga-forge.metadata.mdc-keys=correlationId` captures the MDC key when
+  a saga starts and puts it back in the MDC while its steps, handlers and compensations run. Read it in code through a
+  `SagaMetadata` saga field or handler parameter (at most one each). No secrets or personal data in it.
 - Test sagas with `SagaFixture` (`saga-forge-test`), no Spring context needed.
 ```

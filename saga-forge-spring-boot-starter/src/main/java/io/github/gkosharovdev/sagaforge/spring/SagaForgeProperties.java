@@ -45,6 +45,8 @@ public class SagaForgeProperties {
 
   private final Operations operations = new Operations();
 
+  private final Metadata metadata = new Metadata();
+
   /**
    * Checks values the binder cannot check itself.
    *
@@ -156,6 +158,31 @@ public class SagaForgeProperties {
 
   public Operations getOperations() {
     return operations;
+  }
+
+  public Metadata getMetadata() {
+    return metadata;
+  }
+
+  /**
+   * {@code saga-forge.metadata.*}: process metadata captured from and restored to SLF4J's MDC
+   * (specs/019-process-metadata).
+   */
+  public static class Metadata {
+
+    /**
+     * MDC keys captured into, and restored from, saga metadata; empty means no MDC accessor. An
+     * application MetadataAccessor bean replaces the MDC accessor.
+     */
+    private List<String> mdcKeys = new ArrayList<>();
+
+    public List<String> getMdcKeys() {
+      return mdcKeys;
+    }
+
+    public void setMdcKeys(List<String> mdcKeys) {
+      this.mdcKeys = new ArrayList<>(mdcKeys);
+    }
   }
 
   /**

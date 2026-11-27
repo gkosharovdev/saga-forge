@@ -65,7 +65,7 @@ public class PostgresMessageStore implements MessageStore {
   private static final String COLUMNS =
       "position, message_id, kind, payload_type, payload, command_id, ordering_key,"
           + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, last_failure,"
-          + " leased_by, leased_until, consumed_at, set_aside_reason, external_ref, trace_context";
+          + " leased_by, leased_until, consumed_at, set_aside_reason, external_ref, trace_context, metadata";
 
   private final DataSource dataSource;
   private final ClassLoader payloadClassLoader;
@@ -137,9 +137,9 @@ public class PostgresMessageStore implements MessageStore {
     String sql =
         "INSERT INTO saga_message_store (message_id, kind, payload_type, payload, command_id, ordering_key,"
             + " source_saga_type, source_saga_id, recorded_at, status, attempts, next_attempt_at, external_ref,"
-            + " trace_context, not_before)"
+            + " trace_context, not_before, metadata)"
             + " VALUES (?, ?, ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, ?, ?, ?, 'UNCONSUMED', 0, ?, ?,"
-            + " CAST(? AS JSONB), ?)";
+            + " CAST(? AS JSONB), ?, CAST(? AS JSONB))";
     try (PreparedStatement statement = connection.prepareStatement(sql)) {
       for (NewMessage entry : entries) {
         statement.setString(1, entry.messageId());
@@ -160,6 +160,7 @@ public class PostgresMessageStore implements MessageStore {
                 ? null
                 : JsonCodec.encodeObject("trace_context", entry.traceContext()));
         statement.setObject(13, entry.isScheduled() ? utc(entry.notBefore()) : null);
+        statement.setString(14, JsonCodec.encodeMetadata(entry.metadata()));
         statement.addBatch();
       }
       statement.executeBatch();
@@ -598,7 +599,8 @@ public class PostgresMessageStore implements MessageStore {
         instant(r, "consumed_at"),
         r.getString("set_aside_reason"),
         r.getString("external_ref"),
-        traceContext(r.getString("trace_context")));
+        traceContext(r.getString("trace_context")),
+        JsonCodec.decodeMetadata(r.getString("metadata")));
   }
 
   /**

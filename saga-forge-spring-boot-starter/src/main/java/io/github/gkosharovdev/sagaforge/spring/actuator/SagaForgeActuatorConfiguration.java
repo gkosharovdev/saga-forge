@@ -1,8 +1,10 @@
 package io.github.gkosharovdev.sagaforge.spring.actuator;
 
 import io.github.gkosharovdev.sagaforge.core.spi.AggregateEventSource;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.model.DomainTypes;
 import io.github.gkosharovdev.sagaforge.runtime.SagaRuntime;
+import io.github.gkosharovdev.sagaforge.spring.metadata.SagaForgeMetadataConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.storage.SchemaInitializer;
 import io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration;
 import io.github.gkosharovdev.sagaforge.spring.transport.TransportProperties;
@@ -58,13 +60,15 @@ public class SagaForgeActuatorConfiguration {
       InMemoryTransport transport,
       ObjectProvider<DomainTypes> domainTypes,
       ObjectProvider<AggregateEventSource> eventSources,
+      ObjectProvider<MetadataAccessor> metadataAccessor,
       BeanFactory beanFactory) {
     return new SagaForgeEndpoint(
         transport.queries(),
         transport::leadership,
         domainTypes.getIfAvailable(DomainTypes::builtIn),
         eventSources.orderedStream().toList(),
-        () -> schema(beanFactory));
+        () -> schema(beanFactory),
+        SagaForgeMetadataConfiguration.describe(metadataAccessor.getIfAvailable()));
   }
 
   /**

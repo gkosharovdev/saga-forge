@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.example.checkout;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.scanner.ReflectiveAnnotationScanner;
 import io.github.gkosharovdev.sagaforge.core.scanner.ValidationReport;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
@@ -11,6 +12,7 @@ import io.github.gkosharovdev.sagaforge.example.checkout.events.ShipmentDispatch
 import io.github.gkosharovdev.sagaforge.test.SagaFixture;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -153,5 +155,17 @@ class CheckoutAndFulfilmentTest {
     assertThat(provider.state(paymentId)).isEqualTo(PaymentProvider.State.VOIDED);
     assertThat(inventory.available("sku-mug")).isEqualTo(5);
     assertThat(order.status()).isEqualTo(Order.Status.CANCELLED);
+  }
+
+  @Test
+  @DisplayName("the checkout request's correlation id reaches Logistics with the shipment booking")
+  void bookingCarriesCorrelationId() {
+    SagaMetadata request = SagaMetadata.of(Map.of("correlationId", "c-1"));
+
+    fixture.when(order.placed(), request);
+
+    assertThat(fixture.instance(CheckoutSaga.class, "o-1").metadata()).isEqualTo(request);
+    assertThat(fixture.instance(FulfilmentSaga.class, "o-1").metadata()).isEqualTo(request);
+    assertThat(logistics.correlationIds().values()).containsExactly("c-1");
   }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTriggerKind;
 import io.github.gkosharovdev.sagaforge.core.failure.FailureClassification;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
@@ -19,6 +20,7 @@ import io.github.gkosharovdev.sagaforge.test.RecordedCommand;
 import io.github.gkosharovdev.sagaforge.test.SagaFixture;
 import io.github.gkosharovdev.sagaforge.test.Then;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -127,5 +129,18 @@ class OrderProcessingSagaFixtureTest {
         .hasSize(3)
         .containsOnly(then.result().commands().get(0).commandId());
     assertThat(provider.charges()).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("process metadata: the order's correlation id stays with its saga")
+  void correlationIdStaysWithTheSaga() {
+    SagaMetadata request = SagaMetadata.of(Map.of("correlationId", "c-1"));
+
+    SagaFixture.of(OrderProcessingSaga.class)
+        .build()
+        .given(request, new OrderCreatedEvent("o-1", AMOUNT))
+        .when(new PaymentProcessedEvent("payment-1", "o-1", AMOUNT))
+        .expectCommands(new ReserveStockCommand("o-1"))
+        .expectMetadata(request);
   }
 }

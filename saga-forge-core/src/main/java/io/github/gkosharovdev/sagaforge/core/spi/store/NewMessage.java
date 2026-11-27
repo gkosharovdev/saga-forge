@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.core.spi.store;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import java.time.Instant;
 import java.util.Map;
 
@@ -27,6 +28,8 @@ import java.util.Map;
  * @param notBefore not leasable before this time: the message's first {@code nextAttemptAt}; {@code
  *     null} for due at once. A message with a {@code notBefore} has no ordering key, so it never
  *     holds back other messages ({@code specs/017-saga-deadlines} FR-001, research R1, R2)
+ * @param metadata the process metadata the message carries ({@code specs/019-process-metadata});
+ *     {@code null} becomes empty
  */
 public record NewMessage(
     String messageId,
@@ -39,11 +42,13 @@ public record NewMessage(
     String sourceSagaId,
     Instant recordedAt,
     Map<String, String> traceContext,
-    Instant notBefore) {
+    Instant notBefore,
+    SagaMetadata metadata) {
 
   /**
    * Validates the components; a {@code null} {@code traceContext} becomes empty, and it is stored
-   * as an unmodifiable copy ({@code specs/010-otel-observability} contracts/message-context.md).
+   * as an unmodifiable copy ({@code specs/010-otel-observability} contracts/message-context.md); a
+   * {@code null} {@code metadata} becomes empty.
    */
   public NewMessage {
     Checks.nonBlank(messageId, "messageId");
@@ -58,6 +63,55 @@ public record NewMessage(
       throw new IllegalArgumentException(
           "a message with notBefore must not have an orderingKey, but has " + orderingKey);
     }
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
+  }
+
+  /** A message without metadata (the 017 shape). */
+  public NewMessage(
+      String messageId,
+      MessageKind kind,
+      String payloadType,
+      Object payload,
+      CommandId commandId,
+      String orderingKey,
+      String sourceSagaType,
+      String sourceSagaId,
+      Instant recordedAt,
+      Map<String, String> traceContext,
+      Instant notBefore) {
+    this(
+        messageId,
+        kind,
+        payloadType,
+        payload,
+        commandId,
+        orderingKey,
+        sourceSagaType,
+        sourceSagaId,
+        recordedAt,
+        traceContext,
+        notBefore,
+        SagaMetadata.empty());
+  }
+
+  /**
+   * @param newMetadata the metadata the copy carries; {@code null} becomes empty
+   * @return a copy carrying {@code newMetadata}
+   */
+  public NewMessage withMetadata(SagaMetadata newMetadata) {
+    return new NewMessage(
+        messageId,
+        kind,
+        payloadType,
+        payload,
+        commandId,
+        orderingKey,
+        sourceSagaType,
+        sourceSagaId,
+        recordedAt,
+        traceContext,
+        notBefore,
+        newMetadata);
   }
 
   /** A message due at once (the 010 shape). */
@@ -83,7 +137,8 @@ public record NewMessage(
         sourceSagaId,
         recordedAt,
         traceContext,
-        null);
+        null,
+        SagaMetadata.empty());
   }
 
   /**
@@ -115,6 +170,7 @@ public record NewMessage(
         sourceSagaId,
         recordedAt,
         Map.of(),
-        null);
+        null,
+        SagaMetadata.empty());
   }
 }

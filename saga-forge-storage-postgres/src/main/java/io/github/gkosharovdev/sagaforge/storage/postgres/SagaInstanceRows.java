@@ -71,7 +71,8 @@ final class SagaInstanceRows {
           "compensation_trigger",
           "open_deadlines",
           "resolution",
-          "compensation_round");
+          "compensation_round",
+          "metadata");
 
   static final String STATE_FIELD = "saga_instance.state";
   static final String STEPS_FIELD = "saga_instance.steps";
@@ -125,12 +126,12 @@ final class SagaInstanceRows {
   }
 
   /**
-   * Binds {@code instance} to parameters 1 to 19, in {@link #COLUMNS} order; {@code state} (3),
+   * Binds {@code instance} to parameters 1 to 20, in {@link #COLUMNS} order; {@code state} (3),
    * {@code steps} (7), {@code pending_retry} (15), {@code compensation_trigger} (16; both SQL
    * {@code NULL} when absent) and {@code open_deadlines} (17) and {@code resolution} (18; SQL
-   * {@code NULL} when absent) are JSON text for {@code ?::jsonb} placeholders. Everything is
-   * encoded before the first parameter is set, so an unsupported value fails with {@link
-   * IllegalArgumentException} before any SQL runs.
+   * {@code NULL} when absent) and {@code metadata} (20, 019) are JSON text for {@code ?::jsonb}
+   * placeholders. Everything is encoded before the first parameter is set, so an unsupported value
+   * fails with {@link IllegalArgumentException} before any SQL runs.
    *
    * @throws IllegalArgumentException if {@code sagaId}, {@code sagaType}, {@code status}, {@code
    *     createdAt}, or {@code lastModifiedAt} is {@code null}, or a {@code state} value is outside
@@ -144,6 +145,7 @@ final class SagaInstanceRows {
     String trigger = encodeTrigger(TRIGGER_FIELD, instance.compensationTrigger());
     String deadlines = encodeOpenDeadlines(instance.openDeadlines());
     String resolution = encodeResolution(instance.resolution());
+    String metadata = JsonCodec.encodeMetadata(instance.metadata());
 
     statement.setString(1, instance.sagaId());
     statement.setString(2, instance.sagaType());
@@ -159,6 +161,7 @@ final class SagaInstanceRows {
     statement.setString(17, deadlines);
     statement.setString(18, resolution);
     statement.setInt(19, instance.compensationRound());
+    statement.setString(20, metadata);
   }
 
   /**
@@ -169,21 +172,22 @@ final class SagaInstanceRows {
    */
   static SagaInstance fromRow(ResultSet row, Map<String, String> associations) throws SQLException {
     return new SagaInstance(
-        row.getString("saga_id"),
-        row.getString("saga_type"),
-        decodeState(row.getString("state")),
-        associations,
-        parseEnum(SagaStatus.class, "saga_instance.status", row.getString("status")),
-        getInstant(row, "created_at"),
-        getInstant(row, "last_modified_at"),
-        decodeSteps(row.getString("steps")),
-        row.getString("outcome"),
-        failureFromRow(row),
-        decodePendingRetry(row.getString("pending_retry")),
-        decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
-        decodeOpenDeadlines(row.getString("open_deadlines")),
-        decodeResolution(row.getString("resolution")),
-        row.getInt("compensation_round"));
+            row.getString("saga_id"),
+            row.getString("saga_type"),
+            decodeState(row.getString("state")),
+            associations,
+            parseEnum(SagaStatus.class, "saga_instance.status", row.getString("status")),
+            getInstant(row, "created_at"),
+            getInstant(row, "last_modified_at"),
+            decodeSteps(row.getString("steps")),
+            row.getString("outcome"),
+            failureFromRow(row),
+            decodePendingRetry(row.getString("pending_retry")),
+            decodeTrigger(TRIGGER_FIELD, row.getString("compensation_trigger")),
+            decodeOpenDeadlines(row.getString("open_deadlines")),
+            decodeResolution(row.getString("resolution")),
+            row.getInt("compensation_round"))
+        .withMetadata(JsonCodec.decodeMetadata(row.getString("metadata")));
   }
 
   // --- resolution and operator requests (015)

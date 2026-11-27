@@ -142,6 +142,13 @@ public class OrderProcessingSaga {
   `GET /actuator/sagas/{id}`, `POST /actuator/sagas/{id}/{resume-compensation|compensate|resolve}` with
   `{"reason": "..."}`); the POST needs `management.endpoint.sagas.access=unrestricted` and an authenticated principal,
   so secure it with Spring Security.
+- Carry a correlation id (or tenant, request id) with a saga through process metadata: with the starter set
+  `saga-forge.metadata.mdc-keys=correlationId` and put the key in SLF4J's MDC where the request comes in; the saga
+  started there keeps it, and its steps, handlers and compensations find it back in the MDC, across the transport and
+  restarts. Read it in code through a `SagaMetadata` field on the saga (at most one, R32) or a `SagaMetadata` handler
+  parameter (at most one, R33). Without Spring, give one `MetadataAccessor` to both `SagaRuntime.Builder` and
+  `InMemoryTransport.Builder`. Keep secrets and personal data out of it: it is stored and shown unredacted. In
+  `SagaFixture`: `when(event, SagaMetadata.of(Map.of(...)))`, `given(metadata, events...)`, `expectMetadata(...)`.
 - Test with `SagaFixture.of(Saga.class).build().given(...).when(...).expectCommands(...)`; use `.handlers(...)` to run
   real handlers and `givenAggregates(...)` to seed aggregates.
 

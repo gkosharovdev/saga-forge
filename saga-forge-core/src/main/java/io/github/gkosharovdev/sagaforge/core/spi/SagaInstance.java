@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.core.spi;
 
 import io.github.gkosharovdev.sagaforge.core.compensation.CompensationTrigger;
 import io.github.gkosharovdev.sagaforge.core.deadline.OpenDeadline;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaResolution;
 import java.time.Instant;
 import java.util.Map;
@@ -52,6 +53,8 @@ import java.util.Map;
  * @param compensationRound how often an operator or recovery resumed the compensation of this
  *     instance out of {@code COMPENSATION_FAILED}; 0 until then. Part of the outcome event id of
  *     every later terminal write ({@code specs/015-saga-operations} research R11)
+ * @param metadata the process metadata of the delivery that started the instance ({@code
+ *     specs/019-process-metadata}); fixed after the creation write; {@code null} becomes empty
  */
 public record SagaInstance(
     String sagaId,
@@ -68,8 +71,10 @@ public record SagaInstance(
     CompensationTrigger compensationTrigger,
     Map<String, OpenDeadline> openDeadlines,
     SagaResolution resolution,
-    int compensationRound) {
+    int compensationRound,
+    SagaMetadata metadata) {
   public SagaInstance {
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
     openDeadlines = copyOpenDeadlines(openDeadlines);
     state = Map.copyOf(state);
     associations = Map.copyOf(associations);
@@ -119,6 +124,46 @@ public record SagaInstance(
       throw new IllegalArgumentException(
           "compensationRound must not be negative, but is " + compensationRound);
     }
+  }
+
+  /**
+   * An instance without metadata, as before {@code specs/019-process-metadata}.
+   *
+   * @throws IllegalArgumentException as for the canonical constructor
+   */
+  public SagaInstance(
+      String sagaId,
+      String sagaType,
+      Map<String, Object> state,
+      Map<String, String> associations,
+      SagaStatus status,
+      Instant createdAt,
+      Instant lastModifiedAt,
+      Map<String, StepRecord> steps,
+      String outcome,
+      SagaFailure failure,
+      PendingRetry pendingRetry,
+      CompensationTrigger compensationTrigger,
+      Map<String, OpenDeadline> openDeadlines,
+      SagaResolution resolution,
+      int compensationRound) {
+    this(
+        sagaId,
+        sagaType,
+        state,
+        associations,
+        status,
+        createdAt,
+        lastModifiedAt,
+        steps,
+        outcome,
+        failure,
+        pendingRetry,
+        compensationTrigger,
+        openDeadlines,
+        resolution,
+        compensationRound,
+        SagaMetadata.empty());
   }
 
   /**
@@ -279,7 +324,8 @@ public record SagaInstance(
         compensationTrigger,
         openDeadlines,
         resolution,
-        compensationRound);
+        compensationRound,
+        metadata);
   }
 
   /**
@@ -303,7 +349,8 @@ public record SagaInstance(
         trigger,
         openDeadlines,
         resolution,
-        compensationRound);
+        compensationRound,
+        metadata);
   }
 
   /**
@@ -327,7 +374,8 @@ public record SagaInstance(
         compensationTrigger,
         deadlines,
         resolution,
-        compensationRound);
+        compensationRound,
+        metadata);
   }
 
   /**
@@ -351,7 +399,8 @@ public record SagaInstance(
         compensationTrigger,
         openDeadlines,
         newResolution,
-        compensationRound);
+        compensationRound,
+        metadata);
   }
 
   /**
@@ -375,7 +424,32 @@ public record SagaInstance(
         compensationTrigger,
         openDeadlines,
         resolution,
-        round);
+        round,
+        metadata);
+  }
+
+  /**
+   * @param newMetadata the metadata to record; {@code null} becomes empty
+   * @return this instance with {@code metadata} replaced; only the creation write sets it
+   */
+  public SagaInstance withMetadata(SagaMetadata newMetadata) {
+    return new SagaInstance(
+        sagaId,
+        sagaType,
+        state,
+        associations,
+        status,
+        createdAt,
+        lastModifiedAt,
+        steps,
+        outcome,
+        failure,
+        pendingRetry,
+        compensationTrigger,
+        openDeadlines,
+        resolution,
+        compensationRound,
+        newMetadata);
   }
 
   /**

@@ -83,7 +83,7 @@ class PlainJavaMigrationExampleTest {
     migrate(dataSource);
 
     assertThat(historyRows(dataSource))
-        .containsExactly("BASELINE:1", "SQL:2", "SQL:3", "SQL:4", "SQL:5");
+        .containsExactly("BASELINE:1", "SQL:2", "SQL:3", "SQL:4", "SQL:5", "SQL:6");
   }
 
   private static List<String> historyRows(DataSource dataSource) {

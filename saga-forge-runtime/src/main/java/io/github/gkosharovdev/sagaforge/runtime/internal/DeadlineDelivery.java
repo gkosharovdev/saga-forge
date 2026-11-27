@@ -1,6 +1,7 @@
 package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
@@ -40,7 +41,7 @@ final class DeadlineDelivery {
     this.instanceLocks = instanceLocks;
   }
 
-  HandlingReport deliver(DeadlineReached reached) {
+  HandlingReport deliver(DeadlineReached reached, SagaMetadata metadata) {
     Optional<SagaModel> saga =
         sagas.stream().filter(model -> model.typeName().equals(reached.sagaType())).findFirst();
     Optional<Step> step = saga.flatMap(model -> model.expiryStep(reached.deadlineName()));
@@ -59,11 +60,12 @@ final class DeadlineDelivery {
       with.diagnostics().eventNotHandled(reached, unknown);
       throw unknown;
     }
-    SagaHandlingResult result = traced(saga.get(), step.get(), reached);
+    SagaHandlingResult result = traced(saga.get(), step.get(), reached, metadata);
     return new HandlingReport(reached, List.of(result));
   }
 
-  private SagaHandlingResult traced(SagaModel saga, Step step, DeadlineReached reached) {
+  private SagaHandlingResult traced(
+      SagaModel saga, Step step, DeadlineReached reached, SagaMetadata metadata) {
     SagaInstrumentation telemetry = with.instrumentation();
     try (SagaInstrumentation.Traced span = telemetry.start(SagaInstrumentation.HANDLE)) {
       span.set(SagaInstrumentation.SAGA_TYPE, saga.typeName())
@@ -72,7 +74,7 @@ final class DeadlineDelivery {
           .set(SagaInstrumentation.DEADLINE_NAME, reached.deadlineName());
       SagaHandlingResult result;
       try {
-        Trigger trigger = new Trigger(saga, step, reached, reached.sagaId(), false);
+        Trigger trigger = new Trigger(saga, step, reached, reached.sagaId(), false, metadata);
         result = new AttemptLoop(with).run(trigger, instanceLocks.acquire(reached.sagaId()));
       } catch (RuntimeException | Error failure) {
         span.fail(failure);

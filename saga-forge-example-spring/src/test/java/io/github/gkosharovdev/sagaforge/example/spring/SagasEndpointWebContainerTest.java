@@ -20,12 +20,14 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.userdetails.User;
@@ -160,6 +162,40 @@ class SagasEndpointWebContainerTest {
             HttpResponse.BodyHandlers.ofString());
     assertThat(view.statusCode()).isEqualTo(200);
     assertThat(view.body()).contains("\"RESOLVED\"").doesNotContain("\"context\"");
+  }
+
+  private static String view(String sagaId) throws Exception {
+    HttpResponse<String> view =
+        HTTP.send(
+            HttpRequest.newBuilder(URI.create(base + "/" + sagaId)).GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(view.statusCode()).isEqualTo(200);
+    return view.body();
+  }
+
+  @Test
+  @DisplayName(
+      "019: the view shows the instance's and each entry's metadata; a pre-upgrade row shows {}")
+  void metadataInView() throws Exception {
+    SagaInstance withMetadata;
+    MDC.put("correlationId", "web-c-1");
+    try {
+      withMetadata = failedSaga("order-web-3");
+    } finally {
+      MDC.remove("correlationId");
+    }
+    SagaInstance upgraded = failedSaga("order-web-4");
+    JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+    jdbc.update("UPDATE saga_instance SET metadata = DEFAULT WHERE saga_id = ?", upgraded.sagaId());
+    jdbc.update(
+        "UPDATE saga_lifecycle_history SET metadata = DEFAULT WHERE saga_id = ?",
+        upgraded.sagaId());
+
+    String body = view(withMetadata.sagaId());
+    assertThat(body.split("\"metadata\":\\{\"correlationId\":\"web-c-1\"}", -1).length - 1)
+        .as("the instance and every history entry carry the metadata")
+        .isGreaterThanOrEqualTo(2);
+    assertThat(view(upgraded.sagaId())).contains("\"metadata\":{}").doesNotContain("correlationId");
   }
 
   @Test

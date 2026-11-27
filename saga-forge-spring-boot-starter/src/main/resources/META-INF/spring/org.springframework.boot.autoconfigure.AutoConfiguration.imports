@@ -1,5 +1,6 @@
 io.github.gkosharovdev.sagaforge.spring.SpringTransactionConfiguration
 io.github.gkosharovdev.sagaforge.spring.telemetry.SagaForgeTelemetryConfiguration
+io.github.gkosharovdev.sagaforge.spring.metadata.SagaForgeMetadataConfiguration
 io.github.gkosharovdev.sagaforge.spring.modulith.ModulithInteropConfiguration
 io.github.gkosharovdev.sagaforge.spring.storage.PostgresStorageConfiguration
 io.github.gkosharovdev.sagaforge.spring.transport.InMemoryTransportConfiguration

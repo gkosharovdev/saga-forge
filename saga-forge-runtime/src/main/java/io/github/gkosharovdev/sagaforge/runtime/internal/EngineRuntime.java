@@ -7,6 +7,7 @@ import io.github.gkosharovdev.sagaforge.core.command.CommandGateway;
 import io.github.gkosharovdev.sagaforge.core.event.EventPublisher;
 import io.github.gkosharovdev.sagaforge.core.operations.SagaOperations;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
@@ -16,7 +17,6 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -99,7 +99,8 @@ public final class EngineRuntime {
             diagnostics,
             gateway.instrumentation(),
             EventSubscriptions.of(registered),
-            EventAggregates.of(registered, settings.domainTypes()));
+            EventAggregates.of(registered, settings.domainTypes()),
+            new MetadataScopes(settings.metadataAccessor(), diagnostics));
     InstanceLocks instanceLocks = new InstanceLocks();
     return new EngineRuntime(
         sagas,
@@ -141,7 +142,7 @@ public final class EngineRuntime {
 
   /** Handles one inbound domain event (contracts/event-receiver.md). */
   public HandlingReport receive(Object domainEvent) {
-    return router.receive(domainEvent, Optional.empty());
+    return router.receive(new EventDelivery(domainEvent, null, with.metadata().capture()));
   }
 
   /**
@@ -149,7 +150,15 @@ public final class EngineRuntime {
    * specs/014-publish-once} contracts/event-receiver-source.md).
    */
   public HandlingReport receive(Object domainEvent, String sourceSagaId) {
-    return router.receive(domainEvent, Optional.of(sourceSagaId));
+    return router.receive(new EventDelivery(domainEvent, sourceSagaId, with.metadata().capture()));
+  }
+
+  /**
+   * Handles one inbound domain event with the metadata it was delivered with ({@code
+   * specs/019-process-metadata} contracts/propagation.md).
+   */
+  public HandlingReport receive(EventDelivery delivery) {
+    return router.receive(delivery);
   }
 
   /** The engine's command gateway, also the one injected into saga objects. */

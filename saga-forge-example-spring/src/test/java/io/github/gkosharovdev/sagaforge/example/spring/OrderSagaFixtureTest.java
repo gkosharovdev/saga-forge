@@ -2,6 +2,7 @@ package io.github.gkosharovdev.sagaforge.example.spring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompensated;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaCompleted;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaFailed;
@@ -9,8 +10,11 @@ import io.github.gkosharovdev.sagaforge.core.spi.SagaStatus;
 import io.github.gkosharovdev.sagaforge.example.spring.commands.ProcessPaymentCommand;
 import io.github.gkosharovdev.sagaforge.example.spring.commands.ReserveStockCommand;
 import io.github.gkosharovdev.sagaforge.example.spring.events.OrderCreatedEvent;
+import io.github.gkosharovdev.sagaforge.test.RecordedCommand;
 import io.github.gkosharovdev.sagaforge.test.SagaFixture;
+import io.github.gkosharovdev.sagaforge.test.Then;
 import java.math.BigDecimal;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -74,5 +78,22 @@ class OrderSagaFixtureTest {
             failed ->
                 failed.failedStep().equals("handleOrderCreated")
                     && failed.causeType().equals(IllegalArgumentException.class.getName()));
+  }
+
+  @Test
+  @DisplayName("process metadata: the request's correlation id stays with the order's saga")
+  void correlationIdStaysWithTheSaga() {
+    SagaMetadata request = SagaMetadata.of(Map.of("correlationId", "c-1"));
+
+    Then then =
+        fixture
+            .givenAggregates(Order.create("o-9", true))
+            .when(new OrderCreatedEvent("o-9", new BigDecimal("5.00")), request)
+            .expectEndedWith("completeOrder")
+            .expectMetadata(request);
+
+    assertThat(then.result().commands())
+        .extracting(RecordedCommand::metadata)
+        .containsOnly(request);
   }
 }

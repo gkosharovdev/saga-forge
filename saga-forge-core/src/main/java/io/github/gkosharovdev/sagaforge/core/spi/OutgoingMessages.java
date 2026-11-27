@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.core.spi;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import java.util.List;
 
 /**
@@ -31,6 +32,9 @@ import java.util.List;
  *     commands it scheduled ({@code specs/017-saga-deadlines}); non-null, no {@code null} element;
  *     an unmodifiable defensive copy. Non-empty only for an outbox that {@linkplain
  *     Outbox#supportsScheduling() supports scheduling}
+ * @param metadata the process metadata every message of the batch carries: the owning instance's,
+ *     or the work's for a unit of work outside any instance ({@code specs/019-process-metadata});
+ *     {@code null} becomes empty
  */
 public record OutgoingMessages(
     String unitOfWorkId,
@@ -39,8 +43,10 @@ public record OutgoingMessages(
     List<Object> events,
     List<OutgoingCommand> commands,
     List<Object> recordedEvents,
-    List<ScheduledMessage> scheduled) {
+    List<ScheduledMessage> scheduled,
+    SagaMetadata metadata) {
 
+  /** Validates the components and keeps unmodifiable copies; a {@code null} metadata is empty. */
   public OutgoingMessages {
     if (unitOfWorkId == null) {
       throw new IllegalArgumentException("unitOfWorkId must not be null");
@@ -60,6 +66,31 @@ public record OutgoingMessages(
       throw new IllegalArgumentException(
           "events must not be empty when there are no commands, recorded events or scheduled messages");
     }
+    metadata = metadata == null ? SagaMetadata.empty() : metadata;
+  }
+
+  /**
+   * A batch without metadata, as before {@code specs/019-process-metadata}.
+   *
+   * @throws IllegalArgumentException under the rules of the canonical constructor
+   */
+  public OutgoingMessages(
+      String unitOfWorkId,
+      String sagaType,
+      String sagaId,
+      List<Object> events,
+      List<OutgoingCommand> commands,
+      List<Object> recordedEvents,
+      List<ScheduledMessage> scheduled) {
+    this(
+        unitOfWorkId,
+        sagaType,
+        sagaId,
+        events,
+        commands,
+        recordedEvents,
+        scheduled,
+        SagaMetadata.empty());
   }
 
   /**

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.gkosharovdev.sagaforge.core.command.CommandId;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
 import io.github.gkosharovdev.sagaforge.core.spi.TransactionBoundary;
 import io.github.gkosharovdev.sagaforge.core.spi.store.DeliveryFailure;
@@ -363,6 +364,27 @@ public abstract class MessageStoreContract {
 
     assertThatThrownBy(() -> appendCommitted(event("a", "k2")))
         .isInstanceOf(DuplicateMessageException.class);
+  }
+
+  @Test
+  @DisplayName(
+      "019: metadata round-trips through append, lease, failure, set-aside and queries; none"
+          + " stays empty")
+  void metadata() {
+    SagaMetadata metadata = SagaMetadata.of(Map.of("correlationId", "c-1", "tenant", "t-9"));
+    appendCommitted(event("m", "k1").withMetadata(metadata), event("n", "k2"));
+
+    LeasedMessages leased = lease("c", T0, 10);
+
+    assertThat(leased.readable())
+        .extracting(StoredMessage::metadata)
+        .containsExactly(metadata, SagaMetadata.empty());
+    log()
+        .recordFailure(
+            "c", "m", DeliveryFailure.of(new IllegalStateException("boom"), T0), T0.plusSeconds(1));
+    assertThat(log().query(MessageQuery.builder().build()))
+        .extracting(StoredMessage::metadata)
+        .containsExactly(metadata, SagaMetadata.empty());
   }
 
   @Test

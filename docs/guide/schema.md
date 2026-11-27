@@ -12,6 +12,7 @@ copy Saga Forge's DDL into your own migrations, and Saga Forge's version numbers
 | V3 saga deadlines | the message store's due time and the `CANCELLED` status | 0.4.0 |
 | V4 active standby relay | the leadership table; drops the heartbeat table | 0.4.0 |
 | V5 saga operations | resolutions, compensation rounds, operator columns and indexes | 0.5.0 |
+| V6 process metadata | a `metadata` JSONB column on the instance, history and message-store tables | 0.5.0 |
 
 The migrations live at `classpath:io/github/gkosharovdev/sagaforge/storage/postgres/migration`, and Flyway records them
 in `saga_forge_schema_history`. A released version is never changed: a later schema change is always a new version.
@@ -38,7 +39,7 @@ the jar expects, by meaning, not by text:
 A failure lists every difference, one per line:
 
 ```text
-Saga Forge's schema does not match V5 (saga operations): 1 failure, 0 warnings.
+Saga Forge's schema does not match V6 (process metadata): 1 failure, 0 warnings.
   FAILURE saga_context: column last_modified_at is missing (expected timestamp with time zone NOT NULL)
 ```
 
@@ -69,7 +70,7 @@ then checks the result, then starts the runtime. Your Flyway settings (`spring.f
 apply each version and the others find it applied.
 
 Because your tables are already in the schema, Saga Forge's history starts with a baseline row at version 0, then
-records V1 to V5:
+records V1 to V6:
 
 ```text
  version | description             | type
@@ -77,7 +78,7 @@ records V1 to V5:
  0       | << Flyway Baseline >>   | BASELINE
  1       | base schema             | SQL
  ...
- 5       | saga operations         | SQL
+ 6       | process metadata        | SQL
 ```
 
 Never copy Saga Forge's migrations into your own migration location: the numbers would clash with yours, and each

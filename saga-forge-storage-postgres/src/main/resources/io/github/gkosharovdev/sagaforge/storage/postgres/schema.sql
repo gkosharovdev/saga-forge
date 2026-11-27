@@ -26,6 +26,8 @@ CREATE TABLE saga_instance (
     -- resumed (specs/015-saga-operations data-model.md "Storage: Postgres").
     resolution          JSONB,
     compensation_round  INT NOT NULL DEFAULT 0,
+    -- The process metadata the instance was started with (specs/019-process-metadata); '{}' when none.
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT resolution_only_when_failed
         CHECK (resolution IS NULL OR status IN ('FAILED', 'COMPENSATION_FAILED')),
     CONSTRAINT compensation_round_not_negative
@@ -83,6 +85,8 @@ CREATE TABLE saga_lifecycle_history (
     -- Who asked for an operator action and why (specs/015-saga-operations); NULL for the engine's own entries.
     operator            TEXT,
     operator_reason     TEXT,
+    -- The metadata of the delivery that wrote the entry, else the instance's (specs/019-process-metadata).
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
     PRIMARY KEY (saga_id, sequence_number)
 );
 
@@ -112,6 +116,8 @@ CREATE TABLE IF NOT EXISTS saga_message_store (
     -- Not leasable before this time; NULL when due at once (specs/017-saga-deadlines research R1). Copied into
     -- next_attempt_at on append, so the due index serves it; kept for operator queries.
     not_before        TIMESTAMPTZ,
+    -- The process metadata the message carries (specs/019-process-metadata); '{}' when none.
+    metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT command_id_iff_command CHECK ((kind = 'COMMAND') = (command_id IS NOT NULL)),
     CONSTRAINT lease_together CHECK ((leased_by IS NULL) = (leased_until IS NULL)),
     CONSTRAINT consumed_at_iff_consumed CHECK ((status IN ('CONSUMED', 'CANCELLED')) = (consumed_at IS NOT NULL)),

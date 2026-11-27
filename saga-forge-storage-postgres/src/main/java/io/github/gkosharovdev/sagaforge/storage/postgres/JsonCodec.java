@@ -1,5 +1,6 @@
 package io.github.gkosharovdev.sagaforge.storage.postgres;
 
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -64,6 +65,34 @@ final class JsonCodec {
     }
     requireSupported(field, value);
     return write(field, value);
+  }
+
+  /**
+   * Process metadata as a JSON object of strings ({@code specs/019-process-metadata}); empty
+   * metadata is {@code {}}.
+   */
+  static String encodeMetadata(SagaMetadata metadata) {
+    return encodeObject("metadata", metadata == null ? Map.of() : metadata.asMap());
+  }
+
+  /**
+   * Stored process metadata; SQL {@code NULL} or {@code {}} reads as empty. Each value is read as
+   * its string form.
+   *
+   * @throws IllegalStateException if the text is malformed, not an object, or breaks a metadata
+   *     rule
+   */
+  static SagaMetadata decodeMetadata(String json) {
+    if (json == null) {
+      return SagaMetadata.empty();
+    }
+    Map<String, String> entries = new java.util.LinkedHashMap<>();
+    decodeObject("metadata", json).forEach((key, value) -> entries.put(key, String.valueOf(value)));
+    try {
+      return SagaMetadata.of(entries);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalStateException("metadata holds invalid metadata: " + e.getMessage(), e);
+    }
   }
 
   /**

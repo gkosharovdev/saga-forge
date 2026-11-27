@@ -12,7 +12,7 @@ Command ChargeCard is delivered through the outbox but has no @CommandHandler
 
 With the starter this appears under Spring Boot's `APPLICATION FAILED TO START`. Find each line below by its fixed text;
 `{X}` marks a part filled in with a class, method or number. Messages come from
-`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R31), `StartupChecks` (`saga-forge-runtime`) and the
+`ReflectiveAnnotationScanner` (`saga-forge-core`, rules R1 to R33), `StartupChecks` (`saga-forge-runtime`) and the
 starter's configuration checks.
 
 ## Saga class rules
@@ -55,6 +55,7 @@ starter's configuration checks.
 | R27 | `@Saga class {S}: @DeadlineExpired step {m} must take no parameter or one DeadlineReached` / `must not declare an associationProperty` | The timeout step's shape. | `@SagaStep` with no `associationProperty`; take nothing or `DeadlineReached`. |
 | R28 | `@Saga class {S}: @DeadlineExpired step {m} cannot also be @StartSaga` | A deadline cannot start an instance. | Use a separate start step. |
 | R29 | `@Saga class {S}: step {m} starts deadline '{d}' but also leaves RUNNING, so it would be cancelled at once` | A deadline on an `@EndSaga` or `@StartCompensation` step. | Start it on a step the saga keeps running after. |
+| R32 | `@Saga class {S} must declare at most one SagaMetadata field, found {n}` | Two fields of type `SagaMetadata` on one saga. | Keep one; it holds the instance's process metadata (see [Process metadata](metadata.md)). |
 
 R19 violations (after `has an invalid retry policy: `):
 
@@ -82,6 +83,7 @@ R19 violations (after `has an invalid retry policy: `):
 | R17 | `@AggregateSaver method {m} in {H} must take exactly one @Aggregate-typed parameter` | Wrong saver signature. | `@AggregateSaver void save(Order order)`. |
 | R18 | `Aggregate {A} has more than one @AggregateLoader: {H1.m}, {H2.m}` (or `@AggregateSaver`) | Two loaders (or savers) for one aggregate. | Keep one of each per aggregate type. |
 | R23 | `Command {C} is delivered through the outbox but has no @CommandHandler` | An `@Command(delivery = OUTBOX)` type no registered class handles. | Add a handler, make sure its class is in the scanned packages (or a `SagaModelContributor`), or use `IN_UNIT_OF_WORK`. In `SagaFixture` record mode, `register(HandlerClass.class)`. |
+| R33 | `@CommandHandler method {m} in {H} must declare at most one SagaMetadata parameter, found {n}` | A handler takes `SagaMetadata` twice. | Take it once, beside the command and an optional `CommandId`. |
 
 ## Vocabularies of markers
 

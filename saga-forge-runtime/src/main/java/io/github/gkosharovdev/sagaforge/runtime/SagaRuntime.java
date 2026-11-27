@@ -17,12 +17,14 @@ import io.github.gkosharovdev.sagaforge.core.spi.AggregateResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandFailure;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandInterceptor;
 import io.github.gkosharovdev.sagaforge.core.spi.CommandReceiver;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.EventDispatcher;
 import io.github.gkosharovdev.sagaforge.core.spi.EventReceiver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerInstanceProvider;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlerParameterResolver;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
 import io.github.gkosharovdev.sagaforge.core.spi.LocalTransaction;
+import io.github.gkosharovdev.sagaforge.core.spi.MetadataAccessor;
 import io.github.gkosharovdev.sagaforge.core.spi.Outbox;
 import io.github.gkosharovdev.sagaforge.core.spi.OutboxCommand;
 import io.github.gkosharovdev.sagaforge.core.spi.SagaContextStore;
@@ -274,6 +276,24 @@ public final class SagaRuntime implements EventReceiver {
   }
 
   /**
+   * Handles one inbound domain event delivered with its process metadata: as {@link
+   * #receive(Object, String)} (or {@link #receive(Object)} without a source), except that the
+   * delivery's metadata, not a capture on the calling thread, is the metadata of the units of work
+   * it causes ({@code specs/019-process-metadata} contracts/propagation.md).
+   *
+   * @throws IllegalArgumentException if {@code delivery} is {@code null}, or for any reason {@link
+   *     #receive(Object)} gives
+   * @throws IllegalStateException unless the engine is {@code STARTED}
+   */
+  @Override
+  public HandlingReport receive(EventDelivery delivery) {
+    if (delivery == null) {
+      throw new IllegalArgumentException("delivery must not be null");
+    }
+    return started().receive(delivery);
+  }
+
+  /**
    * The domain event classes some registered saga type has a {@code @SagaStep} for, matched by
    * exact class as the engine routes events ({@code specs/014-publish-once} research R4). Fixed
    * when the engine is built, so it can be read before {@link #start()}. Framework events (outcome
@@ -421,6 +441,7 @@ public final class SagaRuntime implements EventReceiver {
     private Duration maxTotalRetryBackoff = RetrySettings.DEFAULT_MAX_TOTAL_BACKOFF;
     private RetryPause retryPause = RetryPause.sleeping();
     private CommandInterceptor commandInterceptor;
+    private MetadataAccessor metadataAccessor = MetadataAccessor.NONE;
     private OpenTelemetry openTelemetry = OpenTelemetry.noop();
     private SagaTelemetrySettings telemetry = SagaTelemetrySettings.defaults();
     private boolean outcomeEvents = true;
@@ -657,6 +678,18 @@ public final class SagaRuntime implements EventReceiver {
       return this;
     }
 
+    /**
+     * Optional: captures process metadata from, and restores it to, the host's threads ({@code
+     * specs/019-process-metadata}); default {@link MetadataAccessor#NONE}, under which metadata
+     * travels only on delivered messages and stays empty for events handed over directly.
+     *
+     * @throws IllegalArgumentException if {@code metadataAccessor} is {@code null}
+     */
+    public Builder metadataAccessor(MetadataAccessor metadataAccessor) {
+      this.metadataAccessor = requireNonNull(metadataAccessor, "metadataAccessor");
+      return this;
+    }
+
     /** Optional: where diagnostics go; default {@code System.getLogger(DEFAULT_LOGGER_NAME)}. */
     public Builder logger(System.Logger logger) {
       this.logger = requireNonNull(logger, "logger");
@@ -715,7 +748,8 @@ public final class SagaRuntime implements EventReceiver {
           outcomeEvents,
           propertyResolver,
           domainTypes,
-          aggregateEventSources);
+          aggregateEventSources,
+          metadataAccessor);
     }
 
     private static String randomId() {

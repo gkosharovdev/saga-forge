@@ -2,7 +2,9 @@ package io.github.gkosharovdev.sagaforge.runtime.internal;
 
 import io.github.gkosharovdev.sagaforge.core.deadline.DeadlineReached;
 import io.github.gkosharovdev.sagaforge.core.lifecycle.DuplicateSagaInstanceException;
+import io.github.gkosharovdev.sagaforge.core.metadata.SagaMetadata;
 import io.github.gkosharovdev.sagaforge.core.outcome.SagaOutcome;
+import io.github.gkosharovdev.sagaforge.core.spi.EventDelivery;
 import io.github.gkosharovdev.sagaforge.core.spi.EventHandlingException;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingOutcome;
 import io.github.gkosharovdev.sagaforge.core.spi.HandlingReport;
@@ -82,10 +84,11 @@ import java.util.function.Supplier;
 final class EventRouter {
 
   /** One saga type reacting to the event, through its step for the event's class. */
-  private record Reaction(SagaModel saga, Step step, Object event, String associationValue) {
+  private record Reaction(
+      SagaModel saga, Step step, Object event, String associationValue, SagaMetadata metadata) {
 
     Correlation correlation() {
-      return Correlation.of(event).forSaga(saga.typeName());
+      return Correlation.of(event).forSaga(saga.typeName()).delivered(metadata);
     }
   }
 
@@ -113,11 +116,17 @@ final class EventRouter {
   }
 
   /**
-   * @param source the instance whose unit of work recorded {@code event}, when the transport knows
-   *     it ({@code specs/014-publish-once} contracts/event-receiver-source.md SR1 to SR3)
+   * @param delivery the event; its source is the instance whose unit of work recorded it, when the
+   *     transport knows it ({@code specs/014-publish-once} contracts/event-receiver-source.md SR1
+   *     to SR3); its metadata is the delivery's ({@code specs/019-process-metadata})
    */
-  HandlingReport receive(Object event, Optional<String> source) {
+  HandlingReport receive(EventDelivery delivery) {
     ReentrancyGuard.requireNotRunning();
+    if (delivery == null) {
+      throw new IllegalArgumentException("delivery must not be null");
+    }
+    Object event = delivery.event();
+    Optional<String> source = Optional.ofNullable(delivery.sourceSagaId());
     if (event instanceof SagaOutcome) {
       // 011 FR-017: outcome events are framework events; no saga reacts to one, and it is no error.
       return new HandlingReport(event, List.of());
@@ -125,10 +134,10 @@ final class EventRouter {
     if (event instanceof DeadlineReached reached) {
       // 017: routed by saga type and id to the instance that started the deadline, never by
       // association.
-      return deadlines.deliver(reached);
+      return deadlines.deliver(reached, delivery.metadata());
     }
     requireDomainEvent(event);
-    List<Reaction> reactions = reactionsTo(event);
+    List<Reaction> reactions = reactionsTo(event, delivery.metadata());
     if (reactions.isEmpty()) {
       try (SagaInstrumentation.Traced span =
           with.instrumentation().start(SagaInstrumentation.EVENT_IGNORED)) {
@@ -147,14 +156,19 @@ final class EventRouter {
     return report;
   }
 
-  private List<Reaction> reactionsTo(Object event) {
+  private List<Reaction> reactionsTo(Object event, SagaMetadata metadata) {
     List<Reaction> reactions = new ArrayList<>();
     for (SagaModel saga : sagas) {
       saga.stepFor(event.getClass())
           .ifPresent(
               step ->
                   reactions.add(
-                      new Reaction(saga, step, event, requireAssociationValue(saga, step, event))));
+                      new Reaction(
+                          saga,
+                          step,
+                          event,
+                          requireAssociationValue(saga, step, event),
+                          metadata)));
     }
     return reactions;
   }
@@ -217,7 +231,8 @@ final class EventRouter {
                 .start(
                     reaction.saga().type(),
                     reaction.step().associationProperty(),
-                    reaction.associationValue())
+                    reaction.associationValue(),
+                    reaction.metadata())
                 .sagaId();
       } catch (DuplicateSagaInstanceException duplicate) {
         Optional<AdoptedStart> adopted = adoptStrandedStart(reaction);
@@ -376,7 +391,13 @@ final class EventRouter {
       Reaction reaction, String sagaId, boolean started, Lease instanceLease) {
     try (instanceLease) {
       Trigger trigger =
-          new Trigger(reaction.saga(), reaction.step(), reaction.event(), sagaId, started);
+          new Trigger(
+              reaction.saga(),
+              reaction.step(),
+              reaction.event(),
+              sagaId,
+              started,
+              reaction.metadata());
       return new AttemptLoop(with).run(trigger, instanceLease);
     }
   }
